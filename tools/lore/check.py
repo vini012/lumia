@@ -53,6 +53,8 @@ def clauses(src):
         data = json.load(f)
     out = set()
     for s in strings(data):
+        if re.fullmatch(r'[A-Za-z0-9_.:/-]+', s):
+            continue  # technical ids (POI, item, flag names) are not narrative text
         for part in re.split(r'[.!?;:\n—]+', s):
             p = norm(part).strip(' ,"\'')
             if len(p) >= 16:
@@ -99,7 +101,6 @@ def main():
         for kind, what in scan_text(text, cl, wre):
             line = next((i + 1 for i, l in enumerate(text.split('\n')) if what in norm(l)), 0)
             (bad_own if n.startswith(OWN) else other).append(f'{n}:{line}: {kind} [{what[:40]}]')
-    rng = [] if '--all-commits' in sys.argv else ['origin/v5..HEAD']
     try:
         base = subprocess.run(['git', 'merge-base', 'HEAD', 'v5'], cwd=ROOT, capture_output=True, text=True).stdout.strip()
         rng = [] if '--all-commits' in sys.argv else ([base + '..HEAD'] if base else [])
