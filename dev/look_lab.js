@@ -150,6 +150,7 @@
     a: { pos: [0, 0], eye: 1.35, yaw: 7, pitch: 5.4, fov: 35, sunAz: 2.41, focus: [0, -55], size: [1400, 598], ref: 'd959254a' },
     b: { pos: [OB[0], OB[1] + 300], eye: 1.7, yaw: 5, pitch: -6.2, fov: 40, sunAz: -2.55, focus: null, size: [1400, 650], ref: '57faf138' },
     c: { pos: [156.9, 239], eye: 2.5, yaw: -8, pitch: -9, fov: 50, sunAz: .88, focus: [156, 228], size: [1357, 781], ref: 'be82a764', hero: [156, 232] },
+    k: { pos: [9000, 9000], eye: 260, yaw: 0, pitch: 4, fov: 50, sunAz: 2.2, focus: null, size: [1400, 600], ref: null, test: 'clouds' },   // dev: cloud test bench
   };
   const P = PRE[PRESET] || PRE.a;
   L.LAB = { preset: PRESET, P, PRE };
@@ -406,7 +407,19 @@
     const tp = L.todPreset(name, P.sunAz);
     return tp;
   }
+  async function bootCloudTest() {
+    L.makeMaterials(); L.skyInit();
+    L.setTimeOfDay(sunFor(TODN));
+    const cam = L.camera; cam.fov = P.fov; cam.position.set(P.pos[0], P.eye, P.pos[1]);
+    cam.rotation.order = 'YXZ'; cam.rotation.set(P.pitch * D2R, -P.yaw * D2R, 0); cam.updateProjectionMatrix(); cam.updateMatrixWorld();
+    const o = new THREE.Mesh(new THREE.PlaneGeometry(40000, 40000, 8, 8).rotateX(-Math.PI / 2), L.makeWaterMaterial({ depthAttr: false, depth: 40, ocean: true })); o.position.set(P.pos[0], 0, P.pos[1]); o.renderOrder = 2; L.scene.add(o);
+    L.cloudSea.setClumpDensity(() => .55);
+    const c = cam.position; const sd = Number(QS.get('seed') || 0);
+    cumulusAt(c, -24, 9, 2600, 1300, 800, 11 + sd); cumulusAt(c, 6, 5, 3600, 1600, 900, 12 + sd); cumulusAt(c, 30, 7, 2400, 900, 500, 13 + sd); cumulusAt(c, -48, 3, 4200, 1000, 450, 14 + sd);
+    step(3); window.ready = true;
+  }
   async function boot() {
+    if (P.test === 'clouds') return bootCloudTest();
     const t0 = performance.now();
     await L.loadAll(['mage_f']);
     await L.loadLegacy(['tree_pine', 'tree_pine_lo', 'tree_oak', 'tree_oak_lo']);

@@ -19,13 +19,13 @@ window.L = window.L || {};
   const TIERS = {
     alto: { name: 'alto', dpr: 2, shadow: 2048, shadowDist: 60, shadowTaps: 5, post: true, bloom: .6, fxaa: true, far: 12000,
       grassR: 52, grassSp: .5, grassFull: 18, grassBlades: 9, grassMaxTris: 260000, flowerMul: 1, grassMul: 1.3, scatterMul: 1.3, lodMul: 1.25, impostorMul: 1.25,
-      cloudPuffs: 1, seaShells: 5, mistPuffs: 1, rainDrops: 6000, pointLights: 6, lod: 130, grass: 3200 },
+      cloudPuffs: 1, seaShells: 5, seaSteps: 9, mistPuffs: 1, rainDrops: 6000, pointLights: 6, lod: 130, grass: 3200 },
     medio: { name: 'medio', dpr: 1.5, shadow: 1536, shadowDist: 45, shadowTaps: 4, post: true, bloom: .4, fxaa: true, far: 12000,
       grassR: 36, grassSp: .58, grassFull: 13, grassBlades: 7, grassMaxTris: 120000, flowerMul: .8, grassMul: 1, scatterMul: 1, lodMul: 1, impostorMul: 1,
-      cloudPuffs: .7, seaShells: 3, mistPuffs: .7, rainDrops: 3500, pointLights: 4, lod: 95, grass: 1800 },
+      cloudPuffs: .7, seaShells: 3, seaSteps: 6, mistPuffs: .7, rainDrops: 3500, pointLights: 4, lod: 95, grass: 1800 },
     baixo: { name: 'baixo', dpr: 1, shadow: 1024, shadowDist: 32, shadowTaps: 1, post: false, bloom: 0, fxaa: false, far: 10000,
       grassR: 22, grassSp: .7, grassFull: 8, grassBlades: 5, grassMaxTris: 45000, flowerMul: .5, grassMul: .6, scatterMul: .65, lodMul: .75, impostorMul: .75,
-      cloudPuffs: .45, seaShells: 2, mistPuffs: .45, rainDrops: 1500, pointLights: 2, lod: 70, grass: 800 },
+      cloudPuffs: .45, seaShells: 2, seaSteps: 0, mistPuffs: .45, rainDrops: 1500, pointLights: 2, lod: 70, grass: 800 },
   };
   for (const k in TIERS) Object.freeze(TIERS[k]);
   L.TIERS = TIERS;
@@ -534,16 +534,16 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
   // Palettes (sRGB hex in, linear out). L.TOD holds the blended state that sky/terramat/grass read.
   const PAL = {
     day: { zen: 0x4b9fe6, mid: 0x5aa8ea, hor: 0x9cc6ec, low: 0xdfe6ee, sun: 0xfff1d8, sunI: 1.32, sky: 0xa8cff4, skyI: .6, gnd: 0xc4bf7a, gndI: .36,
-      veilD: 0x2c5f98, veilL: 0x88cdec, hazeA: 0xa9cdee, hazeS: 0xe4ecf0, cLit: 0xf4f6f8, cBody: 0xd9dde2, cShade: 0xa9bbd0, tint: [.6, .73, 1.0], exp: 1 },
+      veilD: 0x2c5f98, veilL: 0x88cdec, hazeA: 0xa9cdee, hazeS: 0xe4ecf0, cLit: 0xf4f6f8, cBody: 0xd9dde2, cShade: 0xb6c3d3, cDeep: 0x95a9c4, tint: [.6, .73, 1.0], exp: 1 },
     dusk: { zen: 0x2f5aa8, mid: 0x6d86c4, hor: 0xf0b48a, low: 0xffd4a0, sun: 0xffa45c, sunI: 1.25, sky: 0x8c95cc, skyI: .5, gnd: 0xa4805a, gndI: .28,
-      veilD: 0x3b4e8c, veilL: 0xc9a2a0, hazeA: 0xb9a5c4, hazeS: 0xffc58e, cLit: 0xffd8b0, cBody: 0xe9b9a6, cShade: 0x8f8db5, tint: [.66, .62, 1.0], exp: 1 },
+      veilD: 0x3b4e8c, veilL: 0xc9a2a0, hazeA: 0xb9a5c4, hazeS: 0xffc58e, cLit: 0xffd8b0, cBody: 0xe9b9a6, cShade: 0x8f8db5, cDeep: 0x6c6996, tint: [.66, .62, 1.0], exp: 1 },
     night: { zen: 0x0a1838, mid: 0x112552, hor: 0x24406f, low: 0x2e4b7c, sun: 0xa8c0ff, sunI: .3, sky: 0x4a66aa, skyI: .5, gnd: 0x22304e, gndI: .22,
-      veilD: 0x0e2148, veilL: 0x2c4a7c, hazeA: 0x24406f, hazeS: 0x2f4d80, cLit: 0x6577a4, cBody: 0x4a5a86, cShade: 0x2c3a62, tint: [.75, .85, 1.1], exp: 1.12 },
+      veilD: 0x0e2148, veilL: 0x2c4a7c, hazeA: 0x24406f, hazeS: 0x2f4d80, cLit: 0x6577a4, cBody: 0x4a5a86, cShade: 0x2c3a62, cDeep: 0x1c2846, tint: [.75, .85, 1.1], exp: 1.12 },
   };
   const P3 = {}; for (const k in PAL) { P3[k] = {}; for (const f in PAL[k]) { const v = PAL[k][f]; P3[k][f] = typeof v === 'number' && v > 2 ? C(v) : Array.isArray(v) ? new THREE.Color(v[0], v[1], v[2]) : v; } }
   L.PAL5 = P3;
   const TOD = L.TOD = { sunDir: new THREE.Vector3(.45, .6, -.66).normalize(), moonDir: new THREE.Vector3(-.4, .5, .5).normalize(), lightDir: new THREE.Vector3(0, 1, 0), day: 1, dusk: 0, night: 0, rain: 0, set: false,
-    zen: new THREE.Color(), mid: new THREE.Color(), hor: new THREE.Color(), low: new THREE.Color(), cLit: new THREE.Color(), cBody: new THREE.Color(), cShade: new THREE.Color(), sunCol: new THREE.Color(), hazeS: new THREE.Color(), hazeA: new THREE.Color() };
+    zen: new THREE.Color(), mid: new THREE.Color(), hor: new THREE.Color(), low: new THREE.Color(), cLit: new THREE.Color(), cBody: new THREE.Color(), cShade: new THREE.Color(), cDeep: new THREE.Color(), sunCol: new THREE.Color(), hazeS: new THREE.Color(), hazeA: new THREE.Color() };
   const _c = new THREE.Color(), _c2 = new THREE.Color();
   function mix3(f, out) { const a = P3.day[f], b = P3.dusk[f], n = P3.night[f]; out.setRGB(a.r * TOD.day + b.r * TOD.dusk + n.r * TOD.night, a.g * TOD.day + b.g * TOD.dusk + n.g * TOD.night, a.b * TOD.day + b.b * TOD.dusk + n.b * TOD.night); return out; }
   function mixN(f) { return P3.day[f] * TOD.day + P3.dusk[f] * TOD.dusk + P3.night[f] * TOD.night; }
@@ -557,11 +557,11 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
     if (d == null || k == null || n == null) { const sh = TOD.sunDir.y; d = sstep(.0, .3, sh); n = sstep(.0, -.2, sh); k = Math.max(0, 1 - d - n); }
     const tot = d + k + n || 1; TOD.day = d / tot; TOD.dusk = k / tot; TOD.night = n / tot; TOD.rain = clamp(o.rain || 0, 0, 1); TOD.set = true;
     const R = TOD.rain;
-    mix3('zen', TOD.zen); mix3('mid', TOD.mid); mix3('hor', TOD.hor); mix3('low', TOD.low); mix3('cLit', TOD.cLit); mix3('cBody', TOD.cBody); mix3('cShade', TOD.cShade);
+    mix3('zen', TOD.zen); mix3('mid', TOD.mid); mix3('hor', TOD.hor); mix3('low', TOD.low); mix3('cLit', TOD.cLit); mix3('cBody', TOD.cBody); mix3('cShade', TOD.cShade); mix3('cDeep', TOD.cDeep);
     if (R > 0) {
       _c.copy(GREY).multiplyScalar(.75 - TOD.night * .5); TOD.zen.lerp(_c, R * .7); TOD.mid.lerp(_c, R * .7);
       _c.copy(GREY).multiplyScalar(1 - TOD.night * .7); TOD.hor.lerp(_c, R * .7); TOD.low.lerp(_c, R * .7);
-      TOD.cLit.lerp(_c.copy(GREY).multiplyScalar(1.05 - TOD.night * .65), R * .75); TOD.cBody.lerp(_c.copy(GREY).multiplyScalar(.8 - TOD.night * .5), R * .75); TOD.cShade.lerp(_c.copy(GREY).multiplyScalar(.55 - TOD.night * .35), R * .75);
+      TOD.cLit.lerp(_c.copy(GREY).multiplyScalar(1.05 - TOD.night * .65), R * .75); TOD.cBody.lerp(_c.copy(GREY).multiplyScalar(.8 - TOD.night * .5), R * .75); TOD.cShade.lerp(_c.copy(GREY).multiplyScalar(.55 - TOD.night * .35), R * .75); TOD.cDeep.lerp(_c.copy(GREY).multiplyScalar(.42 - TOD.night * .3), R * .75);
     }
     // key light: the sun while it is up, then the moon
     const useSun = TOD.sunDir.y > -.06; TOD.lightDir.copy(useSun ? TOD.sunDir : TOD.moonDir);

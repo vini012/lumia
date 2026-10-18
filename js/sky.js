@@ -62,38 +62,34 @@
     stars.material.uniforms.uPx.value = L.renderer.getPixelRatio();
   };
 
-  // ================================================================ puff atlas (2x2 cauliflower puffs with normals)
-  // RG = view-space normal xy (encoded), B = thickness, A = coverage
+  // ================================================================ puff atlas (2x2 cauliflower puffs: union of spheres seen from the front)
+  // RG = view-space normal xy (encoded), B = thickness, A = coverage. Bumps sit mostly on the upper rim.
   function makePuffAtlas() {
-    const S = 128, W = S * 2, data = new Uint8Array(W * W * 4);
+    const S = 256, W = S * 2, data = new Uint8Array(W * W * 4);
     for (let v = 0; v < 4; v++) {
-      const r = rnd(101 + v * 17); const discs = [];
-      const n = 7 + Math.floor(r() * 5);
-      discs.push([0, -.05, .5]);
-      for (let i = 0; i < n; i++) { const a = r() * TAU, d = .18 + r() * .2; const rr = .16 + r() * .16; discs.push([Math.cos(a) * d, Math.sin(a) * d * .85 - .02, rr]); }
-      for (let i = 0; i < 9; i++) { const a = -Math.PI * (.1 + r() * .8), d = .3 + r() * .12; discs.push([Math.cos(a) * d, Math.sin(a) * d, .08 + r() * .07]); } // small bumps on the upper rim
+      const r = rnd(101 + v * 17); const discs = [[0, -.04, .4]];
+      const nRing = 9 + Math.floor(r() * 4);
+      for (let i = 0; i < nRing; i++) { const a = i / nRing * TAU + (r() - .5) * .5; const up = Math.sin(a) * .5 + .5; const d = .22 + r() * .1 + up * .06; const rr = .12 + r() * .08 + up * .05; discs.push([Math.cos(a) * d, Math.sin(a) * d * .9 - .03, rr]); }
+      for (let i = 0; i < 11; i++) { const a = Math.PI * (.08 + r() * .84), d = .36 + r() * .08; discs.push([Math.cos(a) * d, Math.sin(a) * d * .92, .05 + r() * .06]); }
       const hgt = new Float32Array(S * S);
       for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-        const px = (x + .5) / S * 2 - 1, py = (y + .5) / S * 2 - 1; let h = 0;
-        for (const [cx, cy, rr] of discs) { const dx = px - cx, dy = py - cy, q = rr * rr - dx * dx - dy * dy; if (q > 0) h = Math.max(h, Math.sqrt(q) + (.5 - rr) * .15 * 0); }
+        const px = (x + .5) / S * 2 - 1, py = 1 - (y + .5) / S * 2; let h = 0; // py: +1 = top of the cell
+        for (const [cx, cy, rr] of discs) { const dx = px - cx, dy = py - cy, q = rr * rr - dx * dx - dy * dy; if (q > 0) h = Math.max(h, Math.sqrt(q)); }
         hgt[y * S + x] = h;
       }
-      // blur the height field a little so cap seams do not show in the normals
-      const tmp = new Float32Array(S * S);
-      for (let pass = 0; pass < 2; pass++) {
-        for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { let s = 0, k = 0; for (let d = -2; d <= 2; d++) { const xx = clamp(x + d, 0, S - 1); s += hgt[y * S + xx]; k++; } tmp[y * S + x] = s / k; }
-        for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { let s = 0, k = 0; for (let d = -2; d <= 2; d++) { const yy = clamp(y + d, 0, S - 1); s += tmp[yy * S + x]; k++; } hgt[y * S + x] = s / k; }
-      }
+      const tmp = new Float32Array(S * S);   // light blur: soft crevices, no aliasing in the normals
+      for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { let s = 0; for (let d = -1; d <= 1; d++) s += hgt[y * S + clamp(x + d, 0, S - 1)]; tmp[y * S + x] = s / 3; }
+      for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { let s = 0; for (let d = -1; d <= 1; d++) s += tmp[clamp(y + d, 0, S - 1) * S + x]; hgt[y * S + x] = s / 3; }
       let hmax = 0; for (let i = 0; i < S * S; i++) hmax = Math.max(hmax, hgt[i]);
-      const ox = (v % 2) * S, oy = Math.floor(v / 2) * S;
+      const ox = (v % 2) * S, oy = Math.floor(v / 2) * S, k = S / 4; // gradient scale: field units -> pixels
       for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-        const h = hgt[y * S + x] / hmax;
-        const hx = (hgt[y * S + Math.min(x + 1, S - 1)] - hgt[y * S + Math.max(x - 1, 0)]) / hmax * S * .25;
-        const hy = (hgt[Math.min(y + 1, S - 1) * S + x] - hgt[Math.max(y - 1, 0) * S + x]) / hmax * S * .25;
-        let nx = -hx, ny = hy, nz = 1; const nl = Math.hypot(nx, ny, nz); nx /= nl; ny /= nl;
-        const o = ((oy + (S - 1 - y)) * W + ox + x) * 4; // rows flipped (DataTexture is bottom-up), so +y is up
-        data[o] = (nx * .5 + .5) * 255; data[o + 1] = (-ny * .5 + .5) * 255; data[o + 2] = clamp(h, 0, 1) * 255;
-        data[o + 3] = clamp(sstep(.0, .22, h) * 255, 0, 255);
+        const h = hgt[y * S + x];
+        const gx = (hgt[y * S + Math.min(x + 1, S - 1)] - hgt[y * S + Math.max(x - 1, 0)]) * k;
+        const gy = (hgt[Math.max(y - 1, 0) * S + x] - hgt[Math.min(y + 1, S - 1) * S + x]) * k; // +y up
+        let nx = -gx, ny = -gy, nz = 1; const nl = Math.hypot(nx, ny, nz); nx /= nl; ny /= nl;
+        const o = ((oy + (S - 1 - y)) * W + ox + x) * 4; // DataTexture rows run bottom-up
+        data[o] = (nx * .5 + .5) * 255; data[o + 1] = (ny * .5 + .5) * 255; data[o + 2] = clamp(h / hmax, 0, 1) * 255;
+        data[o + 3] = sstep(.0, .055, h) * 255;
       }
     }
     const t = new THREE.DataTexture(data, W, W, THREE.RGBAFormat); t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = true; t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.needsUpdate = true;
@@ -103,18 +99,19 @@
   // ================================================================ puff field: one draw call of sorted, lit billboards
   // flags: 0 static, 1 drift + wrap around the camera (sky cumulus), 2 churn (mist), 3 sea clump (gentle bob)
   const cloudU = {
-    tPuff: { value: null }, uSunV: { value: new THREE.Vector3() }, uSunW: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color(1, 1, 1) },
-    uLit: { value: C(0xf4f6f8) }, uBody: { value: C(0xd9dde2) }, uShade: { value: C(0xa9bbd0) }, uTime: L.uTime,
+    tPuff: { value: null }, uSunV: { value: new THREE.Vector3() }, uUpV: { value: new THREE.Vector3(0, 1, 0) }, uSunW: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color(1, 1, 1) },
+    uLit: { value: C(0xf4f6f8) }, uBody: { value: C(0xd9dde2) }, uShade: { value: C(0xb6c3d3) }, uDeep: { value: C(0x9cb0c9) }, uTime: L.uTime,
     uDrift: { value: new THREE.Vector2(1.2, .5) }, uWrap: { value: 24000 }, uNight: { value: 0 },
   };
   L.cloudU = cloudU;
+  // aP: half size (m), -, sun occlusion, seed | aQ: cluster centre xyz, flag | aB: base y, top y, base softness (m), sprite tilt range
   const PUFF_VS = `
-    attribute vec2 aCorner; attribute vec4 aP; attribute vec4 aQ; attribute float aFade;
+    attribute vec2 aCorner; attribute vec4 aP; attribute vec4 aQ; attribute vec4 aB; attribute float aFade;
     uniform vec2 uDrift; uniform float uWrap, uTime;
-    varying vec2 vUv; varying vec3 vBias; varying vec4 vP; varying float vFade; varying vec2 vRot; varying vec3 vW;
+    varying vec2 vUv; varying vec3 vCn; varying vec4 vP; varying float vFade; varying vec2 vRot; varying vec3 vW; varying vec3 vB;
     #include <fog_pars_vertex>
     void main(){
-      vec3 cc = aQ.xyz; vec3 p = position; float fl = aQ.w;
+      vec3 cc = aQ.xyz; vec3 p = position; float fl = aQ.w; vec3 B = aB.xyz;
       if (fl > .5 && fl < 1.5) {
         vec2 off = uDrift * uTime; cc.xz += off; p.xz += off;
         vec2 rel = mod(cc.xz - cameraPosition.xz + uWrap * .5, uWrap) - uWrap * .5;
@@ -122,42 +119,50 @@
       } else if (fl > 1.5 && fl < 2.5) {
         float a = uTime * (.004 + aP.w * .003) * (fract(aP.w * 7.) > .5 ? 1. : -1.); vec2 r = p.xz - cc.xz; float ca = cos(a), sa = sin(a);
         p.xz = cc.xz + vec2(ca * r.x - sa * r.y, sa * r.x + ca * r.y); p.y += sin(uTime * .05 + aP.w * 40.) * aP.x * .08;
-      } else if (fl > 2.5) { p.y += sin(uTime * .12 + aP.w * 30.) * aP.x * .05; p.xz += uDrift * uTime * .15; cc.xz += uDrift * uTime * .15; }
-      vec4 mvPosition = viewMatrix * vec4(p, 1.);
-      float s = aP.x; float rot = fract(aP.w * 13.) * 6.283; float cr = cos(rot), sr = sin(rot);
+      } else if (fl > 2.5) { float b = sin(uTime * .12 + aP.w * 30.) * aP.x * .04; p.y += b; vec2 d = uDrift * uTime * .15; p.xz += d; cc.xz += d; }
+      float s = aP.x; float rot = (fract(aP.w * 13.) - .5) * aB.w; float cr = cos(rot), sr = sin(rot);
       vec2 cn = vec2(cr * aCorner.x - sr * aCorner.y, sr * aCorner.x + cr * aCorner.y);
-      // near fade: puffs we are inside of disappear (the haze chunk whitens instead)
-      float dz = -mvPosition.z; float nf = smoothstep(s * .35, s * 1.1, dz);
-      mvPosition.xy += cn * s; mvPosition.z += s * .25;
+      vec3 camR = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]), camU = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+      vec3 wc = p + (camR * aCorner.x * max(aP.y, 1.) + camU * aCorner.y) * s;
+      vec4 mvPosition = viewMatrix * vec4(p, 1.);
+      float dz = -mvPosition.z; float nf = smoothstep(s * .35, s * 1.1, dz);   // puffs we are inside of fade out
+      float asp = max(aP.y, 1.);  // horizontal stretch (flat sea islands)
+      mvPosition.xy += aCorner * s * vec2(asp, 1.); mvPosition.z += s * .3;
       gl_Position = projectionMatrix * mvPosition;
-      float vi = floor(aP.w * 4.); vec2 cell = vec2(mod(vi, 2.), floor(vi / 2.)) * .5;
-      vUv = cell + (aCorner * .5 + .5) * .5; vRot = vec2(cr, sr);
-      vBias = mat3(viewMatrix) * normalize(p - cc + vec3(0., -s * .2, 0.));
-      vP = aP; vFade = aFade * nf; vW = p;
+      float vi = floor(fract(aP.w * 3.7) * 4.); vec2 cell = vec2(mod(vi, 2.), floor(vi / 2.)) * .5;
+      vUv = cell + (cn * .5 + .5) * .5; vRot = vec2(cr, sr);
+      vCn = mat3(viewMatrix) * ((wc - cc) * vec3(1., 1.7, 1.));
+      vP = aP; vFade = aFade * nf; vW = wc; vB = B;
       #include <fog_vertex>
     }`;
   const PUFF_FS = `
-    uniform sampler2D tPuff; uniform vec3 uSunV, uSunW, uSunCol, uLit, uBody, uShade; uniform float uNight;
-    varying vec2 vUv; varying vec3 vBias; varying vec4 vP; varying float vFade; varying vec2 vRot; varying vec3 vW;
+    uniform sampler2D tPuff; uniform vec3 uSunV, uUpV, uSunW, uSunCol, uLit, uBody, uShade, uDeep; uniform float uNight;
+    varying vec2 vUv; varying vec3 vCn; varying vec4 vP; varying float vFade; varying vec2 vRot; varying vec3 vW; varying vec3 vB;
     #include <fog_pars_fragment>
+    vec3 cloudRamp(float l) {   // deep blue-grey -> shade -> body -> lit (GDD cloud palette)
+      vec3 c = mix(uDeep, uShade, smoothstep(.0, .32, l)); c = mix(c, uBody, smoothstep(.28, .6, l)); return mix(c, uLit, smoothstep(.56, .9, l));
+    }
     void main(){
-      vec4 tx = texture2D(tPuff, vUv); float a = tx.a * vFade; if (a < .004) discard;
+      vec4 tx = texture2D(tPuff, vUv);
+      float hp = clamp((vW.y - vB.x) / max(vB.y - vB.x, 1.), 0., 1.);
+      float a = tx.a * vFade * smoothstep(vB.x - vB.z * .25, vB.x + vB.z, vW.y);   // flat, soft bases
+      if (a < .004) discard;
       vec2 nxy = tx.rg * 2. - 1.; nxy = vec2(vRot.x * nxy.x - vRot.y * nxy.y, vRot.y * nxy.x + vRot.x * nxy.y);
-      vec3 nV = normalize(vec3(nxy, sqrt(max(0., 1. - dot(nxy, nxy)))) * .8 + vBias * .75);
-      float ndl = dot(nV, uSunV);
-      float hf = vP.y, ao = vP.z;
-      float lit = smoothstep(-.45, .75, ndl) * (1. - ao * .7) * mix(.45, 1., smoothstep(.0, .7, hf));
-      lit = clamp(lit + tx.b * .12 * hf, 0., 1.);
-      vec3 col = mix(uShade, uBody, smoothstep(.05, .5, lit)); col = mix(col, uLit, smoothstep(.5, .95, lit));
+      vec3 nS = vec3(nxy, sqrt(max(0., 1. - dot(nxy, nxy))));
+      vec3 N = normalize(nS * .8 + normalize(vCn));
+      float ndl = dot(N, uSunV), nup = dot(N, uUpV);
+      float occ = vP.z;
+      float sun = smoothstep(-.35, .75, ndl) * (1. - occ * .8) * smoothstep(-.15, .35, hp + ndl * .25);
+      float sky = clamp(.5 + .5 * nup, 0., 1.) * (.4 + .6 * hp);
+      vec3 col = cloudRamp(sun * .62 + sky * .38 + .1);
       vec3 V = normalize(vW - cameraPosition);
-      float fwd = pow(max(dot(V, uSunW), 0.), 8.) * (1. - uNight);
-      col += uSunCol * fwd * (1. - tx.a) * .9;           // silver lining on thin edges toward the sun
-      col *= mix(1., .92, (1. - hf) * (1. - lit));        // flat cool bottoms
+      float fwd = pow(max(dot(V, uSunW), 0.), 6.) * (1. - uNight);
+      col += uSunCol * fwd * (1. - tx.b) * (1. - tx.b) * 1.2;                         // silver lining on thin edges
       gl_FragColor = vec4(col, a);
       #ifdef USE_FOG
         float fogDist = length(vFogW);
         float hH = hzD.w; float fe = vFogW.y / hH; float fInt = abs(fe) > 1e-3 ? (1. - exp(-fe)) / fe : 1. - fe * .5;
-        float tA = fogDensity * .55 * fogDist * (exp(-max(cameraPosition.y - hzE.x, -40.) / hH) * fInt + hzE.y);
+        float tA = fogDensity * .55 * fogDist * (exp(-max(hzP.y - hzE.x, -40.) / hH) * fInt + hzE.y);
         vec3 fHor = mix(fogColor, hzC.rgb, pow(max(dot(vFogW / max(fogDist, 1.), hzD.xyz), 0.), hzC.w));
         gl_FragColor.rgb = mix(gl_FragColor.rgb, mix(hzA.rgb, hzB.rgb, .85), (1. - exp(-tA)) * .22);
         gl_FragColor.rgb = mix(gl_FragColor.rgb, fHor, max(1. - exp(-tA * hzB.w * .8), smoothstep(hzE.z, hzE.w, fogDist)));
@@ -167,11 +172,11 @@
   function PuffField(cap, renderOrder, name) {
     this.cap = cap; this.n = 0; this.clusters = []; this.dirty = true; this.sortT = 0;
     const g = new THREE.BufferGeometry(); const V = cap * 4;
-    this.pos = new Float32Array(V * 3); this.ap = new Float32Array(V * 4); this.aq = new Float32Array(V * 4); this.fade = new Float32Array(V);
+    this.pos = new Float32Array(V * 3); this.ap = new Float32Array(V * 4); this.aq = new Float32Array(V * 4); this.ab = new Float32Array(V * 4); this.fade = new Float32Array(V);
     const corner = new Float32Array(V * 2); for (let i = 0; i < cap; i++) { corner.set([-1, -1, 1, -1, 1, 1, -1, 1], i * 8); }
     this.idx = V < 65536 ? new Uint16Array(cap * 6) : new Uint32Array(cap * 6);
-    this.aPos = new THREE.BufferAttribute(this.pos, 3); this.aPP = new THREE.BufferAttribute(this.ap, 4); this.aQQ = new THREE.BufferAttribute(this.aq, 4); this.aF = new THREE.BufferAttribute(this.fade, 1);
-    g.setAttribute('position', this.aPos); g.setAttribute('aCorner', new THREE.BufferAttribute(corner, 2)); g.setAttribute('aP', this.aPP); g.setAttribute('aQ', this.aQQ); g.setAttribute('aFade', this.aF);
+    this.aPos = new THREE.BufferAttribute(this.pos, 3); this.aPP = new THREE.BufferAttribute(this.ap, 4); this.aQQ = new THREE.BufferAttribute(this.aq, 4); this.aBB = new THREE.BufferAttribute(this.ab, 4); this.aF = new THREE.BufferAttribute(this.fade, 1);
+    g.setAttribute('position', this.aPos); g.setAttribute('aCorner', new THREE.BufferAttribute(corner, 2)); g.setAttribute('aP', this.aPP); g.setAttribute('aQ', this.aQQ); g.setAttribute('aB', this.aBB); g.setAttribute('aFade', this.aF);
     this.aIdx = new THREE.BufferAttribute(this.idx, 1); this.aIdx.setUsage(THREE.DynamicDrawUsage); g.setIndex(this.aIdx); g.setDrawRange(0, 0);
     this.geo = g; this.keys = new Float64Array(cap);
     const mat = new THREE.ShaderMaterial({ uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]), vertexShader: PUFF_VS, fragmentShader: PUFF_FS, transparent: true, depthWrite: false, fog: true });
@@ -179,7 +184,7 @@
     this.mesh = new THREE.Mesh(g, mat); this.mesh.frustumCulled = false; this.mesh.renderOrder = renderOrder; this.mesh.name = name;
     L.scene.add(this.mesh);
   }
-  // cluster: {puffs:[[x,y,z,size,hf,ao,seed]...], cx,cy,cz, flag, fade}
+  // cluster: {puffs:[[x,y,z,size,-,occ,seed,fade]...], cx,cy,cz, flag, base, top, soft, tilt, fade}
   PuffField.prototype.add = function (cl) { cl.fade = cl.fade == null ? 1 : cl.fade; this.clusters.push(cl); this.dirty = true; return cl; };
   PuffField.prototype.remove = function (cl) { const i = this.clusters.indexOf(cl); if (i >= 0) { this.clusters.splice(i, 1); this.dirty = true; } };
   PuffField.prototype.rebuild = function () {
@@ -192,12 +197,13 @@
           this.pos[v * 3] = p[0]; this.pos[v * 3 + 1] = p[1]; this.pos[v * 3 + 2] = p[2];
           this.ap[v * 4] = p[3]; this.ap[v * 4 + 1] = p[4]; this.ap[v * 4 + 2] = p[5]; this.ap[v * 4 + 3] = p[6];
           this.aq[v * 4] = cl.cx; this.aq[v * 4 + 1] = cl.cy; this.aq[v * 4 + 2] = cl.cz; this.aq[v * 4 + 3] = cl.flag;
+          this.ab[v * 4] = cl.base; this.ab[v * 4 + 1] = cl.top; this.ab[v * 4 + 2] = cl.soft; this.ab[v * 4 + 3] = cl.tilt;
           this.fade[v] = cl.fade * (p[7] == null ? 1 : p[7]);
         }
         n++;
       }
     }
-    this.n = n; this.aPos.needsUpdate = this.aPP.needsUpdate = this.aQQ.needsUpdate = this.aF.needsUpdate = true; this.dirty = false; this.sortT = 0;
+    this.n = n; this.aPos.needsUpdate = this.aPP.needsUpdate = this.aQQ.needsUpdate = this.aBB.needsUpdate = this.aF.needsUpdate = true; this.dirty = false; this.sortT = 0;
   };
   // back-to-front sort by view depth (replicates the shader's drift/wrap so the order matches)
   PuffField.prototype.sort = function (cam, t) {
@@ -207,7 +213,7 @@
     for (let i = 0; i < n; i++) {
       const v = i * 4; let px = this.pos[v * 3], py = this.pos[v * 3 + 1], pz = this.pos[v * 3 + 2]; const fl = this.aq[v * 4 + 3];
       if (fl === 1) { const ccx = this.aq[v * 4] + dx0, ccz = this.aq[v * 4 + 2] + dz0; px += dx0; pz += dz0; const rx = ((ccx - cx + W * .5) % W + W) % W - W * .5, rz = ((ccz - cz + W * .5) % W + W) % W - W * .5; px += cx + rx - ccx; pz += cz + rz - ccz; }
-      const d = (px - cx) * fx + (py - cy) * fy + (pz - cz) * fz;
+      const d = (px - cx) * fx + (py - cy) * fy + (pz - cz) * fz - this.ap[v * 4] * .3;
       keys[i] = Math.floor(clamp(1e5 - d, 0, 4e6) * 8) * 65536 + i; // larger depth first
     }
     const sub = keys.subarray(0, n); sub.sort();
@@ -215,58 +221,56 @@
     for (let k = 0; k < n; k++) { const i = sub[k] % 65536; const b = i * 4, o = k * 6; idx[o] = b; idx[o + 1] = b + 1; idx[o + 2] = b + 2; idx[o + 3] = b; idx[o + 4] = b + 2; idx[o + 5] = b + 3; }
     this.aIdx.updateRange.count = n * 6; this.aIdx.needsUpdate = true; this.geo.setDrawRange(0, n * 6);
   };
-  // per-puff sun occlusion inside its cluster (cheap AO toward the sun; recomputed when the sun moves)
+  // per-puff sun occlusion inside its cluster (cheap self-shadowing; recomputed when the sun moves)
   function shadeCluster(cl, sx, sy, sz) {
     const P = cl.puffs;
-    let ymin = 1e9, ymax = -1e9; for (const p of P) { ymin = Math.min(ymin, p[1] - p[3] * .5); ymax = Math.max(ymax, p[1] + p[3] * .5); }
-    const H = Math.max(ymax - ymin, 1);
     for (const p of P) {
       let occ = 0;
       for (const q of P) {
         if (q === p) continue; const dx = q[0] - p[0], dy = q[1] - p[1], dz = q[2] - p[2]; const along = dx * sx + dy * sy + dz * sz; if (along <= 0) continue;
-        const lx = dx - sx * along, ly = dy - sy * along, lz = dz - sz * along; const lat = Math.sqrt(lx * lx + ly * ly + lz * lz); const rr = q[3] * .9;
-        if (lat < rr) occ += (1 - lat / rr) * Math.min(1, q[3] / Math.max(p[3], 1)) * .55;
+        const lx = dx - sx * along, ly = dy - sy * along, lz = dz - sz * along; const lat = Math.sqrt(lx * lx + ly * ly + lz * lz); const rr = q[3] * .95;
+        if (lat < rr) occ += (1 - lat / rr) * Math.min(1, q[3] / Math.max(p[3], 1)) * Math.min(1, along / (p[3] * 1.5)) * .5;
       }
-      p[5] = clamp(occ, 0, 1) * .85; if (cl.flag !== 2) p[4] = clamp((p[1] - ymin) / H, 0, 1);
+      p[5] = clamp(occ, 0, 1);
     }
   }
 
   // ---------------------------------------------------------------- cluster shapes
-  // cumulus: flat base, towers of shrinking puffs, cauliflower top
-  function cumulusPuffs(r, w, h, base) {
-    const P = []; const towers = 2 + Math.floor(r() * 4); const s0 = w * .2;
-    for (let i = 0; i < Math.round(9 + w / 90); i++) { const a = r() * TAU, d = Math.sqrt(r()) * w * .42; const s = s0 * (.8 + r() * .5); P.push([Math.cos(a) * d, base + s * .3, Math.sin(a) * d * .6, s]); }
-    for (let t = 0; t < towers; t++) {
-      const a = r() * TAU, d = r() * w * .26; let x = Math.cos(a) * d, z = Math.sin(a) * d * .5; const th = h * (.45 + r() * .55); let y = base + s0 * .5; let s = s0 * (1.05 + r() * .3);
-      for (let it = 0; it < 7 && y < base + th; it++) { const k = 2 + Math.floor(r() * 2); for (let j = 0; j < k; j++) P.push([x + (r() - .5) * s * .8, y, z + (r() - .5) * s * .6, s * (.75 + r() * .3)]); y += Math.max(s * (.42 + r() * .12), th / 7); s *= .88; x += (r() - .5) * s * .3; }
-      P.push([x, y, z, s * 1.1]);
+  // cumulus: an envelope (flat-based dome + 2-4 rising towers); puffs sit on the envelope surface, smaller toward the top
+  function cumulusPuffs(r, w, h, depthK, nMul) {
+    const R = w * .5, D = w * (depthK || .32); const towers = []; const nt = 2 + Math.floor(r() * 3);
+    for (let t = 0; t < nt; t++) towers.push([(r() - .5) * R * (t ? 1.15 : .5), (r() - .5) * D * .7, h * (t ? .45 + r() * .4 : .85 + r() * .15), w * (.11 + r() * .09)]);
+    const env = (x, z) => { const e = 1 - (x / R) * (x / R) - (z / D) * (z / D); if (e <= 0) return -1; const se = Math.sqrt(e); let y = h * .3 * se; for (const tw of towers) { const dx = x - tw[0], dz = z - tw[1]; y = Math.max(y, tw[2] * Math.exp(-(dx * dx + dz * dz) / (2 * tw[3] * tw[3])) * Math.pow(se, .35)); } return y; };
+    const P = []; const n = Math.round((30 + w / 26) * (nMul || 1));
+    for (let i = 0, tries = 0; i < n && tries < n * 20; tries++) {
+      const x = (r() * 2 - 1) * R, z = (r() * 2 - 1) * D; const top = env(x, z); if (top < 0) continue;
+      const y = r() < .6 ? top : top * Math.sqrt(r());                       // mostly on the surface, some filling the towers
+      const s = w * (.15 - .06 * clamp(y / h, 0, 1)) * (.75 + r() * .5);
+      P.push([x, Math.max(y - s * .45, s * .2), z, s]); i++;
     }
+    const nb = Math.round(n * .3);
+    for (let i = 0; i < nb; i++) { const a = r() * TAU, k = .6 + r() * .35, x = Math.cos(a) * R * k, z = Math.sin(a) * D * k; const s = w * (.11 + r() * .05); P.push([x, s * .25, z, s]); }
     return P.map(p => [p[0], p[1], p[2], p[3], 0, 0, r()]);
   }
-  // sea clump: wide, low, a few bumps on top
-  function clumpPuffs(r, w, h) {
-    const P = []; const n = Math.round(5 + w / 18);
-    for (let i = 0; i < n; i++) { const a = r() * TAU, d = Math.sqrt(r()) * w * .45; const s = w * (.18 + r() * .14); P.push([Math.cos(a) * d, s * .15 + r() * h * .35, Math.sin(a) * d * .8, s]); }
-    for (let i = 0; i < Math.round(n * .45); i++) { const a = r() * TAU, d = Math.sqrt(r()) * w * .3; const s = w * (.12 + r() * .1); P.push([Math.cos(a) * d, h * (.45 + r() * .4), Math.sin(a) * d * .7, s]); }
-    return P.map(p => [p[0], p[1], p[2], p[3], 0, 0, r()]);
+  function placeCluster(P, x, y, z, w, h, flag, tilt) {
+    for (const p of P) { p[0] += x; p[1] += y; p[2] += z; }
+    return { puffs: P, cx: x, cy: y + h * .35, cz: z, flag, base: y, top: y + h, soft: Math.max(4, h * .08), tilt: tilt == null ? .6 : tilt };
   }
 
   // ================================================================ cumulus (sky)
   let FA = null, FB = null; // FA: sky cumulus (drawn first), FB: low clouds (sea clumps, mist, lab clusters)
   L.clouds = {
-    // add one cumulus at world position (x, base y, z); w = width, h = tower height; opts.wrap: follow the camera torus
+    // add one cumulus with its flat base at world (x, y, z); w = width, h = height; opts.wrap: follow the camera torus, opts.low: low field
     addCumulus(x, y, z, w, h, seed, opts) {
-      const r = rnd(seed || 1); const P = cumulusPuffs(r, w, h, 0);
-      for (const p of P) { p[0] += x; p[1] += y; p[2] += z; }
-      const cl = { puffs: P, cx: x, cy: y + h * .4, cz: z, flag: opts && opts.wrap ? 1 : 0 };
-      shadeCluster(cl, L.TOD.sunDir.x, L.TOD.sunDir.y, L.TOD.sunDir.z);
+      const r = rnd(seed || 1); const cl = placeCluster(cumulusPuffs(r, w, h), x, y, z, w, h, opts && opts.wrap ? 1 : 0);
+      shadeCluster(cl, L.TOD.lightDir.x, L.TOD.lightDir.y, L.TOD.lightDir.z);
       return (opts && opts.low ? FB : FA).add(cl);
     },
-    addClump(x, y, z, w, h, seed, flag) {
-      const r = rnd(seed || 1); const P = clumpPuffs(r, w, h);
-      for (const p of P) { p[0] += x; p[1] += y; p[2] += z; }
-      const cl = { puffs: P, cx: x, cy: y + h * .3, cz: z, flag: flag == null ? 3 : flag };
-      shadeCluster(cl, L.TOD.sunDir.x, L.TOD.sunDir.y, L.TOD.sunDir.z); return FB.add(cl);
+    // low, wide cloud (cloud sea clump, waterfall spray): base at y
+    addClump(x, y, z, w, h, seed, flag, nMul) {
+      const r = rnd(seed || 1); const cl = placeCluster(cumulusPuffs(r, w, h, .42, nMul || .7), x, y, z, w, h, flag == null ? 3 : flag, 1.2);
+      if (flag === 3 || flag == null) for (const p of cl.puffs) { p[4] = 1.45; p[3] *= .85; }   // sea islands: flatter, wider puffs
+      shadeCluster(cl, L.TOD.lightDir.x, L.TOD.lightDir.y, L.TOD.lightDir.z); return FB.add(cl);
     },
     remove(cl) { (FA.clusters.includes(cl) ? FA : FB).remove(cl); },
     get fieldSky() { return FA; }, get fieldLow() { return FB; },
@@ -276,88 +280,133 @@
     if (FA) return;
     opts = opts || {};
     puffTex = puffTex || makePuffAtlas(); cloudU.tPuff.value = puffTex;
-    FA = new PuffField(Math.round(2600 * Math.max(.5, Q.cloudPuffs)), 1, 'cumulus');
-    FB = new PuffField(Math.round(4200 * Math.max(.5, Q.cloudPuffs)), 4, 'lowclouds');
-    const r = rnd(opts.seed || 77); const n = Math.round((opts.count || 34) * Q.cloudPuffs); const W = cloudU.uWrap.value;
+    FA = new PuffField(Math.round(3600 * Math.max(.5, Q.cloudPuffs)), 1, 'cumulus');
+    FB = new PuffField(Math.round(5200 * Math.max(.5, Q.cloudPuffs)), 4, 'lowclouds');
+    const r = rnd(opts.seed || 77); const n = Math.round((opts.count || 30) * Q.cloudPuffs); const W = cloudU.uWrap.value;
     for (let i = 0; i < n; i++) {
-      const a = r() * TAU, d = 1800 + Math.sqrt(r()) * (W * .5 - 1800); const w = 420 + r() * 900;
-      L.clouds.addCumulus(Math.cos(a) * d, (opts.y0 || 950) + r() * ((opts.y1 || 1700) - (opts.y0 || 950)), Math.sin(a) * d, w, w * (.35 + r() * .5), 1000 + i, { wrap: true });
+      const a = r() * TAU, d = 1800 + Math.sqrt(r()) * (W * .5 - 1800); const w = 500 + r() * 1000;
+      L.clouds.addCumulus(Math.cos(a) * d, (opts.y0 || 950) + r() * ((opts.y1 || 1500) - (opts.y0 || 950)), Math.sin(a) * d, w, w * (.4 + r() * .4), 1000 + i, { wrap: true });
     }
     L.cloudMats = []; L.cloudGroup = FA.mesh;
   };
 
-  // ================================================================ cloud sea (shell layers) + clumps
+  // ================================================================ cloud sea: heightfield raymarch (puffy domes) + clumps
+  // A slab [base, top] around L.CLOUD_Y. Each pixel of a camera-following disc marches the view ray through the slab
+  // against a dome heightfield (density map x big fbm x cell bumps), then shades the hit like the cumulus puffs:
+  // lit tops, blue-grey sides and undersides, translucent thin edges over the ocean holes. Steps per tier (Q.seaSteps).
   const seaU = {
     uTime: L.uTime, tNoise: { value: L.noiseTex }, tDens: { value: null }, uDensXf: { value: new THREE.Vector4(0, 0, 1e-9, 0) }, // x0, z0, 1/size, enabled
-    uSunW: cloudU.uSunW, uLit: cloudU.uLit, uBody: cloudU.uBody, uShade: cloudU.uShade, uSunCol: cloudU.uSunCol,
-    uCov: { value: .5 }, uSeaY: { value: L.CLOUD_Y }, uThick: { value: 26 },
+    uSunW: cloudU.uSunW, uLit: cloudU.uLit, uBody: cloudU.uBody, uShade: cloudU.uShade, uDeep: cloudU.uDeep, uSunCol: cloudU.uSunCol, uNight: cloudU.uNight,
+    uCov: { value: .5 }, uSeaY: { value: L.CLOUD_Y }, uSlab: { value: new THREE.Vector2(50, 42) }, uFar: { value: new THREE.Vector2(1100, 2600) },   // depth below / height above CLOUD_Y
   };
   L.seaU = seaU;
+  // tileable dome heightfield: R = big cumulus heads, G = small cauliflower bumps (union of sphere caps)
+  function makeDomeTex() {
+    const N = 256, d = new Uint8Array(N * N * 4), hR = new Float32Array(N * N), hG = new Float32Array(N * N); const r = rnd(4242);
+    const splat = (H, cx, cy, rad) => { const R = Math.ceil(rad); for (let y = -R; y <= R; y++) for (let x = -R; x <= R; x++) { const q = rad * rad - x * x - y * y; if (q <= 0) continue; const i = ((Math.round(cy) + y) % N + N) % N, j = ((Math.round(cx) + x) % N + N) % N; const v = Math.sqrt(q) / 40; if (v > H[i * N + j]) H[i * N + j] = v; } };
+    for (let k = 0; k < 70; k++) splat(hR, r() * N, r() * N, 16 + r() * 26);
+    for (let k = 0; k < 420; k++) splat(hG, r() * N, r() * N, 5 + r() * 9);
+    let mR = 0, mG = 0; for (let i = 0; i < N * N; i++) { mR = Math.max(mR, hR[i]); mG = Math.max(mG, hG[i]); }
+    for (let i = 0; i < N * N; i++) { d[i * 4] = hR[i] / mR * 255; d[i * 4 + 1] = hG[i] / mG * 255; d[i * 4 + 2] = 0; d[i * 4 + 3] = 255; }
+    const t = new THREE.DataTexture(d, N, N, THREE.RGBAFormat); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = true; t.needsUpdate = true; return t;
+  }
+  seaU.tDome = { value: makeDomeTex() };
+  const SEA_STEPS = Math.max(0, Q.seaSteps | 0);
   const SEA_VS = `
-    attribute float aLayer; uniform float uSeaY, uThick; varying vec3 vW; varying float vL;
+    uniform float uSeaY; uniform vec2 uSlab; varying vec3 vW;
     #include <fog_pars_vertex>
-    void main(){ vec3 p = position; p.xz += cameraPosition.xz; p.y = uSeaY + (aLayer - .5) * uThick; vW = p; vL = aLayer;
-      vec4 mvPosition = viewMatrix * vec4(p, 1.); gl_Position = projectionMatrix * mvPosition;
+    void main(){ vec3 p = position; p.xz += cameraPosition.xz;
+      p.y = cameraPosition.y > uSeaY - uSlab.x * .2 ? uSeaY + uSlab.y : uSeaY - uSlab.x;
+      vW = p; vec4 mvPosition = viewMatrix * vec4(p, 1.); gl_Position = projectionMatrix * mvPosition;
       #include <fog_vertex>
     }`;
   const SEA_FS = `
-    uniform sampler2D tNoise, tDens; uniform vec4 uDensXf; uniform vec3 uSunW, uLit, uBody, uShade, uSunCol; uniform float uTime, uCov, uSeaY;
-    varying vec3 vW; varying float vL;
+    #define STEPS ${SEA_STEPS}
+    uniform sampler2D tNoise, tDens, tDome; uniform vec4 uDensXf; uniform vec3 uSunW, uLit, uBody, uShade, uDeep, uSunCol; uniform float uTime, uCov, uSeaY, uNight; uniform vec2 uSlab, uFar;
+    varying vec3 vW;
     #include <fog_pars_fragment>
-    float cov(vec2 p, float dens) {
-      vec2 w = vec2(uTime * .9, uTime * .35);
-      float a = texture2D(tNoise, (p + w) / 2600.).r;
-      float b = texture2D(tNoise, (p - w * .6) / 760. + .37).g;
-      float c = texture2D(tNoise, (p + w * 1.4) / 230. + .71).a;
-      return a * .55 + b * .3 + c * .15 + (dens - .5) * .55;
+    vec3 cloudRamp(float l) {   // deep blue-grey -> shade -> body -> lit (GDD cloud palette)
+      vec3 c = mix(uDeep, uShade, smoothstep(.0, .32, l)); c = mix(c, uBody, smoothstep(.28, .6, l)); return mix(c, uLit, smoothstep(.56, .9, l));
+    }
+    vec2 gDrift;
+    // fraction (0..1) of the slab filled by cloud at p; det = 0..1 detail level
+    float seaH(vec2 p, float det) {
+      float d = uDensXf.w > 0. ? texture2D(tDens, (p - uDensXf.xy) * uDensXf.z).r : .5;
+      vec4 n = texture2D(tNoise, (p + gDrift) / 3000.);
+      float c = d * 1.3 - .65 + (n.r - .5) * .8 + (n.a - .5) * .45 + (uCov - .5);
+      float cov = smoothstep(-.02, .12, c);                               // cloud islands with steep, soft sides
+      float m = texture2D(tDome, (p - gDrift * .6) / 1500.).r;          // lumpy tops: 100-250 m heads
+      float dome = cov * (.3 + .45 * m + .25 * smoothstep(.1, .5, c));
+      if (det > 0.) { float k = texture2D(tDome, (p + gDrift * .4) / 520. + .37).g; dome += (k - .55) * .14 * det * smoothstep(.0, .2, dome); }
+      return dome;
     }
     void main(){
-      float dens = .5;
-      if (uDensXf.w > 0.) dens = texture2D(tDens, (vW.xz - uDensXf.xy) * uDensXf.z).r;
-      float cv = cov(vW.xz, dens) + uCov - .5;
-      vec2 sd = normalize(uSunW.xz + 1e-4) * 60.;
-      float cs = cov(vW.xz + sd, dens) + uCov - .5;
-      float th = mix(.42, .7, vL);                         // upper shells need thicker cloud
-      float a = smoothstep(th - .04, th + .07, cv);
-      if (a < .01) discard;
-      float slope = (cv - cs) * 4.;                        // facing the sun -> lit
-      float top = smoothstep(th, th + .25, cv);
-      float lit = clamp(.35 + slope * 1.4 + top * .35 + vL * .25, 0., 1.) * mix(.55, 1., clamp(uSunW.y * 3., 0., 1.));
-      vec3 col = mix(uShade, uBody, smoothstep(.05, .55, lit)); col = mix(col, uLit, smoothstep(.55, 1., lit));
-      col = mix(col * vec3(.9, .94, 1.), col, vL);         // lower shells slightly cooler
-      if (cameraPosition.y < uSeaY) col *= .75;             // seen from below
-      vec3 V = normalize(vW - cameraPosition);
-      col += uSunCol * pow(max(dot(V, uSunW), 0.), 10.) * (1. - a) * .5;
-      gl_FragColor = vec4(col, a * mix(.75, .95, vL));
+      gDrift = vec2(uTime * 1.1, uTime * .45);
+      float base = uSeaY - uSlab.x, T = uSlab.x + uSlab.y;
+      vec3 ro = cameraPosition, rd = normalize(vW - ro);
+      float dist0 = length(vW - ro);
+      float det = 1. - smoothstep(2500., 6000., dist0);
+      vec3 hp = vW; float hf = 0.; float hit = 0.;
+      bool above = ro.y > uSeaY - uSlab.x * .2;
+    #if STEPS > 0
+      if (above && rd.y < -.002) {
+        float tExit = (base - ro.y) / rd.y; float t0 = dist0; float t1 = min(tExit, t0 + 1600.);
+        float dt = (t1 - t0) / float(STEPS);
+        float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(.06711056, .00583715))));   // interleaved gradient noise
+        float tp = t0, dp = 1.;   // previous sample: t, (height above surface)
+        float t = t0 + dt * jit * .5;
+        for (int i = 0; i < STEPS; i++) {
+          vec3 s = ro + rd * t; float h = seaH(s.xz, det); float dd = (s.y - base) / T - h;
+          if (dd < 0.) {   // bracketed: one bisection, then the secant
+            float tm = (tp + t) * .5; vec3 sm = ro + rd * tm; float dm = (sm.y - base) / T - seaH(sm.xz, det);
+            if (dm < 0.) { t = tm; dd = dm; } else { tp = tm; dp = dm; }
+            t = mix(tp, t, dp / max(dp - dd, 1e-4)); hit = 1.; break; }
+          tp = t; dp = dd; t += dt;
+        }
+        hp = ro + rd * t; hf = seaH(hp.xz, det);
+        if (hit < .5) { hit = smoothstep(.02, .25, hf) * step(t1, tExit - 1.); hp = ro + rd * t1; }   // marched out of range: far, flat
+      } else
+    #endif
+      { hf = seaH(vW.xz, det * .5); hit = smoothstep(.04, .3, hf); }
+      if (hit < .01) discard;
+      // normal from the heightfield (scale grows with distance so far domes stay smooth)
+      float e = mix(7., 40., 1. - det);
+      float hx = seaH(hp.xz + vec2(e, 0.), det), hz = seaH(hp.xz + vec2(0., e), det);
+      vec3 N = normalize(vec3(-(hx - hf) * T / e, 1., -(hz - hf) * T / e));
+      float occ = smoothstep(.0, .25, seaH(hp.xz + normalize(uSunW.xz + 1e-4) * 70., det * .5) - hf - .05);
+      float hgt = clamp((hp.y - base) / T, 0., 1.);
+      float sunv = clamp(dot(N, uSunW) * 1.2, 0., 1.) * (1. - occ * .7);
+      float top = smoothstep(.45, .95, N.y);
+      vec3 col = cloudRamp(top * .45 + sunv * .4 + hgt * .2);
+      if (!above) col = cloudRamp(.25);                       // seen from below: flat grey-blue underside
+      vec3 V = rd;
+      col += uSunCol * pow(max(dot(V, uSunW), 0.), 8.) * (1. - smoothstep(.0, .3, hf)) * .8 * (1. - uNight);
+      float a = hit * smoothstep(.0, .12, hf + hgt * .3) * smoothstep(uFar.x, uFar.y, length(hp - ro));
+      gl_FragColor = vec4(col, a);
       #ifdef USE_FOG
-        float fogDist = length(vFogW);
-        float hH = hzD.w; float fe = vFogW.y / hH; float fInt = abs(fe) > 1e-3 ? (1. - exp(-fe)) / fe : 1. - fe * .5;
-        float tA = fogDensity * .55 * fogDist * (exp(-max(cameraPosition.y - hzE.x, -40.) / hH) * fInt + hzE.y);
-        vec3 fHor = mix(fogColor, hzC.rgb, pow(max(dot(vFogW / max(fogDist, 1.), hzD.xyz), 0.), hzC.w));
-        gl_FragColor.rgb = mix(gl_FragColor.rgb, mix(hzA.rgb, hzB.rgb, .9), (1. - exp(-tA)) * .3);
+        vec3 fw = hp - ro; float fogDist = length(fw);
+        float hH = hzD.w; float fe = fw.y / hH; float fInt = abs(fe) > 1e-3 ? (1. - exp(-fe)) / fe : 1. - fe * .5;
+        float tA = fogDensity * .55 * fogDist * (exp(-max(hzP.y - hzE.x, -40.) / hH) * fInt + hzE.y);
+        vec3 fHor = mix(fogColor, hzC.rgb, pow(max(dot(fw / max(fogDist, 1.), hzD.xyz), 0.), hzC.w));
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, mix(hzA.rgb, hzB.rgb, .9), (1. - exp(-tA)) * .25);
         gl_FragColor.rgb = mix(gl_FragColor.rgb, fHor, max(1. - exp(-tA * hzB.w), smoothstep(hzE.z, hzE.w, fogDist)));
-        gl_FragColor.a *= 1. - smoothstep(hzE.z * .9, hzE.w, fogDist) * .4;
       #endif
     }`;
   let seaMesh = null;
   function buildSea() {
-    const nl = Math.max(1, Q.seaShells); const R = Q.far * .85;
-    // polar disc, rings denser near the centre; one layer attribute per vertex
-    const rings = 56, segs = 96, pos = [], lay = [], idx = [];
-    for (let l = 0; l < nl; l++) {
-      const base = pos.length / 3; const lv = nl === 1 ? .5 : l / (nl - 1);
-      pos.push(0, 0, 0); lay.push(lv);
-      for (let i = 1; i <= rings; i++) { const rr = R * Math.pow(i / rings, 2.2); for (let j = 0; j < segs; j++) { const a = j / segs * TAU; pos.push(Math.cos(a) * rr, 0, Math.sin(a) * rr); lay.push(lv); } }
-      for (let j = 0; j < segs; j++) idx.push(base, base + 1 + (j + 1) % segs, base + 1 + j);
-      for (let i = 1; i < rings; i++) for (let j = 0; j < segs; j++) { const a = base + 1 + (i - 1) * segs + j, b = base + 1 + (i - 1) * segs + (j + 1) % segs, c = base + 1 + i * segs + j, d = base + 1 + i * segs + (j + 1) % segs; idx.push(a, b, c, b, d, c); }
-    }
-    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('aLayer', new THREE.Float32BufferAttribute(lay, 1)); g.setIndex(idx);
+    const R = Q.far * .85;
+    // polar disc, rings denser near the centre
+    const rings = 64, segs = 96, pos = [0, 0, 0], idx = [];
+    for (let i = 1; i <= rings; i++) { const rr = R * Math.pow(i / rings, 2.2); for (let j = 0; j < segs; j++) { const a = j / segs * TAU; pos.push(Math.cos(a) * rr, 0, Math.sin(a) * rr); } }
+    for (let j = 0; j < segs; j++) idx.push(0, 1 + (j + 1) % segs, 1 + j);
+    for (let i = 1; i < rings; i++) for (let j = 0; j < segs; j++) { const a = 1 + (i - 1) * segs + j, b = 1 + (i - 1) * segs + (j + 1) % segs, c = 1 + i * segs + j, d = 1 + i * segs + (j + 1) % segs; idx.push(a, b, c, b, d, c); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
     const mat = new THREE.ShaderMaterial({ uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]), vertexShader: SEA_VS, fragmentShader: SEA_FS, transparent: true, depthWrite: false, fog: true, side: THREE.DoubleSide });
     for (const k in seaU) mat.uniforms[k] = seaU[k];
     seaMesh = new THREE.Mesh(g, mat); seaMesh.frustumCulled = false; seaMesh.renderOrder = 3; seaMesh.name = 'cloudsea'; L.scene.add(seaMesh);
   }
   // density map: 0..1 texture over a square; 1 = thick cloud (cliff bases), 0 = clear (open ocean holes)
-  const seaClumps = new Map(); let densFn = null, clumpR = 4200;
+  const seaClumps = new Map(); let densFn = null, clumpR = 3200;
   L.cloudSea = {
     get mesh() { return seaMesh; },
     setY(y) { L.CLOUD_Y = y; seaU.uSeaY.value = y; },
@@ -383,23 +432,31 @@
     setClumpDensity(fn) { densFn = fn; },
     clumpRadius(r) { clumpR = r; },
   };
-  // sea clumps live in 600 m tiles around the camera; deterministic per tile
-  const CT = 600; let lastCI = 1e9, lastCJ = 1e9;
+  // Cloud-sea islands: flattened puff clusters ("pancakes") in 500 m tiles around the camera, placed where the same
+  // coverage field as the far raymarched layer says there is cloud. Deterministic per tile; fewer, bigger islands far.
+  const CT = 500; let lastCI = 1e9, lastCJ = 1e9;
+  function islandCov(x, z) {   // CPU twin of seaH()'s coverage term
+    const d = densFn ? densFn(x, z) : .5, u = x / 3000, v = z / 3000;
+    return d * 1.3 - .65 + (L.noise2(u, v, 0) - .5) * .8 + (L.noise2(u, v, 3) - .5) * .45 + (seaU.uCov.value - .5);
+  }
+  L.cloudSea.coverageAt = islandCov;
   function updateClumps(cam) {
     if (!densFn) return;
-    const ci = Math.floor(cam.position.x / CT), cj = Math.floor(cam.position.z / CT); if (ci === lastCI && cj === lastCJ) return; lastCI = ci; lastCJ = cj;
-    const R = Math.ceil(clumpR / CT); const want = new Set(); const cy = L.CLOUD_Y; const dd = L.cloudSea._dens;
+    const px = cam.position.x, pz = cam.position.z;
+    const ci = Math.floor(px / CT), cj = Math.floor(pz / CT); if (ci === lastCI && cj === lastCJ) return; lastCI = ci; lastCJ = cj;
+    const R = Math.ceil(clumpR / CT); const want = new Set(); const dd = L.cloudSea._dens; const hfn = dd && dd.hfn || L.ground;
+    const base0 = L.CLOUD_Y - seaU.uSlab.value.x * .55;
     for (let j = cj - R; j <= cj + R; j++) for (let i = ci - R; i <= ci + R; i++) {
-      const cx = (i + .5) * CT, cz = (j + .5) * CT; if (Math.hypot(cx - cam.position.x, cz - cam.position.z) > clumpR + CT) continue;
-      const key = i + ',' + j; want.add(key); if (seaClumps.has(key)) continue;
-      const list = [];
-      const nTry = Math.round(5 * Q.cloudPuffs + 1);
-      for (let k = 0; k < nTry; k++) {
-        const x = (i + h2(i, j, k * 3)) * CT, z = (j + h2(i, j, k * 3 + 1)) * CT; const d = densFn(x, z);
-        if (h2(i, j, k * 3 + 2) > d * d * 1.1) continue;
-        if (dd && dd.hfn && dd.hfn(x, z) > cy + 25) continue; // not inside land
-        const w = 70 + h2(i, j, k + 50) * 160 * (.6 + d * .6); const hh = w * (.32 + h2(i, j, k + 60) * .3);
-        list.push(L.clouds.addClump(x, cy - 10 + h2(i, j, k + 70) * 18, z, w, hh, i * 7919 + j * 104729 + k, 3));
+      const cx = (i + .5) * CT, cz = (j + .5) * CT, D = Math.hypot(cx - px, cz - pz); if (D > clumpR + CT * .7) continue;
+      const lod = D < 1500 ? 0 : 1, key = i + ',' + j + ',' + lod; want.add(key); if (seaClumps.has(key)) continue;
+      const list = []; const g = lod ? 2 : 4, cs = CT / g;
+      for (let b = 0; b < g; b++) for (let a = 0; a < g; a++) {
+        const k = b * g + a, x = i * CT + (a + .15 + h2(i, j, k * 5 + lod) * .7) * cs, z = j * CT + (b + .15 + h2(i, j, k * 5 + 1 + lod) * .7) * cs;
+        const c = islandCov(x, z); if (c < .0 || h2(i, j, k * 5 + 2) > sstep(.0, .14, c) * .9) continue;
+        let w = (lod ? 300 + h2(i, j, k + 50) * 260 : 130 + h2(i, j, k + 50) * 170) * (.75 + .5 * sstep(0, .3, c)); const hh = w * (.2 + h2(i, j, k + 60) * .16);
+        const by = base0 + h2(i, j, k + 70) * 12;
+        if (hfn && hfn(x, z) > by + hh * .4) continue;   // not inside land
+        list.push(L.clouds.addClump(x, by, z, w, hh, i * 7919 + j * 104729 + k, 3, lod ? .22 : .38));
       }
       seaClumps.set(key, list);
     }
@@ -427,9 +484,8 @@
           const s = 160 + rr() * 220 + (y > top * .8 ? 60 : 0);
           P.push([x + Math.cos(a) * rad, y, z + Math.sin(a) * rad, s, 0, 0, rr()]);
         }
-        const cl = { puffs: P, cx: x, cy: base + top * .5, cz: z, flag: 2 };
-        shadeCluster(cl, L.TOD.sunDir.x, L.TOD.sunDir.y, L.TOD.sunDir.z);
-        for (const p of cl.puffs) p[4] = clamp((p[1] - base) / (top - base), 0, 1);
+        const cl = { puffs: P, cx: x, cy: base + top * .5, cz: z, flag: 2, base: base - 60, top, soft: 40, tilt: TAU };
+        shadeCluster(cl, L.TOD.lightDir.x, L.TOD.lightDir.y, L.TOD.lightDir.z);
         mist.cls.push(FB.add(cl));
       }
       this.open(0, null);
@@ -490,7 +546,7 @@
     skyU.sunDir.value.copy(T.sunDir); skyU.moonDir.value.copy(T.moonDir); skyU.night.value = T.night; skyU.dusk.value = T.dusk; skyU.rain.value = T.rain;
     skyU.sunCol.value.copy(T.sunCol).multiplyScalar(1 - T.night);
     skyU.cloudCol.value.copy(T.cLit); skyU.cloudShade.value.copy(T.cShade);
-    cloudU.uLit.value.copy(T.cLit); cloudU.uBody.value.copy(T.cBody); cloudU.uShade.value.copy(T.cShade);
+    cloudU.uLit.value.copy(T.cLit); cloudU.uBody.value.copy(T.cBody); cloudU.uShade.value.copy(T.cShade); cloudU.uDeep.value.copy(T.cDeep);
     cloudU.uSunCol.value.copy(T.sunCol).multiplyScalar((1 - T.night) * (1 - T.rain * .8));
     cloudU.uSunW.value.copy(T.lightDir); cloudU.uNight.value = T.night;
     if (L.stars) L.stars.material.uniforms.uA.value = T.night * (1 - T.rain) * .95;
@@ -508,8 +564,9 @@
       cloudU.uSunW.value.copy(skyU.sunDir.value); if (cloudU.uSunW.value.y < .05) cloudU.uSunW.value.y = .05; cloudU.uSunW.value.normalize();
     }
     if (!FA) return;
-    _v.copy(cloudU.uSunW.value).transformDirection(cam.matrixWorldInverse); cloudU.uSunV.value.copy(_v);
-    if (reshade) { reshade = false; const s = cloudU.uSunW.value; for (const F of [FA, FB]) { for (const cl of F.clusters) { const hf = cl.flag === 2 ? cl.puffs.map(p => p[4]) : null; shadeCluster(cl, s.x, s.y, s.z); if (hf) cl.puffs.forEach((p, i) => { p[4] = hf[i]; }); } F.dirty = true; } }
+    cam.updateMatrixWorld(); _v.copy(cloudU.uSunW.value).transformDirection(cam.matrixWorldInverse); cloudU.uSunV.value.copy(_v);
+    _v.set(0, 1, 0).transformDirection(cam.matrixWorldInverse); cloudU.uUpV.value.copy(_v);
+    if (reshade) { reshade = false; const s = cloudU.uSunW.value; for (const F of [FA, FB]) { for (const cl of F.clusters) shadeCluster(cl, s.x, s.y, s.z); F.dirty = true; } }
     updateClumps(cam);
     for (const F of [FA, FB]) if (F.dirty) F.rebuild();
     // corridor visibility: inside an opened corridor the mist thins
