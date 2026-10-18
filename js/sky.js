@@ -56,7 +56,9 @@
     const stars = new THREE.Points(g, new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, fog: false, blending: THREE.AdditiveBlending, uniforms: { uA: { value: 0 }, uT: L.uTime, uPx: { value: 1 } },
       vertexShader: `attribute float aS; uniform float uT, uPx; varying float vA; void main(){ vA = .55 + .45 * sin(uT * (1.5 + aS) + position.x * .01 + position.z * .013); gl_PointSize = aS * 1.7 * uPx; vec4 q = projectionMatrix * modelViewMatrix * vec4(position, 1.); gl_Position = q.xyww; }`,
-      fragmentShader: `uniform float uA; varying float vA; void main(){ vec2 d = gl_PointCoord - .5; float a = smoothstep(.5, .05, length(d)); gl_FragColor = vec4(vec3(.85, .9, 1.) * a * uA * vA, 1.); }`
+      fragmentShader: `uniform float uA; varying float vA; void main(){ vec2 d = gl_PointCoord - .5; float a = smoothstep(.5, .05, length(d)); gl_FragColor = vec4(vec3(.85, .9, 1.) * a * uA * vA, 1.);
+#include <encodings_fragment>
+}`
     }));
     stars.frustumCulled = false; stars.renderOrder = -9; L.scene.add(stars); L.stars = stars;
     stars.material.uniforms.uPx.value = L.renderer.getPixelRatio();
@@ -162,11 +164,12 @@
       #ifdef USE_FOG
         float fogDist = length(vFogW);
         float hH = hzD.w; float fe = vFogW.y / hH; float fInt = abs(fe) > 1e-3 ? (1. - exp(-fe)) / fe : 1. - fe * .5;
-        float tA = fogDensity * .55 * fogDist * (exp(-max(hzP.y - hzE.x, -40.) / hH) * fInt + hzE.y);
+        // clouds keep their whites: a third of the ground haze, faded into the horizon only at the far ring
+        float tA = fogDensity * .2 * fogDist * (exp(-max(hzP.y - hzE.x, -40.) / hH) * fInt + hzE.y * .5);
         vec3 fHor = mix(fogColor, hzC.rgb, pow(max(dot(vFogW / max(fogDist, 1.), hzD.xyz), 0.), hzC.w));
-        gl_FragColor.rgb = mix(gl_FragColor.rgb, mix(hzA.rgb, hzB.rgb, .85), (1. - exp(-tA)) * .22);
-        gl_FragColor.rgb = mix(gl_FragColor.rgb, fHor, max(1. - exp(-tA * hzB.w * .8), smoothstep(hzE.z, hzE.w, fogDist)));
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, fHor, max(1. - exp(-tA * hzB.w * .8), smoothstep(hzE.z, hzE.w * 1.1, fogDist)));
       #endif
+      #include <encodings_fragment>
     }`;
   let puffTex = null;
   function PuffField(cap, renderOrder, name) {
@@ -185,7 +188,10 @@
     L.scene.add(this.mesh);
   }
   // cluster: {puffs:[[x,y,z,size,-,occ,seed,fade]...], cx,cy,cz, flag, base, top, soft, tilt, fade}
-  PuffField.prototype.add = function (cl) { cl.fade = cl.fade == null ? 1 : cl.fade; this.clusters.push(cl); this.dirty = true; return cl; };
+  PuffField.prototype.add = function (cl) {   // placed clusters go before the wrapping filler, so a full field drops filler first
+    cl.fade = cl.fade == null ? 1 : cl.fade; if (cl.flag === 1) this.clusters.push(cl); else { let i = 0; while (i < this.clusters.length && this.clusters[i].flag !== 1) i++; this.clusters.splice(i, 0, cl); }
+    this.dirty = true; return cl;
+  };
   PuffField.prototype.remove = function (cl) { const i = this.clusters.indexOf(cl); if (i >= 0) { this.clusters.splice(i, 1); this.dirty = true; } };
   PuffField.prototype.rebuild = function () {
     let n = 0;
@@ -241,11 +247,12 @@
     const R = w * .5, D = w * (depthK || .32); const towers = []; const nt = 2 + Math.floor(r() * 3);
     for (let t = 0; t < nt; t++) towers.push([(r() - .5) * R * (t ? 1.15 : .5), (r() - .5) * D * .7, h * (t ? .45 + r() * .4 : .85 + r() * .15), w * (.11 + r() * .09)]);
     const env = (x, z) => { const e = 1 - (x / R) * (x / R) - (z / D) * (z / D); if (e <= 0) return -1; const se = Math.sqrt(e); let y = h * .3 * se; for (const tw of towers) { const dx = x - tw[0], dz = z - tw[1]; y = Math.max(y, tw[2] * Math.exp(-(dx * dx + dz * dz) / (2 * tw[3] * tw[3])) * Math.pow(se, .35)); } return y; };
-    const P = []; const n = Math.round((30 + w / 26) * (nMul || 1));
+    const P = []; const n = Math.round((34 + w / 18) * (nMul || 1));
     for (let i = 0, tries = 0; i < n && tries < n * 20; tries++) {
       const x = (r() * 2 - 1) * R, z = (r() * 2 - 1) * D; const top = env(x, z); if (top < 0) continue;
-      const y = r() < .6 ? top : top * Math.sqrt(r());                       // mostly on the surface, some filling the towers
-      const s = w * (.15 - .06 * clamp(y / h, 0, 1)) * (.75 + r() * .5);
+      const surf = r() < .62, y = surf ? top : top * Math.sqrt(r());          // mostly on the surface, some filling the towers
+      // big puffs fill the body, smaller ones on the surface give the cauliflower outline
+      const s = w * (surf ? .1 - .02 * clamp(y / h, 0, 1) : .15 - .05 * clamp(y / h, 0, 1)) * (.75 + r() * .5);
       P.push([x, Math.max(y - s * .45, s * .2), z, s]); i++;
     }
     const nb = Math.round(n * .3);
@@ -262,7 +269,7 @@
   L.clouds = {
     // add one cumulus with its flat base at world (x, y, z); w = width, h = height; opts.wrap: follow the camera torus, opts.low: low field
     addCumulus(x, y, z, w, h, seed, opts) {
-      const r = rnd(seed || 1); const cl = placeCluster(cumulusPuffs(r, w, h), x, y, z, w, h, opts && opts.wrap ? 1 : 0);
+      const r = rnd(seed || 1); const cl = placeCluster(cumulusPuffs(r, w, h, 0, opts && opts.nMul), x, y, z, w, h, opts && opts.wrap ? 1 : 0);
       shadeCluster(cl, L.TOD.lightDir.x, L.TOD.lightDir.y, L.TOD.lightDir.z);
       return (opts && opts.low ? FB : FA).add(cl);
     },
@@ -280,12 +287,12 @@
     if (FA) return;
     opts = opts || {};
     puffTex = puffTex || makePuffAtlas(); cloudU.tPuff.value = puffTex;
-    FA = new PuffField(Math.round(3600 * Math.max(.5, Q.cloudPuffs)), 1, 'cumulus');
+    FA = new PuffField(Math.round(5200 * Math.max(.45, Q.cloudPuffs)), 1, 'cumulus');
     FB = new PuffField(Math.round(5200 * Math.max(.5, Q.cloudPuffs)), 4, 'lowclouds');
     const r = rnd(opts.seed || 77); const n = Math.round((opts.count || 30) * Q.cloudPuffs); const W = cloudU.uWrap.value;
     for (let i = 0; i < n; i++) {
       const a = r() * TAU, d = 1800 + Math.sqrt(r()) * (W * .5 - 1800); const w = 500 + r() * 1000;
-      L.clouds.addCumulus(Math.cos(a) * d, (opts.y0 || 950) + r() * ((opts.y1 || 1500) - (opts.y0 || 950)), Math.sin(a) * d, w, w * (.4 + r() * .4), 1000 + i, { wrap: true });
+      L.clouds.addCumulus(Math.cos(a) * d, (opts.y0 || 950) + r() * ((opts.y1 || 1500) - (opts.y0 || 950)), Math.sin(a) * d, w, w * (.4 + r() * .4), 1000 + i, { wrap: true, nMul: .7 });
     }
     L.cloudMats = []; L.cloudGroup = FA.mesh;
   };
@@ -382,6 +389,7 @@
       vec3 V = rd;
       col += uSunCol * pow(max(dot(V, uSunW), 0.), 8.) * (1. - smoothstep(.0, .3, hf)) * .8 * (1. - uNight);
       float a = hit * smoothstep(.0, .12, hf + hgt * .3) * smoothstep(uFar.x, uFar.y, length(hp - ro));
+      if (above) a *= smoothstep(.006, .03, -rd.y);           // edge-on from just above the slab it would be a hard line: leave the horizon to the islands
       gl_FragColor = vec4(col, a);
       #ifdef USE_FOG
         vec3 fw = hp - ro; float fogDist = length(fw);
@@ -391,6 +399,7 @@
         gl_FragColor.rgb = mix(gl_FragColor.rgb, mix(hzA.rgb, hzB.rgb, .9), (1. - exp(-tA)) * .25);
         gl_FragColor.rgb = mix(gl_FragColor.rgb, fHor, max(1. - exp(-tA * hzB.w), smoothstep(hzE.z, hzE.w, fogDist)));
       #endif
+      #include <encodings_fragment>
     }`;
   let seaMesh = null;
   function buildSea() {
@@ -532,7 +541,9 @@
           vec3 w = cameraPosition + p; vec3 dir = normalize(vec3(.12, -1., 0.)); vec4 a = viewMatrix * vec4(w, 1.); vec4 b = viewMatrix * vec4(w + dir * .7, 1.);
           vec2 sd = normalize(b.xy - a.xy + 1e-5); vec2 nn = vec2(-sd.y, sd.x); vec4 mv = mix(a, b, aC.y); mv.xy += nn * aC.x * .012;
           gl_Position = projectionMatrix * mv; vA = smoothstep(1., 4., -mv.z) * (1. - smoothstep(18., 22., length(p.xz))); vX = aC.x; }`,
-      fragmentShader: `uniform float uA; uniform vec3 uCol; varying float vA; varying float vX; void main(){ gl_FragColor = vec4(uCol, uA * vA * (1. - abs(vX)) * .35); }` });
+      fragmentShader: `uniform float uA; uniform vec3 uCol; varying float vA; varying float vX; void main(){ gl_FragColor = vec4(uCol, uA * vA * (1. - abs(vX)) * .35);
+#include <encodings_fragment>
+}` });
     rain = new THREE.Mesh(g, m); rain.frustumCulled = false; rain.renderOrder = 7; rain.visible = false; L.scene.add(rain);
   }
 

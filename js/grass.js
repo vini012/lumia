@@ -56,7 +56,7 @@ vec2 v5gPush(vec2 xz, float y) {
   float t = position.y;
   float a = aB.y + rot; vec2 wdir = vec2(cos(a), sin(a)); vec2 ldir = vec2(-wdir.y, wdir.x);
   float lean = (aB.w - .5) * .8;
-  float wid = .05 * mix(1., cmp, .9) * pow(max(1. - t, 0.), .75) * aB.x * step(.001, vis);
+  float wid = .024 * mix(1., cmp, .9) * pow(max(1. - t, 0.), .75) * aB.x * step(.001, vis);
   vec3 gP = vec3(iP.x + root.x, iP.y, iP.z + root.y);
   float wave; vec2 bend = v5gWind(gP.xz, aB.w, wave) + v5gPush(gP.xz, gP.y);
   float bl = min(length(bend), 1.2);
@@ -64,8 +64,15 @@ vec2 v5gPush(vec2 xz, float y) {
   gP += vec3(off.x, H * t * (1. - .3 * bl * bl * t - .12 * lean * lean), off.y);
   vec3 gN = vec3(iN.x * 2. - 1., 0., iN.y * 2. - 1.); gN.y = sqrt(max(1. - dot(gN.xz, gN.xz), .04));
   vec3 objectNormal = normalize(gN + vec3(bend.x, 0., bend.y) * .5 + vec3(ldir.x, 0., ldir.y) * lean * .25);
+  // deep green, self-shadowed base -> ground tint -> sunlit, slightly warmer tips (the carpet reads dense from any side)
+  // close up: a deep green, self-shadowed carpet with lit yellow-green tips; further out the blades fade to the
+  // ground tint so the ring edge never shows
   vec3 bc = iC.rgb * iC.rgb;
-  vColor = bc * mix(.52, 1.04, pow(t, .65)) * (.9 + .2 * aB.w) * (1. + .14 * wave * t) + vec3(.03, .026, 0.) * t * t;
+  float nearK = 1. - smoothstep(4., uLod.x * 1.7, camd);
+  vec3 body = bc * mix(vec3(1.), vec3(.46, .66, .32), nearK);
+  vec3 deep = vec3(.02, .042, .005) * (.75 + .5 * aB.w);
+  vColor = mix(mix(bc * .55, deep, nearK), body * (.9 + .2 * aB.w), smoothstep(mix(.02, .22, nearK), 1., t)) * (1. + .16 * wave * t)
+         + bc * vec3(.16, .17, 0.) * pow(t, 4.) * nearK;
   vGFar = camd;
 `;
   const FLOWER_VERT = `
@@ -353,10 +360,11 @@ vec2 v5gPush(vec2 xz, float y) {
     G = { R, sp, fsp: .62 / Math.sqrt(Math.max(.2, Q.flowerMul)), flowerMul: 1, full, frame: 0, dirty: true, budget: Q.name === 'alto' ? 2.5 : Q.name === 'baixo' ? 1.0 : 1.5,
       cx: 1e9, cz: 1e9, cy: 0, fx: 0, fz: 0, fy: 0, fov: 0 };
     GU.uLod.value.set(full, R, 1.3, 0);
+    if (L.terrainU && L.terrainU.uGrass) L.terrainU.uGrass.value.set(full, R, .8, 1);   // the terrain darkens the soil under the carpet
     scratch();
     const blades = Q.grassBlades;
     G.trisPer = blades * 3;
-    G.capG = Math.max(500, Math.floor(Q.grassMaxTris / G.trisPer));
+    G.capG = Math.max(500, Math.floor((Q.grassMaxTris - 8) / (G.trisPer + 1.2)));   // grass + flower cards (capF = .3 capG, 4 tris) stay in budget
     G.capF = Math.ceil(G.capG * .3);
     const gg = bladeGeo(blades, sp * .44);
     G.gP = instAttr(gg, 'iP', new Float32Array(G.capG * 4), 4); G.gC = instAttr(gg, 'iC', new Uint8Array(G.capG * 4), 4, true); G.gN = instAttr(gg, 'iN', new Uint8Array(G.capG * 4), 4, true);

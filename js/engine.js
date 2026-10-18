@@ -18,13 +18,13 @@ window.L = window.L || {};
   // grass*: grass ring; *Mul: distance multipliers for other modules (scatter, terrain LOD, impostors)
   const TIERS = {
     alto: { name: 'alto', dpr: 2, shadow: 2048, shadowDist: 60, shadowTaps: 5, post: true, bloom: .6, fxaa: true, far: 12000,
-      grassR: 52, grassSp: .5, grassFull: 18, grassBlades: 9, grassMaxTris: 260000, flowerMul: 1, grassMul: 1.3, scatterMul: 1.3, lodMul: 1.25, impostorMul: 1.25,
+      grassR: 52, grassSp: .5, grassFull: 18, grassBlades: 12, grassMaxTris: 260000, flowerMul: 1, grassMul: 1.3, scatterMul: 1.3, lodMul: 1.25, impostorMul: 1.25,
       cloudPuffs: 1, seaShells: 5, seaSteps: 9, mistPuffs: 1, rainDrops: 6000, pointLights: 6, lod: 130, grass: 3200 },
     medio: { name: 'medio', dpr: 1.5, shadow: 1536, shadowDist: 45, shadowTaps: 4, post: true, bloom: .4, fxaa: true, far: 12000,
-      grassR: 36, grassSp: .58, grassFull: 13, grassBlades: 7, grassMaxTris: 120000, flowerMul: .8, grassMul: 1, scatterMul: 1, lodMul: 1, impostorMul: 1,
+      grassR: 36, grassSp: .58, grassFull: 13, grassBlades: 10, grassMaxTris: 120000, flowerMul: .8, grassMul: 1, scatterMul: 1, lodMul: 1, impostorMul: 1,
       cloudPuffs: .7, seaShells: 3, seaSteps: 6, mistPuffs: .7, rainDrops: 3500, pointLights: 4, lod: 95, grass: 1800 },
     baixo: { name: 'baixo', dpr: 1, shadow: 1024, shadowDist: 32, shadowTaps: 1, post: false, bloom: 0, fxaa: false, far: 10000,
-      grassR: 22, grassSp: .7, grassFull: 8, grassBlades: 5, grassMaxTris: 45000, flowerMul: .5, grassMul: .6, scatterMul: .65, lodMul: .75, impostorMul: .75,
+      grassR: 22, grassSp: .7, grassFull: 8, grassBlades: 7, grassMaxTris: 45000, flowerMul: .5, grassMul: .6, scatterMul: .65, lodMul: .75, impostorMul: .75,
       cloudPuffs: .45, seaShells: 2, seaSteps: 0, mistPuffs: .45, rainDrops: 1500, pointLights: 2, lod: 70, grass: 800 },
   };
   for (const k in TIERS) Object.freeze(TIERS[k]);
@@ -65,7 +65,7 @@ window.L = window.L || {};
   // D: sun dir xyz, height scale (m) | E: base altitude, floor density, far fade start, far fade end
   // M: mist centre x, z, radius (0 = off), top | N: mist colour rgb, visibility length (m)
   // P: camera world position (three r128 only uploads cameraPosition to Standard/Phong/Toon/Shader materials)
-  HZ.A.set([.025, .115, .31, .92]); HZ.B.set([.25, .6, .84, .38]); HZ.C.set([.78, .85, .9, 6]); HZ.D.set([0, 1, 0, 520]);
+  HZ.A.set([.025, .115, .31, .8]); HZ.B.set([.25, .6, .84, .38]); HZ.C.set([.78, .85, .9, 6]); HZ.D.set([0, 1, 0, 520]);
   HZ.E.set([60, .16, 9000, 11800]); HZ.M.set([0, 0, 0, 900]); HZ.N.set([.92, .94, .97, 60]);
   const hzUniforms = () => ({ hzA: { value: HZ.A }, hzB: { value: HZ.B }, hzC: { value: HZ.C }, hzD: { value: HZ.D }, hzE: { value: HZ.E }, hzM: { value: HZ.M }, hzN: { value: HZ.N }, hzP: { value: HZ.P } });
   L.hazeUniforms = hzUniforms;
@@ -580,7 +580,7 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
     mix3('hazeA', TOD.hazeA); mix3('hazeS', TOD.hazeS);
     if (R > 0) { TOD.hazeA.lerp(_c.copy(GREY).multiplyScalar(1 - TOD.night * .7), R * .8); TOD.hazeS.lerp(TOD.hazeA, R * .8); }
     scene.fog.color.copy(TOD.hazeA); scene.background.copy(TOD.hor);
-    scene.fog.density = .0006 * (1 + R * 1.6 + TOD.dusk * .15);
+    scene.fog.density = .00045 * (1 + R * 2.2 + TOD.dusk * .15);
     mix3('veilD', _c); HZ.A[0] = _c.r; HZ.A[1] = _c.g; HZ.A[2] = _c.b;
     mix3('veilL', _c); if (R > 0) _c.lerp(_c2.copy(GREY).multiplyScalar(1 - TOD.night * .7), R * .7); HZ.B[0] = _c.r; HZ.B[1] = _c.g; HZ.B[2] = _c.b;
     HZ.C[0] = TOD.hazeS.r; HZ.C[1] = TOD.hazeS.g; HZ.C[2] = TOD.hazeS.b; HZ.C[3] = 6 - TOD.dusk * 3;

@@ -37,22 +37,22 @@
       g.save(); g.globalCompositeOperation = 'source-atop'; g.fillStyle = sg; g.fillRect(l.x - l.r, l.y, l.r * 2, l.r * 1.8); g.restore();
     }
   }
-  // pine bough: a drooping fan of needle tufts with a lighter upper edge
+  // pine bough: a drooping fan of needle strokes, lit along the top and darkening toward the tips below
   function drawBough(g, ox, oy, S, seed) {
-    const r = rnd(seed), cx = ox + S / 2, cy = oy + S * .42;
+    const r = rnd(seed), cx = ox + S / 2, top = oy + S * .16;
     g.lineCap = 'round';
     for (let layer = 0; layer < 3; layer++) {
-      const yy = cy + layer * S * .1, wv = S * (.42 - layer * .06);
-      for (let k = 0; k < 34; k++) {
-        const t = k / 33 - .5; const x0 = cx + t * wv * 1.6, y0 = yy + Math.abs(t) * S * .16 + (r() - .5) * S * .03;
-        const len = S * (.16 + r() * .1) * (1 - Math.abs(t) * .6); const ang = Math.PI / 2 + t * 1.1 + (r() - .5) * .3;
-        const s0 = .5 + (1 - layer * .25) * .25 + (r() - .5) * .08;
-        g.strokeStyle = shadeCol(s0, .2); g.lineWidth = S * .022;
-        g.beginPath(); g.moveTo(x0, y0 - len * .25); g.quadraticCurveTo(x0 + Math.cos(ang) * len * .3, y0 + len * .2, x0 + Math.cos(ang) * len * .55, y0 + Math.sin(ang) * len * .6); g.stroke();
+      const spread = S * .42 * (1 - layer * .1);
+      for (let k = 0; k < 90; k++) {
+        const t = r() * 2 - 1;
+        const bx = cx + t * spread * .3, by = top + layer * S * .07 + Math.abs(t) * S * .06 + r() * S * .05;
+        const len = S * (.2 + r() * .17) * (1 - Math.abs(t) * .3);
+        const ang = Math.PI / 2 + t * 1.2 + (r() - .5) * .22;
+        const ex = bx + Math.cos(ang) * len, ey = by + Math.sin(ang) * len * .72;
+        const yN = clamp((ey - top) / (S * .62), 0, 1);
+        g.strokeStyle = shadeCol(clamp(.98 - yN * .5 - layer * .05 + (r() - .5) * .12, .3, 1), .35); g.lineWidth = S * (.013 + r() * .01);
+        g.beginPath(); g.moveTo(bx, by); g.quadraticCurveTo(bx + Math.cos(ang) * len * .55, by + Math.sin(ang) * len * .18, ex, ey); g.stroke();
       }
-      // lit top band
-      const gr = g.createLinearGradient(0, yy - S * .05, 0, yy + S * .08); gr.addColorStop(0, shadeCol(1, .5, .9)); gr.addColorStop(1, shadeCol(.8, .4, 0));
-      g.fillStyle = gr; g.beginPath(); g.ellipse(cx, yy, wv * .82, S * .07, 0, Math.PI, TAU); g.fill();
     }
   }
   function drawStrands(g, ox, oy, S, seed) {

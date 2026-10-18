@@ -19,14 +19,15 @@
     uPathA: { value: v3(0xebda8d) }, uPathB: { value: v3(0xc4b559) }, uPathC: { value: v3(0xa88f5a) },
     uSand: { value: v3(0xead9a3) }, uSandWet: { value: v3(0xb9a77c) }, uSnow: { value: v3(0xf2f5fa) },
     uForest: { value: v3(0x4a6b3a) }, uMoss: { value: v3(0x5f7d35) },
-    uStrata: { value: new THREE.Vector4(46, .55, 13, .35) },  // band height (m), band contrast, fine band height, fine contrast
+    uStrata: { value: new THREE.Vector4(120, .55, 13, .06) },  // layer group height (m, 3 layers each), dark-layer amount, fine band height, fine contrast
     uDetail: { value: new THREE.Vector3(1, 45, .22) },          // enabled, near-detail fade distance (m), strength
+    uGrass: { value: new THREE.Vector4(13, 36, .55, 0) },       // grass full-density radius, ring radius, soil darkening, on (set by grassInit)
   };
 
   // GLSL: palette + layers. Expects vWp (world pos), vWn (world normal), vT (aT), vU (aU), vCol (ground tint).
   const TERRAIN_FN = `
 uniform sampler2D tNoise; uniform float uAlbedo, uPatch; uniform vec3 uPal[7]; uniform vec3 uPalMean;
-uniform vec3 uRockA, uRockB, uRockC, uPathA, uPathB, uPathC, uSand, uSandWet, uSnow, uForest, uMoss; uniform vec4 uStrata; uniform vec3 uDetail;
+uniform vec3 uRockA, uRockB, uRockC, uPathA, uPathB, uPathC, uSand, uSandWet, uSnow, uForest, uMoss; uniform vec4 uStrata; uniform vec3 uDetail; uniform vec4 uGrass;
 vec3 v5Meadow(vec3 base, vec4 n1, vec4 n2) {
   vec3 palA = mix(uPal[2], uPal[0], smoothstep(.2, .62, n1.g)); palA = mix(palA, uPal[1], smoothstep(.5, .85, n2.r));
   vec3 palB = mix(uPal[6], uPal[3], smoothstep(.25, .7, n1.g)); palB = mix(palB, uPal[4], smoothstep(.45, .8, n2.r)); palB = mix(palB, uPal[5], smoothstep(.62, .9, n2.g) * .6);
@@ -34,19 +35,21 @@ vec3 v5Meadow(vec3 base, vec4 n1, vec4 n2) {
   return mix(base, base * pal / uPalMean, uPatch);
 }
 vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack) {
-  vec3 an = abs(wn); float wx = an.x / (an.x + an.z + 1e-4);
-  vec4 rx = texture2D(tNoise, vec2(wp.z, wp.y * .45) / 95.), rz = texture2D(tNoise, vec2(wp.x, wp.y * .45) / 95.);
-  vec4 rn = mix(rz, rx, wx);
-  crack = smoothstep(.16, .02, rn.b) * (.6 + .4 * rn.g);
-  float warp = n1.r * 1.3 + rn.r * .35;
-  float band = texture2D(tNoise, vec2(wp.y / uStrata.x + warp, .37)).g;
-  float fine = texture2D(tNoise, vec2(wp.y / uStrata.z + warp * 2.1, .71)).a;
-  vec3 r = mix(uRockA, uRockB, smoothstep(.3, .7, band));
-  r = mix(r, uRockC, smoothstep(.55, .9, band) * uStrata.y * .6);
-  r *= 1. + (fine - .5) * uStrata.w;
-  r *= .88 + rn.r * .26;
-  r *= 1. - crack * .45;
-  float ledge = smoothstep(.75, 1., wn.y) * .12; r += ledge;   // ledges catch light
+  // painterly sediment: a few broad warped layers with their own shade, a soft undercut below each lip and
+  // large soft blotches; no fine noise (the references paint cliffs as smooth, big shapes). World space, no seams.
+  vec3 an = abs(wn); float hz = mix(wp.x, wp.z, an.x / (an.x + an.z + 1e-4));
+  vec4 rn = texture2D(tNoise, vec2(hz / 260., wp.y / 160.));
+  float yy = wp.y / uStrata.x * 3. + n1.r * 3. + rn.r * .9;
+  float li = floor(yy), lf = yy - li;
+  float shade = fract(sin(li * 12.9898) * 43758.5453);
+  vec3 r = mix(uRockA, uRockB, smoothstep(.25, .75, shade));
+  r = mix(r, uRockC, smoothstep(.75, 1., shade) * uStrata.y * .7);
+  r *= 1. - smoothstep(.22, .0, lf) * .2;                  // soft undercut below each lip
+  r *= 1. + smoothstep(.8, 1., lf) * .08;                  // lit lip
+  r *= 1. + (texture2D(tNoise, vec2(wp.y / uStrata.z + n1.r * 4., .71)).a - .5) * uStrata.w;
+  r *= .9 + rn.b * .2;
+  crack = smoothstep(.12, .03, rn.a) * .6;
+  r *= 1. - crack * .25;
   return r;
 }
 `;
@@ -72,6 +75,9 @@ vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack) {
           float near = (1. - smoothstep(uDetail.y * .4, uDetail.y, camd)) * uDetail.x;
           if (near > 0.) { vec4 nd = texture2D(tNoise, vWp.xz / 7.); g *= 1. + ((nd.a - .5) * .9 + (nd.g - .5) * .5) * uDetail.z * near; }
           g *= 1. + (n2.a - .5) * .12;
+          // soil under the grass carpet: deep green near the camera so gaps between blades never flash bright ground
+          float gc = uGrass.w * (1. - smoothstep(uGrass.x, uGrass.y * .95, camd)) * clamp(1. - vT.x * 1.6 - vT.y * 1.5 - vT.z - vT.w, 0., 1.);
+          g = mix(g, mix(g * vec3(.42, .55, .3), vec3(.03, .056, .008), 1. - smoothstep(3., uGrass.x, camd)), gc * uGrass.z);
           // forest floor + wet/moss
           g = mix(g, g * uForest / max(uPalMean, vec3(.05)) * .8, clamp(vU.x, 0., 1.) * .8);
           g = mix(g, mix(g * .72, uMoss * uAlbedo, .35), clamp(vU.y, 0., 1.) * .7);
@@ -85,7 +91,14 @@ vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack) {
           // stratified rock
           float crack;
           float rk = smoothstep(.28, .62, vT.x + (n2.r - .5) * .22);
-          if (rk > .001) { vec3 rc = v5Rock(vWp, wn, n1, crack) * uAlbedo; g = mix(g, rc * mix(vec3(1.), vCol / max(dot(vCol, vec3(.333)), .05) * .33 + .67, .25), rk); }
+          if (rk > .001) {
+            // where aT.x is high, WORLD's vertex colour is the rock tint (relative to the default grey); saturated meadow colours are ignored
+            float mx = max(vColor.r, max(vColor.g, vColor.b)), sat = (mx - min(vColor.r, min(vColor.g, vColor.b))) / max(mx, 1e-3);
+            vec3 tint = mix(vColor / uRockA, vec3(1.), smoothstep(.62, .78, sat));
+            vec3 rc = v5Rock(vWp, wn, n1, crack) * clamp(tint, 0., 2.6) * uAlbedo;
+            rc = mix(rc, uMoss * uAlbedo * .85, smoothstep(.42, .72, wn.y) * .7);       // grassy ledges on the steps
+            g = mix(g, rc, rk);
+          }
           // modest snow caps (white on top only; the blue comes from the light)
           float sn = smoothstep(.4, .7, vT.w + (n1.g - .5) * .3) * smoothstep(.35, .75, wn.y + .2);
           g = mix(g, uSnow * uAlbedo * 1.12, sn);
