@@ -34,7 +34,7 @@ window.L = window.L || {};
     towerH: 12,                // m above the ground at the 'lighthouse' POI
     lampTypes: ['lighthouse_lamp', 'lanterna_farol', 'farol_lanterna'],
     summitR: 32, vigilGrace: 45,
-    dawn: [6, 7.5], sunrise: [5, 9], night: [19, 5], dusk: [17, 20.5],
+    dawn: [6, 7.5], sunrise: [5, 9], night: [18, 6], dusk: [17, 20.5],
     interactR: 2.4,
   };
 
@@ -98,7 +98,8 @@ window.L = window.L || {};
     return 12;
   }
   const inH = (h, a, b) => a <= b ? h >= a && h < b : h >= a || h < b;
-  const isNight = () => inH(hours(), CFG.night[0], CFG.night[1]);
+  const isNight = () => (dbgHour == null && L.clock && L.clock.isNight) ? !!L.clock.isNight() : inH(hours(), CFG.night[0], CFG.night[1]);
+  const moon = () => { try { return L.clock && L.clock.moonPhase ? L.clock.moonPhase() : .5; } catch (e) { return .5; } }; // 0 new .. .5 full
   const isDawn = () => inH(hours(), CFG.dawn[0], CFG.dawn[1]);
   const isSunrise = () => inH(hours(), CFG.sunrise[0], CFG.sunrise[1]);
   const isDusk = () => inH(hours(), CFG.dusk[0], CFG.dusk[1]);
@@ -146,6 +147,7 @@ window.L = window.L || {};
     switch (c) {
       case 'night': return isNight(); case 'day': return !isNight(); case 'dawn': return isDawn();
       case 'has_key': return hasStar(); case 'awake': return !!W('awake');
+      case 'full_moon': return Math.abs(moon() - .5) < .095; case 'new_moon': return Math.min(moon(), 1 - moon()) < .095;
     }
     return !!F[c] || !!W(c);
   }
@@ -756,9 +758,11 @@ window.L = window.L || {};
     if (pendingDream) { const id = pendingDream; pendingDream = null; showDream(id); }
     else if (F.hintDream) { F.hintDream = 0; changed(); const txt = hintText(); if (txt) emit('dream', { id: 'hint', text: txt, soft: true }); }
   }
+  // 'slept' arrives when the night is over (SYSTEMS sends it at dawn): sleeping the night through at the camp, under a
+  // roof and by a burning fire, counts as the whole night
   function sleepVigil() {
-    if (W('altar_4') || !taskState('f4') || !isNight()) return;
-    if (vigilGood()) { F.vigil = { night: nightId(), ok: 0, bad: 0, slept: true }; changed(); }
+    if (W('altar_4') || !taskState('f4') || (F.vigil && F.vigil.done)) return;
+    if (vigilGood()) { F.vigil = { night: nightId(), ok: 999, bad: 0, slept: true, done: true }; changed(); emit('vigil', { done: true }); }
   }
   function vigilGood() {
     const p = poi('summit_camp'); if (!p) return false; if (hyp(PL.x, PL.z, p.x, p.z) > CFG.summitR) return false;
@@ -804,7 +808,7 @@ window.L = window.L || {};
   const CD = {};
   const mana = {
     st() { return L.save && L.save.player && L.save.player.st; },
-    get() { if (L.surv && typeof L.surv.mana === 'function') return L.surv.mana(); const st = this.st(); if (st && typeof st.mana === 'number') return st.mana; return MEM.mana; },
+    get() { const sv = L.surv; if (sv && typeof sv.mana === 'number') return sv.mana; if (sv && typeof sv.mana === 'function') return sv.mana(); const st = this.st(); if (st && typeof st.mana === 'number') return st.mana; return MEM.mana; },
     use(n) { if (!n) return; if (L.surv && L.surv.useMana) return L.surv.useMana(n); const st = this.st(); if (st && typeof st.mana === 'number') { st.mana = Math.max(0, st.mana - n); dirty(); } else MEM.mana = Math.max(0, MEM.mana - n); },
   };
   S.mana = () => mana.get();

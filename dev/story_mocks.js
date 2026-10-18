@@ -45,7 +45,7 @@
     set(c, id, d) { if (c === 'w5') W5.set(id, d); rec('save.set', [c, id]); (listeners[c] || []).forEach(fn => fn(id, d)); },
     del(c, id) { if (c === 'w5') W5.delete(id); }, on(c, fn) { (listeners[c] = listeners[c] || []).push(fn); },
   };
-  const clock = L.clock = { h: 8, d: 100, DAY_LEN: 1440, hours() { return this.h; }, dayPhase() { return this.h / 24; }, now() { return (this.d + this.h / 24) * 1440000; }, day() { return this.d; }, isNight() { return this.h >= 19 || this.h < 5; }, skipToDawn() { if (this.h >= 6) this.d++; this.h = 6.05; rec('skipToDawn'); }, moonPhase() { return 0; } };
+  const clock = L.clock = { h: 8, d: 100, DAY_LEN: 1440, hours() { return this.h; }, dayPhase() { return this.h / 24; }, now() { return (this.d + this.h / 24) * 1440000; }, day() { return this.d; }, isNight() { return this.h >= 18 || this.h < 6; }, skipToDawn() { if (this.h >= 6) this.d++; this.h = 6.05; rec('skipToDawn'); }, moonPhase() { return 0; } };
   MOCK.setHour = (h, nextDay) => { if (nextDay) clock.d++; clock.h = h; };
   L.surv = { sleeping: false, warm(s) { rec('warm', s); } };
   L.isSheltered = () => MOCK.sheltered;

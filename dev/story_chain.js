@@ -108,10 +108,17 @@
     // ---------- light 4: a night at the summit
     readAt('n06'); readAt('s23'); ok(S.recipes().indexOf('receita_sopa_quente') >= 0, 'soup recipe');
     go('summit_camp'); hour(18); tick(1.5); useObj('g_espirito_iaque', 'meet the yak spirit at dusk'); ok(task('f4').state === 'on', 'f4 on');
-    M.sheltered = true; M.fireNear = true; hour(20); tick(3);
-    for (let h = 20.5; h < 29; h += .5) { M.setHour(h % 24, h >= 24 && h < 24.5); tick(4); }
-    M.setHour(5.5); tick(2); ok(S.flags.vigil && S.flags.vigil.done, 'whole night with roof and fire');
-    D.give('sopa_quente', 1); M.setHour(6); tick(1); useObj('g_espirito_iaque', 'give the hot soup at sunrise'); ok(W('altar_4') && S.fragCount() === 4, 'fragment 4');
+    // night A: awake by the fire, then she wanders off for too long -> the vigil breaks (soft, no penalty)
+    M.sheltered = true; M.fireNear = true; hour(20); tick(3); ok(S.flags.vigil && !S.flags.vigil.done, 'vigil starts at nightfall under a roof by the fire');
+    M.fireNear = false; tick(S.CFG.vigilGrace + 10); ok(!S.flags.vigil, 'away from the fire for a while: the vigil breaks');
+    // night B: asleep in a bed at the camp, roof and fire: the night counts when she wakes at dawn
+    M.fireNear = true; nextNight(19); tick(2); sleep(); ok(S.flags.vigil && S.flags.vigil.done && S.flags.vigil.slept, 'slept the night through at the camp: counts');
+    L.save.player.flags.vigil = null; // (test only) forget it to check the awake path too
+    // night C: awake the whole night
+    nextNight(19.5); tick(3);
+    for (let h = 20; h < 30; h += .5) { M.setHour(h % 24, h >= 24 && h < 24.5); tick(4); }
+    M.setHour(6.2); tick(2); ok(S.flags.vigil && S.flags.vigil.done, 'whole night awake with roof and fire');
+    D.give('sopa_quente', 1); M.setHour(6.5); tick(1); useObj('g_espirito_iaque', 'give the hot soup at sunrise'); ok(W('altar_4') && S.fragCount() === 4, 'fragment 4');
     M.sheltered = false; M.fireNear = false;
     // ---------- Ponte de Vento and light 5
     hour(11); go('griffin_queen'); use('g_rainha_grifo', 'meet the griffin queen'); ok(task('k_penas').state === 'on', 'k_penas on');
