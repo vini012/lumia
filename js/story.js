@@ -34,6 +34,7 @@ window.L = window.L || {};
     towerH: 12,                // m above the ground at the 'lighthouse' POI
     lampTypes: ['lighthouse_lamp', 'lanterna_farol', 'farol_lanterna'],
     summitR: 32, vigilGrace: 45,
+    bridgePitch0: .3,          // camera pitch (v4 convention, + = looking down) that casts a level cloud bridge
     dawn: [6, 7.5], sunrise: [5, 9], night: [18, 6], dusk: [17, 20.5],
     interactR: 2.4,
   };
@@ -1072,7 +1073,7 @@ window.L = window.L || {};
   let bridge = null;
   function makeBridge(c) {
     if (bridge) removeBridge();
-    const dirx = Math.sin(c.yaw), dirz = Math.cos(c.yaw); const slope = clamp(-(c.pitch || 0) * .35, -.18, .3);
+    const dirx = Math.sin(c.yaw), dirz = Math.cos(c.yaw); const slope = clamp(-((c.pitch || 0) - CFG.bridgePitch0) * .35, -.18, .3); // camera pitch: + looks down; the usual view gives a level bridge
     const y0 = (c.y || 0) - .02; let len = 0;
     for (let i = 1; i <= 40; i++) { const x = c.x + dirx * i, z = c.z + dirz * i, top = y0 + slope * i; len = i; if (i > 2 && groundY(x, z, -1e9) > top + (i <= 5 ? 1 : .3)) break; } // small bumps at the start do not stop it
     if (len < 3) return false;

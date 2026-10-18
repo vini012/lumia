@@ -66,7 +66,7 @@ window.L = window.L || {};
  --t1:#86bcae;--t2:#e9a88e;--t3:#ecca72;--t4:#a9bce3;--gold:#f2c14e;font-family:var(--title);color:var(--ink)}
 #lu *{box-sizing:border-box}
 #lu button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none}
-#lu .lu-i{width:24px;height:24px;display:block;flex:none}
+.lu-i{width:24px;height:24px;display:block;flex:none}
 .lu-paper{position:relative;background-color:var(--paper);color:var(--text);
  background-image:radial-gradient(120% 90% at 30% 20%,rgba(255,251,238,.75),rgba(255,251,238,0) 55%),radial-gradient(150% 130% at 50% 50%,rgba(0,0,0,0) 58%,rgba(150,105,50,.22)),${FIBRE},${NOISE};
  border:2px solid rgba(122,91,69,.78);border-radius:22px 9px 26px 11px/11px 26px 9px 22px;box-shadow:0 2px 0 rgba(122,91,69,.22),0 16px 38px rgba(36,22,10,.38)}
@@ -192,10 +192,10 @@ window.L = window.L || {};
 /* ---------- HUD: star slots, round buttons, spell bar */
 .lu-hstars{position:absolute;top:calc(8px + var(--sat));left:50%;transform:translateX(-50%);display:flex;gap:5px;padding:4px 9px;border-radius:14px;background:rgba(30,22,16,.22);opacity:0;transition:opacity 1.4s;pointer-events:none}
 .lu-hstars.lu-show{opacity:.92}
-.lu-hstars .lu-i,.lu-jstars .lu-i{width:17px;height:17px;color:rgba(255,247,230,.72);stroke-width:1.6}
+.lu-hstars .lu-i,.lu-jstars .lu-i{width:21px;height:21px;color:rgba(255,247,230,.72);stroke-width:1.6}
 .lu-jstars .lu-i{color:rgba(122,91,69,.55);width:20px;height:20px}
 .lu-hstars .lu-full,.lu-jstars .lu-full{color:#c98a12;fill:#ffd35c;filter:drop-shadow(0 0 4px rgba(255,205,90,.95))}
-.lu-hstars.lu-one{gap:0}.lu-hstars.lu-one .lu-i{width:22px;height:22px}
+.lu-hstars.lu-one{gap:0}.lu-hstars.lu-one .lu-i{width:25px;height:25px}
 .lu-rb{position:absolute;width:54px;height:54px;border-radius:50%;display:flex;align-items:center;justify-content:center;pointer-events:auto;color:var(--ink)!important;
  background:radial-gradient(circle at 38% 30%,#fffaf0,var(--paper) 60%,var(--paper2))!important;border:2px solid var(--ink)!important;box-shadow:0 3px 0 rgba(122,91,69,.5),0 8px 18px rgba(0,0,0,.28);transition:transform .12s,opacity .5s}
 .lu-rb:active{transform:scale(.93)}

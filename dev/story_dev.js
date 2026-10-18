@@ -365,7 +365,7 @@
     async world_bridge() { // from the bluff over the bay, towards the open water
       const bc = { x: -330, z: 240 }, a0 = .9, sx = bc.x + Math.sin(a0) * 74, sz = bc.z + Math.cos(a0) * 74; L.P.x = sx; L.P.z = sz; L.P.y = L.ground(sx, sz); setHour(16.6);
       U.closeAll(); D.learn('ponte'); U.closeAll(); const yaw = Math.atan2(bc.x - sx, bc.z - sz), dx = Math.sin(yaw), dz = Math.cos(yaw); L.P.ry = camS.yaw = yaw; tick(.2);
-      L.save.player.st.mana = 100; S.castSpell('ponte', { yaw, pitch: 0 }); tick(2.4);
+      L.save.player.st.mana = 100; S.castSpell('ponte', { yaw, pitch: .3 }); tick(2.4);
       const y0 = L.P.y; L.P.x += dx * 8; L.P.z += dz * 8; L.P.y = y0; L.P.speed = 3; poseHero(.3, tAll += .3); L.P.speed = 0;
       view([sx - dx * 4 + dz * 13, y0 + 5.5, sz - dz * 4 - dx * 13], [sx + dx * 13, y0 - .6, sz + dz * 13]);
     },
