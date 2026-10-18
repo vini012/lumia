@@ -21,8 +21,8 @@ for (const [name, ddl] of Object.entries(variants)) {
   const cons = (await db.query(`select conname, pg_get_constraintdef(oid) d from pg_constraint where conrelid='public.lumiar_mundo'::regclass and contype='c'`)).rows;
   console.log('== ' + name); for (const c of cons) console.log('   ', c.conname, c.d.slice(0, 140));
   const tryq = async (sql) => { try { await db.exec(sql); return true; } catch (e) { return e.message; } };
-  ok(await tryq(`insert into lumiar_mundo (w,c,id,d,at) values ('m','p5','vini','{"t":100,"inv":{}}', now())`) === true, 'p5 insert');
-  for (const c of ['m5','b5','h5','t5','f5','k5','w5','d5']) ok(await tryq(`insert into lumiar_mundo (w,c,id,d,at) values ('m','${c}','x','{"t":1}', now())`) === true, c + ' insert');
+  ok(await tryq(`insert into lumiar_mundo (w,c,id,d,at) values ('m','p5','vini','{"ts":100,"inv":{}}', now())`) === true, 'p5 insert');
+  for (const c of ['m5','b5','h5','t5','f5','k5','w5','d5']) ok(await tryq(`insert into lumiar_mundo (w,c,id,d,at) values ('m','${c}','x','{"ts":1}', now())`) === true, c + ' insert');
   ok(await tryq(`insert into lumiar_mundo (w,c,id,d,at) values ('m','builds4','b2','{"x":2}', now())`) === true, 'v4 still ok');
   if (name.includes('builds3')) ok(await tryq(`insert into lumiar_mundo (w,c,id,d) values ('m','builds3','b9','{}')`) === true, 'old names kept');
   if (!name.includes('no checks')) ok(typeof await tryq(`insert into lumiar_mundo (w,c,id,d,at) values ('m','zz9','x','{}', now())`) === 'string', 'unknown collection refused');
@@ -31,13 +31,13 @@ for (const [name, ddl] of Object.entries(variants)) {
   ok(typeof await tryq(`insert into lumiar_mundo (w,c,id,d,at) values ('m','k5','big2','${JSON.stringify({ s: 'x'.repeat(33000) })}', now())`) === 'string', '33 KB refused');
   // newer wins (upsert as PostgREST does it)
   const up = (id, d, at) => db.query(`insert into lumiar_mundo (w,c,id,d,at) values ('m','b5',$1,$2::jsonb,$3) on conflict (w,c,id) do update set d=excluded.d, at=excluded.at`, [id, d, at]);
-  await up('door', '{"t":2000,"o":true}', new Date(2000).toISOString());
-  await up('door', '{"t":1000,"o":false}', new Date(1000).toISOString()); // older: ignored
-  let r = (await db.query(`select d from lumiar_mundo where c='b5' and id='door'`)).rows[0].d; ok(r.t === 2000 && r.o === true, 'older update ignored');
-  await up('door', '{"t":3000,"o":false}', new Date(3000).toISOString()); r = (await db.query(`select d from lumiar_mundo where c='b5' and id='door'`)).rows[0].d; ok(r.t === 3000, 'newer update applied');
-  await up('door', null, new Date(2500).toISOString()); r = (await db.query(`select d from lumiar_mundo where c='b5' and id='door'`)).rows[0].d; ok(r && r.t === 3000, 'older delete ignored');
+  await up('door', '{"ts":2000,"o":true}', new Date(2000).toISOString());
+  await up('door', '{"ts":1000,"o":false}', new Date(1000).toISOString()); // older: ignored
+  let r = (await db.query(`select d from lumiar_mundo where c='b5' and id='door'`)).rows[0].d; ok(r.ts === 2000 && r.o === true, 'older update ignored');
+  await up('door', '{"ts":3000,"o":false}', new Date(3000).toISOString()); r = (await db.query(`select d from lumiar_mundo where c='b5' and id='door'`)).rows[0].d; ok(r.ts === 3000, 'newer update applied');
+  await up('door', null, new Date(2500).toISOString()); r = (await db.query(`select d from lumiar_mundo where c='b5' and id='door'`)).rows[0].d; ok(r && r.ts === 3000, 'older delete ignored');
   await up('door', null, new Date(4000).toISOString()); r = (await db.query(`select d from lumiar_mundo where c='b5' and id='door'`)).rows[0].d; ok(r === null, 'newer delete applied');
-  await up('door', '{"t":3500}', new Date(3500).toISOString()); r = (await db.query(`select d from lumiar_mundo where c='b5' and id='door'`)).rows[0].d; ok(r === null, 'older than tombstone ignored');
+  await up('door', '{"ts":3500}', new Date(3500).toISOString()); r = (await db.query(`select d from lumiar_mundo where c='b5' and id='door'`)).rows[0].d; ok(r === null, 'older than tombstone ignored');
   // v4 rows: last writer wins as before
   await db.query(`insert into lumiar_mundo (w,c,id,d,at) values ('m','builds4','b1','{"x":9}', $1) on conflict (w,c,id) do update set d=excluded.d, at=excluded.at`, [new Date(1).toISOString()]);
   r = (await db.query(`select d from lumiar_mundo where c='builds4' and id='b1'`)).rows[0].d; ok(r.x === 9, 'v4 untouched behaviour');

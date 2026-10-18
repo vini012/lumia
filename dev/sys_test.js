@@ -28,7 +28,7 @@ test('mergeMono rules', () => {
 });
 test('resolvePlayer: every branch', () => {
   const { resolvePlayer } = device('x').L.save._t;
-  const P = (t, o) => Object.assign({ t, inv: {}, notes: {}, sp: [], flags: {}, pos: [0, 0, 0, 0] }, o);
+  const P = (ts, o) => Object.assign({ ts, inv: {}, notes: {}, sp: [], flags: {}, pos: [0, 0, 0, 0] }, o);
   eq(resolvePlayer(null, null).d, null, 'nothing');
   eq(resolvePlayer(null, P(5, { inv: { a: 1 } })).d.inv, { a: 1 }, 'server only');
   let r = resolvePlayer({ d: P(7, { inv: { b: 2 } }), base: 0, fresh: true }, null); eq(r.d.inv, { b: 2 }); ok(r.write, 'local only -> write');
@@ -37,7 +37,7 @@ test('resolvePlayer: every branch', () => {
   r = resolvePlayer({ d: P(5, { inv: { b: 1 } }), base: 5, fresh: false }, P(8, { inv: { b: 9 } })); eq(r.d.inv, { b: 9 }, 'only server changed'); ok(!r.write);
   // both changed: newer wins wholesale, progress merged
   r = resolvePlayer({ d: P(12, { inv: { b: 4 }, notes: { n02: 1 }, sp: ['faisca'] }), base: 5, fresh: false }, P(8, { inv: { b: 9 }, notes: { n01: 1 }, sp: ['brotar'] }));
-  eq(r.d.inv, { b: 4 }, 'conflict: local newer inv'); eq(r.d.notes, { n01: 1, n02: 1 }, 'conflict: notes union'); eq(r.d.sp.sort(), ['brotar', 'faisca']); ok(r.write && r.d.t > 12);
+  eq(r.d.inv, { b: 4 }, 'conflict: local newer inv'); eq(r.d.notes, { n01: 1, n02: 1 }, 'conflict: notes union'); eq(r.d.sp.sort(), ['brotar', 'faisca']); ok(r.write && r.d.ts > 12);
   // fresh device played offline: existing save wins, its notes merged in
   r = resolvePlayer({ d: P(50, { inv: { berry: 2 }, notes: { n01: 1 } }), base: 0, fresh: true }, P(20, { inv: { madeira: 30 }, notes: { n05: 1 } }));
   eq(r.d.inv, { madeira: 30 }, 'fresh: server inventory wins'); eq(r.d.notes, { n05: 1, n01: 1 }, 'fresh: notes merged'); ok(r.write);
@@ -97,9 +97,9 @@ test('debounce + coalescing: player 4 s, world writes 400 ms batched', async () 
   await advance(1200); eq(cl.calls.upsert - u0, 1, 'one upsert at 4 s'); eq(srv.rows.get('teste|p5|vini').d.inv.madeira, 29, 'latest value');
   ok(!L.save.saving, 'saved'); eq(L.save.status, 'online');
   const u1 = cl.calls.upsert;
-  L.save.set('b5', 'b1', { t: 0, x: 1 }); L.save.set('b5', 'b2', { x: 2 }); L.save.set('b5', 'b1', { x: 3 }); L.save.set('k5', 'b2', { items: { pedra: 2 } });
+  L.save.set('b5', 'b1', { t: 0, x: 1 }); L.save.set('b5', 'b2', { x: 2 }); L.save.set('b5', 'b1', { t: 'wall', x: 3 }); L.save.set('k5', 'b2', { items: { pedra: 2 } });
   await advance(300); eq(cl.calls.upsert - u1, 0, 'world: not yet'); await advance(300); eq(cl.calls.upsert - u1, 1, 'world: one batched upsert');
-  eq(srv.rows.get('teste|b5|b1').d.x, 3, 'coalesced to last'); ok(srv.rows.get('teste|b5|b1').d.t > 0, 't stamped');
+  eq(srv.rows.get('teste|b5|b1').d.x, 3, 'coalesced to last'); ok(srv.rows.get('teste|b5|b1').d.ts > 0, 'ts stamped'); eq(srv.rows.get('teste|b5|b1').d.t, 'wall', 'piece field t kept');
   L.save.del('b5', 'b2'); await advance(600); eq(srv.rows.get('teste|b5|b2').d, null, 'soft delete d=null'); ok(!L.save.get('b5', 'b2'));
 });
 test('two players see each other: builds, plots, world flags, presence', async () => {
@@ -129,7 +129,7 @@ test('newer wins: an older realtime / queued snapshot never overwrites a newer r
   eq(srv.rows.get('teste|b5|door').d.by, 'B', 'server keeps the newer write'); eq(A.L.save.get('b5', 'door').by, 'B', 'A adopts the newer row');
   eq(A.L.save.status, 'online'); eq(A.L.save.pending, 0);
   // the server-side trigger alone also protects (client check disabled by a raw old upsert)
-  srv.upsert([{ w: 'teste', c: 'b5', id: 'door', d: { o: true, t: 5 }, at: new Date(5).toISOString() }]);
+  srv.upsert([{ w: 'teste', c: 'b5', id: 'door', d: { o: true, ts: 5 }, at: new Date(5).toISOString() }]);
   eq(srv.rows.get('teste|b5|door').d.by, 'B', 'trigger keeps newer');
 });
 test('offline: writes queue, survive a crash, are delivered on the next start', async () => {
@@ -232,6 +232,112 @@ test('local backend: no server, other tab sees writes, reload keeps data', async
   eq(A.L.save.backend, 'local'); eq(A.L.save.status, 'local');
   A.L.save.set('b5', 'l1', { x: 4 }); A.L.save.player.inv.pedra = 3; A.L.save.dirty(); await advance(6000);
   const A2 = device('A2', { storage: store }); await boot(A2, 'Vini'); eq(A2.L.save.get('b5', 'l1').x, 4); eq(A2.L.save.player.inv.pedra, 3);
+});
+
+// ================================================================ survival
+// tiny collider world (axis-aligned boxes) with the world.js API used by survival
+function colliders(L, boxes) {
+  L.queryCols = (x, z, r, fn) => { for (const b of boxes) fn(b); };
+  L.colTop = (c, x, z) => (Math.abs(x - c.x) <= c.hx && Math.abs(z - c.z) <= c.hz) ? c.y1 : NaN;
+  L.pointInSolid = (x, y, z) => boxes.some(c => !c.nocam && Math.abs(x - c.x) <= c.hx && Math.abs(z - c.z) <= c.hz && y >= c.y0 && y <= c.y1);
+}
+const house = (x, z, fy) => [ // 3x3 room: 4 walls + roof wedge (bottom 2.5 m above the floor)
+  { x, z: z - 1.5, hx: 1.5, hz: .15, y0: fy, y1: fy + 3 }, { x, z: z + 1.5, hx: 1.5, hz: .15, y0: fy, y1: fy + 3 },
+  { x: x - 1.5, z, hx: .15, hz: 1.5, y0: fy, y1: fy + 3 }, { x: x + 1.5, z, hx: .15, hz: 1.5, y0: fy, y1: fy + 3 },
+  { x, z, hx: 1.5, hz: 1.8, y0: fy + 2.5, y1: fy + 4.8, nocam: true }];
+async function survDev(name, o) { const d = device(name, Object.assign({ mods: ['save', 'survival'] }, o)); d.L.ground = () => 200; d.L.CLOUD_Y = 90; await boot(d, name); return d; }
+function run(L, secs, ctx, dt = .1) { for (let t = 0; t < secs; t += dt) L.surv.tick(dt, ctx); }
+test('survival: hunger 100 -> 0 in about 40 min of play', async () => {
+  const A = await survDev('A'); const S = A.L.surv; S.set({ fome: 100 });
+  const base = { x: 0, y: 200, z: 0, night: 0, grounded: true };
+  // a typical session mix: 55% walking, 25% standing (building, crafting), 10% sprinting, 10% swimming
+  let m = 0; for (; m < 90 && S.fome > 0; m++) { run(A.L, 33, Object.assign({ moving: true }, base), .25); run(A.L, 15, base, .25); run(A.L, 6, Object.assign({ moving: true, sprinting: true }, base), .25); run(A.L, 6, Object.assign({ moving: true, swimming: true }, base), .25); }
+  console.log('    minutes of mixed play from full to empty:', m); ok(m >= 35 && m <= 45, 'empty after ~40 min');
+  S.set({ fome: 100, frio: 0, wet: 0 }); run(A.L, 25 * 4, Object.assign({ moving: true }, base), .25); near(S.fome, 96, .05, 'walking: -1 per 25 s');
+});
+test('survival: hungry rules, eating, buffs', async () => {
+  const A = await survDev('A'); const S = A.L.surv, p = A.L.save.player; const hints = []; S.on('hint', h => hints.push(h.text));
+  const base = { x: 0, y: 200, z: 0, night: 0, grounded: true, moving: true };
+  S.set({ fome: 26 }); ok(S.canSprint(), 'can sprint when fed'); run(A.L, 30, base); ok(!S.canSprint(), 'no sprint below 25'); ok(hints.includes('Você está com fome.'), 'soft hint');
+  S.set({ fome: 0, mana: 0 }); eq(S.speedMul(), .75, 'slower at 0'); eq(S.jumpMul(), .85);
+  S.set({ fome: 10, mana: 0 }); run(A.L, 10, Object.assign({}, base, { moving: false })); near(S.mana, 10 * .4 * .5, .05, 'mana regen halved when hungry');
+  S.set({ fome: 70, mana: 0 }); run(A.L, 10, Object.assign({}, base, { moving: false })); near(S.mana, 10 * .4 * 1.25, .05, 'faster when fed');
+  p.inv = { frutinhas: 2, sopa_quente: 1, madeira: 3 };
+  S.set({ fome: 50, frio: .8 }); let r = S.eat('frutinhas'); ok(r.ok && r.gained === 6, 'berries +6'); eq(p.inv.frutinhas, 1, 'consumed');
+  eq(S.eat('madeira').ok, false, 'not food'); eq(S.eat('pao').why, 'Você não tem isso.');
+  r = S.eat('sopa_quente'); ok(r.ok && S.cold === 0 && S.buff('quente') > 359, 'warm food: cold gone, warm 6 min'); ok(!('sopa_quente' in p.inv), 'last one removed');
+  run(A.L, 60, Object.assign({}, base, { night: 1 })); eq(S.cold, 0, 'stays warm with the buff');
+  S.set({ fome: 100 }); eq(S.eat('frutinhas').why, 'Barriga cheia!');
+  eq(A.L.cookCheck(A.L.COOK.find(c => c.id === 'c_pao'), { trigo: 3 }, {}).why, 'Receita desconhecida', 'bread needs the recipe');
+  ok(A.L.cookCheck(A.L.COOK.find(c => c.id === 'c_pao'), { trigo: 3, receita_pao: 1 }, {}).ok, 'with recipe');
+  eq(A.L.cookCheck(A.L.COOK.find(c => c.id === 'c_ensopado'), { cenoura: 1 }, {}).why, 'Faltam 1 cenoura, 2 cogumelo, 1 abóbora');
+  const story = []; A.L.story = { event: (n, d) => story.push(n + ':' + d.item) };
+  p.inv = { cenoura: 3, cogumelo: 2, abobora: 1 }; let c = S.cook('c_ensopado'); ok(c.ok && c.item === 'ensopado', 'cooked');
+  eq(p.inv, { cenoura: 1, ensopado: 1 }, 'ingredients paid'); eq(S.cook('c_ensopado').ok, false, 'not twice');
+  S.set({ fome: 20 }); S.eat('ensopado'); eq(story, ['cooked:ensopado', 'ate:ensopado'], 'story events cooked + ate');
+});
+test('survival: energy, sprint, exhaustion', async () => {
+  const A = await survDev('A'); const S = A.L.surv; const base = { x: 0, y: 200, z: 0, night: 0, grounded: true, moving: true };
+  S.set({ fome: 90, en: 100 }); run(A.L, 10, Object.assign({ sprinting: true }, base)); near(S.en, 10, 1.5, 'sprint 9/s');
+  run(A.L, 2, Object.assign({ sprinting: true }, base)); ok(S.exhausted() && !S.canSprint(), 'exhausted');
+  run(A.L, 3, base); ok(S.canSprint(), 'recovers'); S.set({ fome: 20 }); ok(S.enMax < 100, 'max energy capped by hunger');
+});
+test('survival: cold, shelter, fire, altitude, wet', async () => {
+  const A = await survDev('A'); const L = A.L, S = L.surv; colliders(L, house(10, 10, 200));
+  const out = { x: 0, y: 200, z: 0, night: 1, grounded: true };
+  S.set({ frio: 0 }); run(L, 200, out); near(S.cold, .55, .01, 'night outside -> .55');
+  const sh = L.shelterInfo(10, 200, 10); ok(sh.roof && sh.inside && sh.walls === 8, 'inside the little house: roof + 8 walls'); ok(!L.isSheltered(0, 200, 0), 'outside');
+  ok(!L.isSheltered(10, 203.2, 10), 'standing on the roof is not shelter');
+  run(L, 200, { x: 10, y: 200, z: 10, night: 1, grounded: true }); near(S.cold, .55 * .35, .01, 'roof cuts the night cold'); ok(S.inside && S.sheltered, 'inside + sheltered flags');
+  L.fires.add('f1', { x: 12, y: 200, z: 12, kind: 'lareira' }); run(L, 30, { x: 10, y: 200, z: 10, night: 1, grounded: true }); eq(S.cold, 0, 'fire warms'); ok(S.nearFire);
+  L.fires.remove('f1'); S.set({ frio: 0 });
+  run(L, 300, { x: 0, y: 900, z: 0, night: 1, grounded: true }); ok(S.cold > .9, 'summit at night: very cold ' + S.cold.toFixed(2));
+  ok(S.en < 60, 'cold saps energy to ~50% ' + S.en.toFixed(0));
+  S.set({ frio: 0, wet: 0 }); run(L, 100, { x: 0, y: 200, z: 0, night: 0, grounded: true, swimming: true, moving: true }); ok(S.wet === 1 && S.cold > .2, 'swimming by day: wet and chilly ' + S.cold.toFixed(2));
+  run(L, 120, { x: 0, y: 200, z: 0, night: 0, grounded: true }); ok(S.wet < .1 && S.cold < .1, 'dries in the sun');
+  // lit stations from b5 records register as fires automatically
+  L.save.set('b5', 'fog1', { t: 'fogueira', x: 50, y: 200, z: 50, lit: true }); ok(L.nearFire(52, 200, 50), 'lit campfire from b5'); ok(!L.nearFire(58, 200, 50));
+  L.save.set('b5', 'fog1', { t: 'fogueira', x: 50, y: 200, z: 50, lit: false }); ok(!L.nearFire(52, 200, 50), 'put out');
+  L.save.set('b5', 'f2', { t: 'forno', x: 60, y: 200, z: 60, lit: true }); ok(L.fires.near(62, 200, 60).kind === 'forno');
+});
+test('survival: sleeping alone skips to dawn, dream hook, home', async () => {
+  const srv = new FakeServer(); const A = await survDev('A', { server: srv }); const L = A.L, S = L.surv;
+  const story = []; L.story = { event: (n, d) => story.push(n) }; const ev = []; S.on('slept', () => ev.push('slept')); S.on('woke', e => ev.push('woke:' + e.skipped));
+  L.clock.setHours(14); let r = S.sleep({ x: 5, y: 200, z: 5 }); ok(r.nap, 'daytime: just a nap'); eq(L.save.player.home, [5, 200, 5], 'home set');
+  L.clock.setHours(23); S.set({ fome: 60, en: 10, frio: .5 }); S.sleep({ x: 5, y: 200, z: 5 }); ok(S.sleeping && S.busy(), 'sleeping');
+  for (let i = 0; i < 100; i++) { S.tick(.1, { x: 5, y: 200, z: 5, grounded: true }); await advance(100); }
+  near(L.clock.hours(), 6.1, .2, 'dawn'); eq(ev, ['slept', 'woke:true']); eq(story, ['slept', 'woke'], 'story hooks'); ok(!S.sleeping);
+  ok(S.en > 90 && S.cold < .05 && S.fome < 60, 'rested, warm, a bit hungry ' + [S.en, S.cold, S.fome].map(v => v.toFixed(2)));
+  await advance(2000); near(srv.rows.get('teste|w5|clock').d.off, L.clock.off, 1, 'clock written');
+});
+test('survival: two players, the night is skipped only when both sleep', async () => {
+  const srv = new FakeServer(); const A = await survDev('A', { server: srv }), B = await survDev('B', { server: srv });
+  A.L.clock.setHours(22); B.L.clock.debugOffset = A.L.clock.debugOffset; await advance(3000);
+  const waits = []; A.L.surv.on('sleep', e => { if (e.phase === 'wait') waits.push(e.waiting.join(',')); });
+  A.L.surv.sleep({ x: 0, y: 200, z: 0 });
+  const both = async (s) => { for (let i = 0; i < s * 10; i++) { A.L.surv.tick(.1, { x: 0, y: 200, z: 0, grounded: true }); B.L.surv.tick(.1, { x: 3, y: 200, z: 0, grounded: true }); await advance(100); } };
+  await both(8); ok(A.L.clock.isNight(), 'still night: B is awake'); eq(waits[waits.length - 1], 'B', 'A waits for B');
+  B.L.surv.sleep({ x: 3, y: 200, z: 0 }); await both(10);
+  near(A.L.clock.hours(), 6.1, .25, 'A dawn'); near(B.L.clock.hours(), A.L.clock.hours(), .02, 'B dawn too'); ok(!A.L.surv.sleeping && !B.L.surv.sleeping, 'both woke');
+});
+test('survival: falling into the cloud sea and leaving the world -> soft respawn', async () => {
+  const A = await survDev('A'); const L = A.L, S = L.surv; L.P = { x: 0, y: 200, z: 0, vx: 0, vy: -30, vz: 0 }; const evs = []; S.on('respawn', e => evs.push(e.phase + (e.text ? ':' + e.text : '')));
+  let gz = 200; L.ground = (x, z) => x > 100 ? 10 : gz;  // a cliff at x = 100 with the cloud sea below
+  for (let i = 0; i < 50; i++) S.tick(.1, { x: 90, y: 200, z: 0, grounded: true, moving: true });
+  let y = 200; for (let i = 0; i < 40 && !S.respawning; i++) { y -= 5; S.tick(.1, { x: 105, y, z: 0, grounded: false }); }
+  ok(S.respawning, 'respawn started below the cloud surface'); ok(evs[0] === 'start:As nuvens te trouxeram de volta…');
+  for (let i = 0; i < 30; i++) S.tick(.1, { x: 105, y, z: 0, grounded: false });
+  eq([L.P.x, L.P.z], [90, 0], 'back on the last safe ground'); ok(evs.includes('moved') && evs.includes('end')); ok(!S.respawning);
+  for (let i = 0; i < 5; i++) S.tick(.1, { x: 7800, y: 200, z: 0, grounded: true }); ok(S.respawning, 'out of the world'); ok(evs.some(e => /vento/.test(e)));
+  for (let i = 0; i < 30; i++) S.tick(.1, { x: 0, y: 200, z: 0, grounded: true });
+  // walking down into a lowland valley below the cloud layer is fine (ground under the feet)
+  evs.length = 0; L.ground = () => 40; for (let i = 0; i < 30; i++) S.tick(.1, { x: 0, y: 40, z: 0, grounded: true, moving: true }); ok(!S.respawning, 'lowland walk ok');
+});
+test('survival: state persists through L.save (reload)', async () => {
+  const srv = new FakeServer(); const store = new Map(); const A = await survDev('A', { server: srv, storage: store }); const S = A.L.surv;
+  S.set({ fome: 42.4242, mana: 13, frio: .2 }); S.addBuff('energia', 120); run(A.L, 2.2, { x: 0, y: 200, z: 0, night: 0, grounded: true }); await advance(6000);
+  const st = srv.rows.get('teste|p5|a').d.st; near(st.fome, 42.4, .2); ok(st.buffs.energia > 0, 'buff saved'); kill(A);
+  const N = await survDev('A', { server: srv }); N.L.surv.tick(.01, { x: 0, y: 200, z: 0 }); near(N.L.surv.fome, 42.4, .2, 'restored on a new phone'); ok(N.L.surv.buff('energia') > 100, 'buff restored');
 });
 
 // ================================================================ runner

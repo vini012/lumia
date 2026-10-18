@@ -32,7 +32,7 @@ class FakeServer {
     this.latency = o.latency == null ? 30 : o.latency; this.skew = o.skew || 0; this.clients = new Set(); this.log = []; this.hasRpc = o.hasRpc !== false;
   }
   key(r) { return r.w + '|' + r.c + '|' + r.id; }
-  rowT(r) { return r && r.d && typeof r.d.t === 'number' ? r.d.t : (r && r.at ? Date.parse(r.at) : 0); }
+  rowT(r) { return r && r.d && typeof r.d.ts === 'number' ? r.d.ts : (r && r.at ? Date.parse(r.at) : 0); }
   upsert(rows, who) {
     for (const r of rows) {
       if (this.allowed && !this.allowed.has(r.c)) return { error: { code: '23514', message: 'new row for relation "lumiar_mundo" violates check constraint "lumiar_mundo_c_check"' } };

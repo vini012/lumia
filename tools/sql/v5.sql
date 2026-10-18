@@ -2,7 +2,7 @@
 -- What it does:
 --   1. allows the v5 collections p5 m5 b5 h5 t5 f5 k5 w5 d5 in the collections check (old names are kept);
 --   2. raises the row size check on d to 32000 bytes;
---   3. adds a newer-wins guard for the v5 collections: an update carrying an older record time (d->>'t', or the at
+--   3. adds a newer-wins guard for the v5 collections: an update carrying an older record time (d->>'ts', or the at
 --      column for deletions) than the stored row is ignored, so an old offline snapshot never overwrites newer data;
 --   4. adds public.lumiar_now() (server clock for the game, read-only) and an index used for catch-up reads.
 -- v4 rows and collections (builds4, cut4, ...) are not touched and keep their old behaviour.
@@ -61,7 +61,7 @@ end $$;
 create or replace function public.lumiar_row_ms(d jsonb, at_text text) returns double precision
 language sql stable as $$
   select coalesce(
-    case when jsonb_typeof(d -> 't') = 'number' then (d ->> 't')::double precision end,
+    case when jsonb_typeof(d -> 'ts') = 'number' then (d ->> 'ts')::double precision end,
     case when at_text is not null and at_text <> '' then extract(epoch from at_text::timestamptz) * 1000 end,
     0)
 $$;

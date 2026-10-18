@@ -4,7 +4,7 @@
    closed or the browser data of one device is cleared (progress lives on the server under world + player name).
    Backends, picked at init: Supabase (Vercel build: window.LUMIAR_SB + window.supabase), the artifact runtime
    (window.claude.use('db' | 'room')), or this device only (localStorage, other tabs see changes).
-   Rules: optimistic local apply, writes coalesced per (c,id) and debounced, newer-wins by the record time `t`
+   Rules: optimistic local apply, writes coalesced per (c,id) and debounced, newer-wins by the record time `ts`
    (ms, server-corrected) so an older snapshot never overwrites a newer row, monotonic merge of progress fields when
    the same player played on two devices, flush on page hide with fetch keepalive, retry with backoff when offline.
    Server side: tools/sql/v5.sql (collections list, 32 KB rows, newer-wins trigger, lumiar_now()). */
@@ -48,7 +48,7 @@
     let n = s.length; for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); if (c > 0x7f) n += c > 0x7ff ? 2 : 1; } return n;
   }
   function rowTime(r) { // ms: the record's own t, else the row's at
-    if (!r) return 0; const d = r.d; if (d && typeof d.t === 'number') return d.t;
+    if (!r) return 0; const d = r.d; if (d && typeof d.ts === 'number') return d.ts;
     const a = r.at ? Date.parse(r.at) : NaN; return a === a ? a : 0;
   }
   function sameJSON(a, b) { return a === b || JSON.stringify(a) === JSON.stringify(b); }
@@ -76,17 +76,17 @@
   // merge two versions of the same player: the newer one (by t) wins for everything except MONO fields, which are
   // merged so story progress / spells / notes / tools reached on either device are never lost.
   function mergePlayer(a, b) {
-    const newer = (b.t || 0) >= (a.t || 0) ? b : a, older = newer === a ? b : a;
+    const newer = (b.ts || 0) >= (a.ts || 0) ? b : a, older = newer === a ? b : a;
     const out = clone(newer);
     for (const k of MONO) if (k in a || k in b) out[k] = mergeMono(older[k], newer[k], true);
-    out.t = Math.max(a.t || 0, b.t || 0);
+    out.ts = Math.max(a.ts || 0, b.ts || 0);
     return out;
   }
   // decide the player record at load: `loc` = {d, base, fresh} from this device's mirror, `srv` = server record or null.
   // base = the server t this local copy was derived from; fresh = created here from defaults, never seen the server.
   // returns {d, write} (write = the result must be sent to the server)
   function resolvePlayer(loc, srv) {
-    const ld = loc && loc.d, lt = ld ? (ld.t || 0) : 0, base = loc ? (loc.base || 0) : 0, st = srv ? (srv.t || 0) : 0;
+    const ld = loc && loc.d, lt = ld ? (ld.ts || 0) : 0, base = loc ? (loc.base || 0) : 0, st = srv ? (srv.ts || 0) : 0;
     if (!ld && !srv) return { d: null, write: false, how: 'none' };
     if (!ld) return { d: clone(srv), write: false, how: 'server' };
     if (!srv) return { d: clone(ld), write: lt > 0, how: 'local' };
@@ -94,10 +94,10 @@
     // the server changed since this device last synced
     if (loc.fresh) { // a brand-new device that played offline: the existing save wins, progress is merged in
       const d = clone(srv); for (const k of MONO) if (k in ld || k in srv) d[k] = mergeMono(srv[k], ld[k], false);
-      const changed = !sameJSON(d, srv); if (changed) d.t = st + 1; return { d, write: changed, how: 'fresh-merge' };
+      const changed = !sameJSON(d, srv); if (changed) d.ts = st + 1; return { d, write: changed, how: 'fresh-merge' };
     }
     if (lt <= base) return { d: clone(srv), write: false, how: 'server-newer' };
-    const d = mergePlayer(ld, srv); const write = !sameJSON(d, srv); if (write) d.t = Math.max(d.t, st) + 1;
+    const d = mergePlayer(ld, srv); const write = !sameJSON(d, srv); if (write) d.ts = Math.max(d.ts, st) + 1;
     return { d, write, how: 'conflict-merge' };
   }
 
@@ -217,7 +217,7 @@
   function newPlayer(name, look, defaults) {
     const p = {
       v: 5, name, look: look || {}, inv: {}, tools: {}, sp: [], notes: {}, dreams: [], th: [], tasks: {}, flags: {},
-      st: { fome: 80, en: 100, mana: 100, frio: 0, wet: 0, buffs: {} }, pos: null, home: null, stats: {}, set: {}, t: 0, dev: S.dev,
+      st: { fome: 80, en: 100, mana: 100, frio: 0, wet: 0, buffs: {} }, pos: null, home: null, stats: {}, set: {}, ts: 0, dev: S.dev,
     };
     if (defaults) for (const k in defaults) p[k] = clone(defaults[k]);
     return p;
@@ -240,11 +240,11 @@
 
   // ================================================================ local apply
   function getRec(c, id) { return S.data[c].get(id); }
-  function curT(c, id) { const r = S.data[c].get(id); return r ? (r.t || 0) : (S.tomb.get(pk(c, id)) || 0); }
+  function curT(c, id) { const r = S.data[c].get(id); return r ? (r.ts || 0) : (S.tomb.get(pk(c, id)) || 0); }
   function applyLocal(c, id, d, origin) { // returns true when something changed
     const m = S.data[c], old = m.get(id);
     if (d == null) { if (!old) return false; m.delete(id); } else m.set(id, d);
-    if (d == null) S.tomb.set(pk(c, id), Math.max(S.tomb.get(pk(c, id)) || 0, (old && old.t) || 0)); else S.tomb.delete(pk(c, id));
+    if (d == null) S.tomb.set(pk(c, id), Math.max(S.tomb.get(pk(c, id)) || 0, (old && old.ts) || 0)); else S.tomb.delete(pk(c, id));
     if (!(S.backend === 'local' && origin === 'remote')) { S.mirrorDirty.add(c); scheduleMirror(); } // local mode: the mirror is the store
     if (S.ready) emit(c, id, d, old, origin);
     return true;
@@ -268,7 +268,7 @@
     if (c === 'p5' && id === S.key) { Object.assign(S.player, d); dirty(); return S.player; }
     id = String(id); const now = clock.now();
     const prevT = curT(c, id), t = Math.max(now, prevT + 1);
-    const rec = d == null ? null : Object.assign({}, d, { t });
+    const rec = d == null ? null : Object.assign({}, d, { ts: t }); // ts: record time (t stays free: build piece type)
     if (rec && bytes(rec) > CFG.maxRow) { warn('row too big, not saved', c, id, bytes(rec)); emit('status', Object.assign(statusInfo(), { tooBig: c + '/' + id })); return null; }
     applyLocal(c, id, rec, 'local');
     if (rec == null) S.tomb.set(pk(c, id), t);
@@ -282,7 +282,7 @@
   }
   function dirty() {
     if (!S.player) return; const now = clock.now();
-    S.player.t = Math.max(now, (S.player.t || 0) + 1); S.player.dev = S.dev;
+    S.player.ts = Math.max(now, (S.player.ts || 0) + 1); S.player.dev = S.dev;
     if (!S.playerDirty) { S.playerDirty = true; bumpSaving(); }
     schedule('p5'); mirrorPlayerSoon();
   }
@@ -336,12 +336,12 @@
         for (const k of ['stats', 'th']) { if (b <= CFG.maxRow) break; if (Array.isArray(d[k])) d[k] = d[k].slice(-50); else if (k === 'stats') d[k] = {}; b = bytes(d); }
         if (b > CFG.maxRow) warn('player record is', b, 'bytes');
       }
-      pend.set(pk('p5', S.key), { c: 'p5', id: S.key, d, t: d.t, chk: false, bad: 0, own: true });
+      pend.set(pk('p5', S.key), { c: 'p5', id: S.key, d, t: d.ts, chk: false, bad: 0, own: true });
       mirrorPlayer();
     }
     if (EX.dirty && S.world) {
-      EX.dirty = false; const d = exploredEncode(); d.t = clock.now();
-      pend.set(pk('m5', S.key), { c: 'm5', id: S.key, d, t: d.t, chk: false, bad: 0, own: true });
+      EX.dirty = false; const d = exploredEncode(); d.ts = clock.now();
+      pend.set(pk('m5', S.key), { c: 'm5', id: S.key, d, t: d.ts, chk: false, bad: 0, own: true });
       lsSet(PFX() + 'x:' + S.key, d);
     }
   }
@@ -438,13 +438,13 @@
   // ================================================================ own player record from another device
   function ownPlayerRemote(d, t) {
     if (!d || !S.player) return false;
-    if (d.dev === S.dev && (d.t || 0) <= (S.player.t || 0)) { S.pbase = Math.max(S.pbase, d.t || 0); return false; } // echo
-    if ((d.t || 0) <= (S.player.t || 0) && (d.t || 0) <= S.pbase) return false;
+    if (d.dev === S.dev && (d.ts || 0) <= (S.player.ts || 0)) { S.pbase = Math.max(S.pbase, d.ts || 0); return false; } // echo
+    if ((d.ts || 0) <= (S.player.ts || 0) && (d.ts || 0) <= S.pbase) return false;
     const before = JSON.stringify(S.player);
     let res;
-    if ((d.t || 0) > (S.player.t || 0)) res = mergePlayer(S.player, d); else res = mergePlayer(d, S.player);
+    if ((d.ts || 0) > (S.player.ts || 0)) res = mergePlayer(S.player, d); else res = mergePlayer(d, S.player);
     if (activeRecently() && S.player.pos) res.pos = S.player.pos; // two devices at once: keep this device's position
-    S.pbase = Math.max(S.pbase, d.t || 0);
+    S.pbase = Math.max(S.pbase, d.ts || 0);
     replacePlayer(res);
     if (JSON.stringify(S.player) === before) return false;
     if (!sameJSON(res, d)) dirty(); // we hold progress the other device does not have yet
@@ -614,8 +614,8 @@
     B.subscribe = (onRow, onState) => {
       const ch = SB.channel('lm-db5-' + S.world).on('postgres_changes', { event: '*', schema: 'public', table: TABLE, filter: 'w=eq.' + S.world }, p => {
         const r = p && p.new; if (!r || !r.c) return;
-        if (p.commit_timestamp && r.d && typeof r.d.t === 'number') { // our own echo -> server clock sample
-          const k = pk(r.c, r.id) + '@' + r.d.t, ts = sentAt.get(k);
+        if (p.commit_timestamp && r.d && typeof r.d.ts === 'number') { // our own echo -> server clock sample
+          const k = pk(r.c, r.id) + '@' + r.d.ts, ts = sentAt.get(k);
           if (ts) { sentAt.delete(k); const sv = Date.parse(p.commit_timestamp); if (sv === sv) { skewS.push(sv - ts); if (skewS.length > 7) skewS.shift(); B.skewSample(); } }
         }
         onRow(r);
@@ -638,15 +638,15 @@
   // ================================================================ backend: artifact runtime (db + room)
   function dbBackend(db, roomNs) {
     const B = { kind: 'db' }; const path = c => 'worlds5/' + S.world + '/' + c;
-    const asRow = (c, s) => { const d = s.data(); if (!d) return null; if (d._del) return { c, id: s.id, d: null, at: new Date(d.t || 0).toISOString() }; return { c, id: s.id, d, at: new Date(d.t || 0).toISOString() }; };
+    const asRow = (c, s) => { const d = s.data(); if (!d) return null; if (d._del) return { c, id: s.id, d: null, at: new Date(d.ts || 0).toISOString() }; return { c, id: s.id, d, at: new Date(d.ts || 0).toISOString() }; };
     B.loadCol = async (c, o) => {
       o = o || {}; if (o.id != null) { const s = await db.doc(path(c) + '/' + o.id).get(); const r = s.exists ? asRow(c, s) : null; return r && r.d ? [r] : []; }
-      let q = db.collection(path(c)); if (o.since) q = q.where('t', '>', o.since);
+      let q = db.collection(path(c)); if (o.since) q = q.where('ts', '>', o.since);
       const snap = await q.get(); return snap.docs.map(s => asRow(c, s)).filter(r => r && (r.d || o.tomb));
     };
     B.fetchIds = async (c, ids) => { const out = []; for (const id of ids) { try { const s = await db.doc(path(c) + '/' + id).get(); if (s.exists) { const r = asRow(c, s); if (r) out.push(r); } } catch (e) { throw e; } } return out; };
     B.put = async items => {
-      for (const it of items) { await db.doc(path(it.c) + '/' + it.id).set(it.d ? it.d : { t: it.t, _del: 1 }); }
+      for (const it of items) { await db.doc(path(it.c) + '/' + it.id).set(it.d ? it.d : { ts: it.t, _del: 1 }); }
     };
     B.subscribe = (onRow, onState) => {
       const uns = []; let first = {};
@@ -666,7 +666,7 @@
   // ================================================================ backend: this device only
   function localBackend() {
     const B = { kind: 'local' };
-    B.loadCol = async c => { const o = lsGet(PFX() + 'c:' + c, {}); return Object.keys(o).filter(id => o[id]).map(id => ({ c, id, d: o[id], at: new Date(o[id].t || 0).toISOString() })); };
+    B.loadCol = async c => { const o = lsGet(PFX() + 'c:' + c, {}); return Object.keys(o).filter(id => o[id]).map(id => ({ c, id, d: o[id], at: new Date(o[id].ts || 0).toISOString() })); };
     B.fetchIds = async (c, ids) => { const o = lsGet(PFX() + 'c:' + c, {}); return ids.filter(id => o[id]).map(id => ({ c, id, d: o[id], at: '' })); };
     B.put = async items => {
       const by = {}; for (const it of items) (by[it.c] || (by[it.c] = [])).push(it);
@@ -681,7 +681,7 @@
         if (!e.key || e.key.indexOf(PFX() + 'c:') !== 0) return; const c = e.key.slice((PFX() + 'c:').length); if (!COLSET.has(c)) return;
         let o = {}; try { o = JSON.parse(e.newValue || '{}') || {}; } catch (er) { return; }
         for (const id in o) if (o[id]) onRow({ c, id, d: o[id], at: '' });
-        for (const [id, d] of S.data[c]) if (!o[id] && !(c === 'p5' && id === S.key) && !pend.has(pk(c, id))) onRow({ c, id, d: null, at: new Date((d && d.t || 0) + 1).toISOString() });
+        for (const [id, d] of S.data[c]) if (!o[id] && !(c === 'p5' && id === S.key) && !pend.has(pk(c, id))) onRow({ c, id, d: null, at: new Date((d && d.ts || 0) + 1).toISOString() });
       };
       if (G.addEventListener) G.addEventListener('storage', fn); onState('SUBSCRIBED');
       return () => { if (G.removeEventListener) G.removeEventListener('storage', fn); };
@@ -747,8 +747,8 @@
     for (const r of rows) { if (!COLSET.has(r.c) || r.d == null) continue; if (r.c === 'm5') { if (r.id === S.key) { srvM = r.d; mergeExplored(r.d, !S.ready); } continue; } if (r.c === 'p5' && r.id === S.key) { srvP = r.d; continue; } by[r.c].set(r.id, r.d); }
     for (const c of COLS) {
       if (c === 'm5') continue; const cur = S.data[c], nxt = by[c];
-      if (CFG.window[c]) for (const [id, d] of cur) if (!nxt.has(id) && (d.t || 0) < clock.now() - CFG.window[c]) nxt.set(id, d); // outside the window: keep
-      for (const it of pend.values()) if (it.c === c) { const sd = nxt.get(it.id); if (!sd || (sd.t || 0) <= it.t) { if (it.d == null) nxt.delete(it.id); else nxt.set(it.id, it.d); } }
+      if (CFG.window[c]) for (const [id, d] of cur) if (!nxt.has(id) && (d.ts || 0) < clock.now() - CFG.window[c]) nxt.set(id, d); // outside the window: keep
+      for (const it of pend.values()) if (it.c === c) { const sd = nxt.get(it.id); if (!sd || (sd.ts || 0) <= it.t) { if (it.d == null) nxt.delete(it.id); else nxt.set(it.id, it.d); } }
       if (c === 'p5' && S.player) nxt.set(S.key, S.player);
       // swap with change events (only after ready: before that the game reads all() itself)
       const old = new Map(cur); cur.clear(); for (const [id, d] of nxt) cur.set(id, d);
@@ -761,7 +761,7 @@
     S.pfresh = false;
     if (res.d) {
       if (!S.player) S.player = fixPlayer(res.d); else if (!sameJSON(S.player, res.d)) { replacePlayer(res.d); if (S.ready) emit('player', S.player, 'load'); }
-      S.pbase = Math.max(S.pbase, srvP ? (srvP.t || 0) : 0);
+      S.pbase = Math.max(S.pbase, srvP ? (srvP.ts || 0) : 0);
       if (res.write) { S.playerDirty = true; schedule('p5'); }
     }
     if (S.player) S.data.p5.set(S.key, S.player);
@@ -808,9 +808,9 @@
     const ck = S.data.w5.get('clock'); if (ck && typeof ck.off === 'number') clock.off = ck.off;
     wire();
     S.ready = true;
-    if (!ck && opt.startHour != null && loaded) { // a brand-new world starts in the morning (an old t: any real clock row wins)
+    if (!ck && opt.startHour != null && loaded) { // a brand-new world starts in the morning (an old ts: any real clock row wins)
       const g = clock.gameMs(); const target = Math.floor(g / DAY_MS) * DAY_MS + opt.startHour / 24 * DAY_MS; clock.off += Math.round(target - g);
-      const rec = { off: clock.off, by: S.key, t: 1 }; S.data.w5.set('clock', rec); pend.set(pk('w5', 'clock'), { c: 'w5', id: 'clock', d: rec, t: 1, chk: true, bad: 0 }); schedule('w5');
+      const rec = { off: clock.off, by: S.key, ts: 1 }; S.data.w5.set('clock', rec); pend.set(pk('w5', 'clock'), { c: 'w5', id: 'clock', d: rec, t: 1, chk: true, bad: 0 }); schedule('w5');
     }
     // 3) presence
     try { const rm = await S.B.room(); if (rm) attachRoom(rm); } catch (e) { warn('room', e); }
