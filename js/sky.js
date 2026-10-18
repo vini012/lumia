@@ -364,7 +364,7 @@
     setCoverage(c) { seaU.uCov.value = c; },
     setDensityMap(tex, x0, z0, size) { seaU.tDens.value = tex; seaU.uDensXf.value.set(x0, z0, 1 / size, tex ? 1 : 0); },
     // bake a density texture from a height function: thick where land meets the cloud layer, holes far from land
-    densityFromHeight(hfn, x0, z0, size, res) {
+    densityFromHeight(hfn, x0, z0, size, res, mod) {   // mod(x, z, v) -> v: optional art-directed override
       res = res || 256; const N = res, cy = L.CLOUD_Y; const land = new Float32Array(N * N);
       for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const x = x0 + (i + .5) / N * size, z = z0 + (j + .5) / N * size; const h = hfn(x, z); land[j * N + i] = h > cy - 30 ? 1 : 0; }
       // distance to land (two-pass chamfer), in cells
@@ -372,7 +372,7 @@
       for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const k = j * N + i; if (i > 0) D[k] = Math.min(D[k], D[k - 1] + 1); if (j > 0) D[k] = Math.min(D[k], D[k - N] + 1); if (i > 0 && j > 0) D[k] = Math.min(D[k], D[k - N - 1] + 1.414); if (i < N - 1 && j > 0) D[k] = Math.min(D[k], D[k - N + 1] + 1.414); }
       for (let j = N - 1; j >= 0; j--) for (let i = N - 1; i >= 0; i--) { const k = j * N + i; if (i < N - 1) D[k] = Math.min(D[k], D[k + 1] + 1); if (j < N - 1) D[k] = Math.min(D[k], D[k + N] + 1); if (i < N - 1 && j < N - 1) D[k] = Math.min(D[k], D[k + N + 1] + 1.414); if (i > 0 && j < N - 1) D[k] = Math.min(D[k], D[k + N - 1] + 1.414); }
       const cell = size / N; const data = new Uint8Array(N * N * 4);
-      for (let k = 0; k < N * N; k++) { const dm = D[k] * cell; const v = land[k] ? .85 : clamp(.95 - sstep(60, 1500, dm) * .75, 0, 1); data[k * 4] = v * 255; data[k * 4 + 1] = data[k * 4 + 2] = 0; data[k * 4 + 3] = 255; }
+      for (let k = 0; k < N * N; k++) { const dm = D[k] * cell; let v = land[k] ? .85 : clamp(.95 - sstep(60, 1500, dm) * .75, 0, 1); if (mod) v = clamp(mod(x0 + ((k % N) + .5) / N * size, z0 + (Math.floor(k / N) + .5) / N * size, v, dm), 0, 1); data[k * 4] = v * 255; data[k * 4 + 1] = data[k * 4 + 2] = 0; data[k * 4 + 3] = 255; }
       const t = new THREE.DataTexture(data, N, N, THREE.RGBAFormat); t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearFilter; t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.needsUpdate = true;
       this.setDensityMap(t, x0, z0, size); this._dens = { data, N, x0, z0, size, hfn };
       densFn = (x, z) => { const u = (x - x0) / size * N - .5, v = (z - z0) / size * N - .5; const i = clamp(Math.round(u), 0, N - 1), j = clamp(Math.round(v), 0, N - 1); return data[(j * N + i) * 4] / 255; };

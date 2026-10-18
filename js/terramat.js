@@ -244,6 +244,8 @@ vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack) {
           c *= lit * mix(.25, 1., uDay);
           float a = edge * mix(.55, .92, max(streak, vS * .7)) * (.75 + s2 * .35);
           gl_FragColor = vec4(c, clamp(a, 0., 1.));
+          #include <tonemapping_fragment>
+          #include <encodings_fragment>
           #include <fog_fragment>
         }`
     });
@@ -253,13 +255,14 @@ vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack) {
   // white mist where a waterfall hits the ground or the cloud sea (a few low cloud puffs)
   L.addFallMist = function (x, y, z, w) { if (!L.clouds) return null; return L.clouds.addClump(x, y - w * .15, z, w * 1.6, w * .7, Math.floor(x * 13 + z * 7), 3); };
 
-  // ================================================================ time of day hook
+  // ================================================================ time of day hook (runs every frame: no allocation)
+  const WC = { sh: C(0x63b2d4), shN: C(0x1a3a6a), dp: C(0x2a7fc4), dpN: C(0x0b1d44) };
   L.onTimeOfDay(T => {
     WU.uSky.value.copy(T.hor).lerp(T.low, .3); WU.uSkyTop.value.copy(T.mid);
     WU.uSun.value.copy(T.sunCol).multiplyScalar(T.day + T.dusk * .8 + T.night * .25); WU.uSunDir.value.copy(T.lightDir);
     WU.uDay.value = (.14 + T.day * .86 + T.dusk * .55) * (1 - T.rain * .35);
-    WU.uShallow.value.copy(C(0x63b2d4)).multiplyScalar(.2 + .8 * (T.day + T.dusk * .7)).lerp(C(0x1a3a6a), T.night * .5);
-    WU.uDeep.value.copy(C(0x2a7fc4)).multiplyScalar(.2 + .8 * (T.day + T.dusk * .7)).lerp(C(0x0b1d44), T.night * .6);
+    WU.uShallow.value.copy(WC.sh).multiplyScalar(.2 + .8 * (T.day + T.dusk * .7)).lerp(WC.shN, T.night * .5);
+    WU.uDeep.value.copy(WC.dp).multiplyScalar(.2 + .8 * (T.day + T.dusk * .7)).lerp(WC.dpN, T.night * .6);
     WU.uFoam.value.copy(T.cLit);
   });
 })(window.L);

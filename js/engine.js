@@ -60,13 +60,14 @@ window.L = window.L || {};
   // Typed arrays survive THREE.UniformsUtils.clone by reference, so every program that receives these uniform
   // objects (built-in materials via ShaderLib, ShaderMaterials via UniformsLib.fog) reads the same live values.
   const v4 = () => new Float32Array(4);
-  const HZ = { A: v4(), B: v4(), C: v4(), D: v4(), E: v4(), M: v4(), N: v4() }; L.HZ = HZ;
+  const HZ = { A: v4(), B: v4(), C: v4(), D: v4(), E: v4(), M: v4(), N: v4(), P: v4() }; L.HZ = HZ;
   // A: veil dark rgb, veil strength | B: veil light rgb, far-haze ratio | C: sun-side haze rgb, sun power
   // D: sun dir xyz, height scale (m) | E: base altitude, floor density, far fade start, far fade end
   // M: mist centre x, z, radius (0 = off), top | N: mist colour rgb, visibility length (m)
+  // P: camera world position (three r128 only uploads cameraPosition to Standard/Phong/Toon/Shader materials)
   HZ.A.set([.025, .115, .31, .92]); HZ.B.set([.25, .6, .84, .38]); HZ.C.set([.78, .85, .9, 6]); HZ.D.set([0, 1, 0, 520]);
   HZ.E.set([60, .16, 9000, 11800]); HZ.M.set([0, 0, 0, 900]); HZ.N.set([.92, .94, .97, 60]);
-  const hzUniforms = () => ({ hzA: { value: HZ.A }, hzB: { value: HZ.B }, hzC: { value: HZ.C }, hzD: { value: HZ.D }, hzE: { value: HZ.E }, hzM: { value: HZ.M }, hzN: { value: HZ.N } });
+  const hzUniforms = () => ({ hzA: { value: HZ.A }, hzB: { value: HZ.B }, hzC: { value: HZ.C }, hzD: { value: HZ.D }, hzE: { value: HZ.E }, hzM: { value: HZ.M }, hzN: { value: HZ.N }, hzP: { value: HZ.P } });
   L.hazeUniforms = hzUniforms;
   Object.assign(THREE.UniformsLib.fog, hzUniforms());
   for (const k in THREE.ShaderLib) { const S = THREE.ShaderLib[k]; if (S.uniforms && S.uniforms.fogColor) Object.assign(S.uniforms, hzUniforms()); }
@@ -81,7 +82,7 @@ window.L = window.L || {};
   THREE.ShaderChunk.fog_vertex = '#ifdef USE_FOG\n vFogW = vec3(dot(viewMatrix[0].xyz, mvPosition.xyz), dot(viewMatrix[1].xyz, mvPosition.xyz), dot(viewMatrix[2].xyz, mvPosition.xyz));\n#endif\n';
   THREE.ShaderChunk.fog_pars_fragment = `#ifdef USE_FOG
  uniform vec3 fogColor; varying vec3 vFogW;
- uniform vec4 hzA, hzB, hzC, hzD, hzE, hzM, hzN;
+ uniform vec4 hzA, hzB, hzC, hzD, hzE, hzM, hzN, hzP;
  #ifdef FOG_EXP2
   uniform float fogDensity;
  #else
@@ -108,7 +109,7 @@ window.L = window.L || {};
   #ifdef FOG_EXP2
     float hH = hzD.w; float fe = vFogW.y / hH;
     float fInt = abs(fe) > 1e-3 ? (1. - exp(-fe)) / fe : 1. - fe * .5;
-    float fPath = fogDist * (exp(-max(cameraPosition.y - hzE.x, -40.) / hH) * fInt + hzE.y);
+    float fPath = fogDist * (exp(-max(hzP.y - hzE.x, -40.) / hH) * fInt + hzE.y);
     float tA = fogDensity * .55 * fPath;
     float fA = (1. - exp(-tA)) * hzA.w;
     float fogFactor = max(1. - exp(-tA * hzB.w), smoothstep(hzE.z, hzE.w, fogDist));
@@ -120,7 +121,7 @@ window.L = window.L || {};
     float fogFactor = smoothstep(fogNear, fogFar, fogDist);
     fc = mix(fc, fogColor, fogFactor);
   #endif
-  float fMist = v5MistPath(cameraPosition, fogRd, fogDist);
+  float fMist = v5MistPath(hzP.xyz, fogRd, fogDist);
   fc = mix(fc, hzN.rgb, 1. - exp(-fMist / max(hzN.w, 1.)));
   ${outSRGB ? 'fc = pow(fc, vec3(1. / 2.2));' : ''}
   gl_FragColor.rgb = fc;
@@ -151,6 +152,8 @@ window.L = window.L || {};
 
   // ================================================================ scene, camera, lights
   const scene = new THREE.Scene(); L.scene = scene;
+  // keep the shared camera uniform in sync with whatever camera renders this scene (main view, bakes, probes)
+  scene.onBeforeRender = function (r, s, cam) { const e = cam.matrixWorld.elements; HZ.P[0] = e[12]; HZ.P[1] = e[13]; HZ.P[2] = e[14]; };
   scene.fog = new THREE.FogExp2(0x9cc6ec, 0.0006);
   scene.background = C(0x9cc6ec);
   const camera = new THREE.PerspectiveCamera(50, 1, .4, Q0.far); L.camera = camera;
@@ -556,8 +559,8 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
     const R = TOD.rain;
     mix3('zen', TOD.zen); mix3('mid', TOD.mid); mix3('hor', TOD.hor); mix3('low', TOD.low); mix3('cLit', TOD.cLit); mix3('cBody', TOD.cBody); mix3('cShade', TOD.cShade);
     if (R > 0) {
-      for (const c of [TOD.zen, TOD.mid]) c.lerp(_c.copy(GREY).multiplyScalar(.75 - TOD.night * .5), R * .7);
-      for (const c of [TOD.hor, TOD.low]) c.lerp(_c.copy(GREY).multiplyScalar(1 - TOD.night * .7), R * .7);
+      _c.copy(GREY).multiplyScalar(.75 - TOD.night * .5); TOD.zen.lerp(_c, R * .7); TOD.mid.lerp(_c, R * .7);
+      _c.copy(GREY).multiplyScalar(1 - TOD.night * .7); TOD.hor.lerp(_c, R * .7); TOD.low.lerp(_c, R * .7);
       TOD.cLit.lerp(_c.copy(GREY).multiplyScalar(1.05 - TOD.night * .65), R * .75); TOD.cBody.lerp(_c.copy(GREY).multiplyScalar(.8 - TOD.night * .5), R * .75); TOD.cShade.lerp(_c.copy(GREY).multiplyScalar(.55 - TOD.night * .35), R * .75);
     }
     // key light: the sun while it is up, then the moon
@@ -569,7 +572,7 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
     mix3('sky', hemi.color); mix3('gnd', hemi.groundColor); hemi.intensity = 1;
     hemi.color.multiplyScalar(mixN('skyI') * (1 + R * .25)); hemi.groundColor.multiplyScalar(mixN('gndI') * (1 - R * .3));
     if (R > 0) hemi.color.lerp(_c.copy(GREY).multiplyScalar(.62 - TOD.night * .4), R * .6);
-    _c.setRGB(0, 0, 0); for (const kk of ['day', 'dusk', 'night']) { const t = P3[kk].tint; _c.r += t.r * TOD[kk]; _c.g += t.g * TOD[kk]; _c.b += t.b * TOD[kk]; }
+    mix3('tint', _c);
     LOOK.shadowTint.value.copy(_c).lerp(_c2.setRGB(.85, .88, .95), R * .7);
     LOOK.rimCol.value.copy(TOD.sunCol).lerp(_c.setRGB(1, 1, 1), .4);
     LOOK.fillLift.value.setRGB(.012, .018, .035).multiplyScalar(TOD.night);

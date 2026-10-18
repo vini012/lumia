@@ -28,9 +28,9 @@
 
   const COMMON = `
 attribute vec4 iP;
-uniform float uTime; uniform vec3 uPlayer; uniform vec4 uWind; uniform vec4 uLod;
+uniform float uTime; uniform vec3 uPlayer; uniform vec4 uWind; uniform vec4 uLod; uniform vec4 hzP;
 float v5gLod(vec3 p, float rk, float R, out float cmp, out float camd) {
-  camd = distance(p, cameraPosition);
+  camd = distance(p, hzP.xyz);
   float f = clamp(uLod.x * uLod.x / max(camd * camd, 1.), 0., 1.) * smoothstep(R, R * .72, camd);
   cmp = clamp(inversesqrt(max(f, .02)), 1., 2.8);
   return clamp((f * 1.1 - rk) / .1, 0., 1.) * smoothstep(.3, 1.2, camd);
