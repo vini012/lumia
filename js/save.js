@@ -53,6 +53,7 @@
   }
   function sameJSON(a, b) { return a === b || JSON.stringify(a) === JSON.stringify(b); }
 
+  const RANK = { on: 1, done: 2 };
   // deep monotonic merge: numbers -> max, booleans -> or, arrays -> union (a's order first), objects -> per key;
   // strings and mixed types -> `pref` side (the newer record)
   function mergeMono(a, b, prefB) {
@@ -71,6 +72,7 @@
       for (const k in b) if (!(k in a)) out[k] = clone(b[k]); return out;
     }
     if (ta === 'number' && tb === 'boolean') return a || b; if (ta === 'boolean' && tb === 'number') return a || b;
+    if (ta === 'string' && tb === 'string' && RANK[a] && RANK[b]) return RANK[a] >= RANK[b] ? a : b; // task states move forward only
     return clone(prefB ? b : a);
   }
   // merge two versions of the same player: the newer one (by t) wins for everything except MONO fields, which are
@@ -216,15 +218,21 @@
 
   function newPlayer(name, look, defaults) {
     const p = {
-      v: 5, name, look: look || {}, inv: {}, tools: {}, sp: [], notes: {}, dreams: [], th: [], tasks: {}, flags: {},
+      v: 5, name, look: look || {}, inv: {}, tools: {}, sp: {}, notes: {}, dreams: {}, th: {}, tasks: {}, flags: {},
       st: { fome: 80, en: 100, mana: 100, frio: 0, wet: 0, buffs: {} }, pos: null, home: null, stats: {}, set: {}, ts: 0, dev: S.dev,
     };
     if (defaults) for (const k in defaults) p[k] = clone(defaults[k]);
     return p;
   }
+  // id maps of progress ({id: time}); an array of ids (older drafts) becomes a map, nothing is dropped
+  const MAPS = ['sp', 'notes', 'dreams', 'th', 'tasks', 'flags', 'inv', 'tools', 'stats'];
   function fixPlayer(p) { // tolerate partial / older records
     const d = newPlayer(p.name || S.name);
-    for (const k in d) if (p[k] === undefined) p[k] = d[k];
+    for (const k in d) if (p[k] === undefined || p[k] === null) p[k] = d[k];
+    for (const k of MAPS) {
+      const v = p[k]; if (Array.isArray(v)) { const o = {}; for (const id of v) if (typeof id === 'string' || typeof id === 'number') o[id] = 1; for (const id in v) if (!/^\d+$/.test(id)) o[id] = v[id]; p[k] = o; }
+      else if (typeof v !== 'object') p[k] = {};
+    }
     if (!p.st || typeof p.st !== 'object') p.st = d.st; for (const k in d.st) if (p.st[k] === undefined) p.st[k] = d.st[k];
     return p;
   }
@@ -332,8 +340,8 @@
     if (S.player && S.playerDirty) {
       S.playerDirty = false; const d = clone(S.player);
       let b = bytes(d);
-      if (b > CFG.maxRow) { // keep the essentials: trim the fields that grow without bound
-        for (const k of ['stats', 'th']) { if (b <= CFG.maxRow) break; if (Array.isArray(d[k])) d[k] = d[k].slice(-50); else if (k === 'stats') d[k] = {}; b = bytes(d); }
+      if (b > CFG.maxRow) { // keep the essentials: drop the statistics first (they only feed little summaries)
+        d.stats = {}; b = bytes(d);
         if (b > CFG.maxRow) warn('player record is', b, 'bytes');
       }
       pend.set(pk('p5', S.key), { c: 'p5', id: S.key, d, t: d.ts, chk: false, bad: 0, own: true });

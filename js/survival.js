@@ -55,7 +55,7 @@
     R('c_maca', 'fogueira', 'maca_assada', { maca: 2 }),
     R('c_cha', 'fogueira', 'cha_ervas', { ervas: 2 }),
     R('c_sopa_quente_f', 'fogueira', 'sopa_quente', { cenoura: 1, ervas: 2, cogumelo: 2 }, 'receita_sopa_quente'),
-    R('c_pao', 'forno', 'pao', { trigo: 3 }, 'receita_pao'),
+    R('c_pao', 'forno', 'pao', { trigo: 3 }),
     R('c_torta', 'forno', 'torta_frutas', { trigo: 2, frutinhas: 4 }),
     R('c_torta_m', 'forno', 'torta_frutas', { trigo: 2, morango: 3 }),
     R('c_sopa_abobora', 'caldeirao', 'sopa_abobora', { abobora: 1, ervas: 1 }),
@@ -68,11 +68,16 @@
   for (const k in L.FOOD) L.ITEMS5[k] = { n: L.FOOD[k].n, ic: L.FOOD[k].ic, food: 1 };
   const ING = { trigo: ['Trigo', '🌾'], abobora: ['Abóbora', '🎃'], ervas: ['Ervas', '🌿'], lotus: ['Lótus', '🪷'], flor_lua: ['Flor da lua', '🌙'] };
   for (const k in ING) if (!L.ITEMS5[k]) L.ITEMS5[k] = { n: ING[k][0], ic: ING[k][1] };
-  Object.assign(L.ITEMS5, { receita_pao: { n: 'Receita de pão', ic: '📜' }, receita_sopa_quente: { n: 'Receita de sopa quente', ic: '📜' }, receita_forno: { n: 'Receita do forno', ic: '📜' } });
+  Object.assign(L.ITEMS5, { receita_sopa_quente: { n: 'Receita de sopa quente', ic: '📜' }, receita_forno: { n: 'Receita do forno', ic: '📜' } });
+  // a recipe is known when it is in the bag or in flags (flags[id] or flags.rec[id]: how story.js keeps recipes)
+  L.knowsRecipe = function (id, inv, flags) {
+    const p = L.save && L.save.player; inv = inv || (p && p.inv) || {}; flags = flags || (p && p.flags) || {};
+    return (inv[id] || 0) > 0 || !!flags[id] || !!(flags.rec && flags.rec[id]);
+  };
   // a recipe can be made now? (ingredients in inv, recipe known)
   L.cookCheck = function (r, inv, flags) {
     inv = inv || (L.save && L.save.player ? L.save.player.inv : {}) || {}; flags = flags || (L.save && L.save.player ? L.save.player.flags : {}) || {};
-    if (r.rq && !(inv[r.rq] > 0) && !flags[r.rq]) return { ok: false, why: 'Receita desconhecida' };
+    if (r.rq && !L.knowsRecipe(r.rq, inv, flags)) return { ok: false, why: 'Receita desconhecida' };
     const miss = []; for (const k in r.cost) if ((inv[k] || 0) < r.cost[k]) miss.push((r.cost[k] - (inv[k] || 0)) + ' ' + ((L.ITEMS5[k] && L.ITEMS5[k].n) || k).toLowerCase());
     return miss.length ? { ok: false, why: 'Faltam ' + miss.join(', ') } : { ok: true };
   };

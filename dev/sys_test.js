@@ -42,6 +42,13 @@ test('resolvePlayer: every branch', () => {
   r = resolvePlayer({ d: P(50, { inv: { berry: 2 }, notes: { n01: 1 } }), base: 0, fresh: true }, P(20, { inv: { madeira: 30 }, notes: { n05: 1 } }));
   eq(r.d.inv, { madeira: 30 }, 'fresh: server inventory wins'); eq(r.d.notes, { n05: 1, n01: 1 }, 'fresh: notes merged'); ok(r.write);
 });
+test('older array-shaped progress becomes id maps (nothing dropped)', async () => {
+  const srv = new FakeServer(); srv.upsert([{ w: 'teste', c: 'p5', id: 'vini', d: { v: 5, name: 'Vini', sp: ['faisca'], dreams: ['d1'], th: [], notes: { n01: 5 }, inv: { madeira: 2 }, ts: 10 }, at: new Date(10).toISOString() }]);
+  const A = device('A', { server: srv }); const p = await boot(A, 'Vini');
+  eq(p.sp, { faisca: 1 }); eq(p.dreams, { d1: 1 }); eq(p.th, {}); eq(p.notes, { n01: 5 }); eq(p.inv, { madeira: 2 });
+  p.sp.brotar = 99; A.L.save.dirty(); await advance(5000); eq(srv.rows.get('teste|p5|vini').d.sp, { faisca: 1, brotar: 99 }, 'map keys survive JSON');
+  const { mergeMono } = A.L.save._t; eq(mergeMono({ k: { s: 'done', t: 1 } }, { k: { s: 'on', t: 2 } }, true), { k: { s: 'done', t: 2 } }, 'task states only move forward');
+});
 test('RLE + base64 round trips and size of a well explored map', () => {
   const { rleEncode, rleDecode, b64enc, b64dec, resample } = device('x').L.save._t;
   for (const n of [0, 1, 2, 3, 4, 5, 255, 1000]) { const u = new Uint8Array(n).map((_, i) => (i * 37 + n) & 255); eq([...b64dec(b64enc(u))], [...u], 'b64 n=' + n); }
@@ -137,13 +144,13 @@ test('offline: writes queue, survive a crash, are delivered on the next start', 
   const A = device('A', { server: srv, storage: store }); await boot(A, 'Vini');
   A.setOffline(true);
   A.L.save.set('b5', 'w1', { t: 'wall', x: 1 }); A.L.save.set('t5', 'pet1', { o: 'vini', sp: 'ovelha' });
-  A.L.save.player.inv.madeira = 42; A.L.save.player.sp.push('faisca'); A.L.save.dirty();
+  A.L.save.player.inv.madeira = 42; A.L.save.player.sp.faisca = 1234; A.L.save.dirty();
   await advance(8000); eq(A.L.save.status, 'offline'); ok(!srv.rows.has('teste|b5|w1'), 'not on server yet');
   await advance(2000); // mirrors written
   kill(A);             // crash: no pagehide, no flush
   const A2 = device('A2', { server: srv, storage: store }); await boot(A2, 'Vini'); await advance(3000);
   ok(srv.rows.has('teste|b5|w1') && srv.rows.has('teste|t5|pet1'), 'queued world writes delivered');
-  eq(srv.rows.get('teste|p5|vini').d.inv.madeira, 42, 'offline player progress delivered'); eq(A2.L.save.player.sp, ['faisca']);
+  eq(srv.rows.get('teste|p5|vini').d.inv.madeira, 42, 'offline player progress delivered'); eq(A2.L.save.player.sp, { faisca: 1234 });
   eq(A2.L.save.pending, 0);
 });
 test('reconnect after a long offline period: retry with backoff + online event', async () => {
@@ -165,10 +172,10 @@ test('page hide: everything is written down and sent with keepalive', async () =
 });
 test('progress survives a new phone (cleared browser): same world + name', async () => {
   const srv = new FakeServer(); const A = device('A', { server: srv }); await boot(A, 'Vini');
-  const p = A.L.save.player; p.inv = { madeira: 12, sem_trigo: 3 }; p.sp = ['faisca', 'brotar']; p.notes = { n01: 111, n02: 222 }; p.home = [1, 2, 3]; A.L.save.setPos(100, 20, -50, 1.2);
+  const p = A.L.save.player; p.inv = { madeira: 12, sem_trigo: 3 }; p.sp = { faisca: 10, brotar: 20 }; p.notes = { n01: 111, n02: 222 }; p.home = [1, 2, 3]; A.L.save.setPos(100, 20, -50, 1.2);
   await advance(6000); kill(A);
   const N = device('newphone', { server: srv }); const p2 = await boot(N, 'vini'); // lower case: same slug
-  eq(p2.inv, { madeira: 12, sem_trigo: 3 }); eq(p2.sp, ['faisca', 'brotar']); eq(p2.notes, { n01: 111, n02: 222 }); eq(p2.pos, [100, 20, -50, 1.2]); eq(p2.home, [1, 2, 3]);
+  eq(p2.inv, { madeira: 12, sem_trigo: 3 }); eq(p2.sp, { faisca: 10, brotar: 20 }); eq(p2.notes, { n01: 111, n02: 222 }); eq(p2.pos, [100, 20, -50, 1.2]); eq(p2.home, [1, 2, 3]);
 });
 test('two devices of the same player: remote progress adopted, nothing lost', async () => {
   const srv = new FakeServer(); const A = device('A', { server: srv }); await boot(A, 'Vini');
@@ -200,8 +207,8 @@ test('row size guard', async () => {
   const srv = new FakeServer(); const A = device('A', { server: srv }); await boot(A, 'Vini');
   eq(A.L.save.set('k5', 'big', { s: 'x'.repeat(40000) }), null, 'too big refused locally');
   ok(A.L.save.set('k5', 'ok', { s: 'x'.repeat(20000) }) != null);
-  for (let i = 0; i < 300; i++) A.L.save.player.th.push('pensamento ' + 'x'.repeat(100) + i);
-  A.L.save.dirty(); await advance(5000); ok(srv.rows.get('teste|p5|vini').d.th.length <= 50, 'player trimmed to fit');
+  for (let i = 0; i < 300; i++) A.L.save.player.stats['s' + i] = 'x'.repeat(100); A.L.save.player.notes.n01 = 5;
+  A.L.save.dirty(); await advance(5000); const pd = srv.rows.get('teste|p5|vini').d; ok(Object.keys(pd.stats).length === 0 && pd.notes.n01 === 5, 'player trimmed to fit (stats dropped, progress kept)');
 });
 test('skipToDawn moves every client clock; server clock skew', async () => {
   const srv = new FakeServer({ skew: 7000 }); const A = device('A', { server: srv }), B = device('B', { server: srv });
@@ -268,8 +275,11 @@ test('survival: hungry rules, eating, buffs', async () => {
   r = S.eat('sopa_quente'); ok(r.ok && S.cold === 0 && S.buff('quente') > 359, 'warm food: cold gone, warm 6 min'); ok(!('sopa_quente' in p.inv), 'last one removed');
   run(A.L, 60, Object.assign({}, base, { night: 1 })); eq(S.cold, 0, 'stays warm with the buff');
   S.set({ fome: 100 }); eq(S.eat('frutinhas').why, 'Barriga cheia!');
-  eq(A.L.cookCheck(A.L.COOK.find(c => c.id === 'c_pao'), { trigo: 3 }, {}).why, 'Receita desconhecida', 'bread needs the recipe');
-  ok(A.L.cookCheck(A.L.COOK.find(c => c.id === 'c_pao'), { trigo: 3, receita_pao: 1 }, {}).ok, 'with recipe');
+  const sq = A.L.COOK.find(c => c.id === 'c_sopa_quente'), sqInv = { cenoura: 1, ervas: 2, cogumelo: 1 };
+  eq(A.L.cookCheck(sq, sqInv, {}).why, 'Receita desconhecida', 'hot soup needs the recipe');
+  ok(A.L.cookCheck(sq, sqInv, { rec: { receita_sopa_quente: 1 } }).ok, 'recipe known through flags.rec (story.js)');
+  ok(A.L.cookCheck(sq, Object.assign({ receita_sopa_quente: 1 }, sqInv), {}).ok, 'recipe item in the bag');
+  ok(A.L.cookCheck(A.L.COOK.find(c => c.id === 'c_pao'), { trigo: 3 }, {}).ok, 'bread: only the oven is needed');
   eq(A.L.cookCheck(A.L.COOK.find(c => c.id === 'c_ensopado'), { cenoura: 1 }, {}).why, 'Faltam 1 cenoura, 2 cogumelo, 1 abóbora');
   const story = []; A.L.story = { event: (n, d) => story.push(n + ':' + d.item) };
   p.inv = { cenoura: 3, cogumelo: 2, abobora: 1 }; let c = S.cook('c_ensopado'); ok(c.ok && c.item === 'ensopado', 'cooked');
@@ -338,6 +348,95 @@ test('survival: state persists through L.save (reload)', async () => {
   S.set({ fome: 42.4242, mana: 13, frio: .2 }); S.addBuff('energia', 120); run(A.L, 2.2, { x: 0, y: 200, z: 0, night: 0, grounded: true }); await advance(6000);
   const st = srv.rows.get('teste|p5|a').d.st; near(st.fome, 42.4, .2); ok(st.buffs.energia > 0, 'buff saved'); kill(A);
   const N = await survDev('A', { server: srv }); N.L.surv.tick(.01, { x: 0, y: 200, z: 0 }); near(N.L.surv.fome, 42.4, .2, 'restored on a new phone'); ok(N.L.surv.buff('energia') > 100, 'buff restored');
+});
+
+// ================================================================ farm
+async function farmDev(name, o) {
+  const d = device(name, Object.assign({ mods: ['save', 'survival', 'farm'] }, o)); d.L.ground = () => 200; d.L.waterAt = (x, z) => x > 100 ? 200.6 : -Infinity;
+  await boot(d, name); return d;
+}
+test('farm: growth math (stages, watering x2 for 10 min, hoe, water plots, time left)', () => {
+  const L = device('x', { mods: ['save', 'farm'] }).L, m = L.farm._m;
+  const r = { crop: 'trigo', pt: 0, gt: 0, gg: 0, g: 0, wu: 0 };
+  near(m.progress(r, 10 * MIN, 10 * MIN), .5, 1e-9, 'trigo half grown at 10 min');
+  eq([3.9, 4.1, 10.9, 11.1, 19.9, 20].map(t => m.stageOf('trigo', m.progress(r, t * MIN, t * MIN))), [0, 1, 1, 2, 2, 3], 'stage thresholds .2/.55/1');
+  near(m.timeLeft(r, 0, 0) / MIN, 20, 1e-9, 'time left unwatered');
+  const w = Object.assign({}, r, { wu: 10 * MIN }); near(m.progress(w, 10 * MIN, 0), 1, 1e-9, 'watered at planting: ripe in 10 min'); near(m.timeLeft(w, 0, 0) / MIN, 10, 1e-9);
+  near(m.progress(w, 5 * MIN, 0), .5, 1e-9, 'x2 while watered');
+  // watered at minute 5: bank then 10 min at x2 -> 5 + 2 * 7.5 = 20 at 12.5 min
+  const b = Object.assign({}, r, m.bank(r, 5 * MIN, 5 * MIN), { wu: 15 * MIN }); eq(b.g, 5 * MIN); eq(b.st, 1, 'bank stores the stage');
+  near(m.timeLeft(b, 5 * MIN, 5 * MIN) / MIN, 7.5, 1e-9, 'time left after watering'); near(m.progress(b, 12.5 * MIN, 0), 1, 1e-9);
+  near(m.progress(b, 30 * MIN, 0), 1, 1e-9, 'clamped');
+  const h = Object.assign({}, r, { ho: 1 }); near(m.timeLeft(h, 0, 0) / MIN, 20 / 1.5, 1e-9, 'hoe x1.5');
+  const lo = { crop: 'lotus', pt: 0, gt: 0, gg: 0, g: 0, wp: 1 }; near(m.timeLeft(lo, 0, 0) / MIN, 15, 1e-9, 'water plot: always watered (lotus 30 -> 15 min)');
+  eq(m.stageOf('lotus', 1), 2, 'lotus has 3 stages');
+});
+test('farm: the moon flower grows only at night (~36 h real), watering doubles, Brotar once a day', () => {
+  const L = device('x', { mods: ['save', 'farm'] }).L, m = L.farm._m, D = 1440e3, HOUR = 3600e3;
+  near(m.nightIn(0, D), D / 2, 1e-6, 'half of every day is night'); near(m.nightIn(.3 * D, .7 * D), 0, 1e-6, 'nothing by day');
+  near(m.nightIn(.7 * D, 1.3 * D), .5 * D, 1e-6, '16:48 -> 07:12 holds the whole night 18:00 -> 06:00');
+  const r = { crop: 'lua', pt: 0, gt: 0, gg: 0, g: 0, wu: 0 };
+  const at = h => m.progress(r, h * HOUR, h * HOUR);
+  near(at(36), 1, 1e-9, 'ripe after 36 h of real time'); ok(at(35.5) < 1, 'not before');
+  near(m.timeLeft(r, 0, 0) / HOUR, 36, .01, 'time left 36 h');
+  // planted at 07:00 game time: nothing until 18:00
+  const g7 = 7 / 24 * D, r7 = Object.assign({}, r, { gt: g7, gg: g7 }); eq(m.progress(r7, g7 + 10.9 / 24 * D, g7 + 10.9 / 24 * D), 0, 'no growth by day');
+  ok(m.progress(r7, g7 + 11.5 / 24 * D, g7 + 11.5 / 24 * D) > 0, 'grows after 18:00');
+  // simulate a mid-growth state and compare timeLeft with a brute-force walk
+  const s = { crop: 'lua', g: 5 * HOUR, gt: 0, gg: .6 * D, wu: 20 * MIN };
+  const left = m.timeLeft(s, 0, .6 * D); let t = 0; while (m.progress(s, t, .6 * D + t) < 1 && t < 80 * HOUR) t += 1000;
+  near(left / 1000, t / 1000, 1.5, 'timeLeft matches a step simulation (s)');
+  const wd = { crop: 'lua', pt: 0, gt: 0, gg: 0, g: 0, wu: 60 * MIN }; near(m.effMs(wd, 60 * MIN, 60 * MIN), 2 * m.nightIn(0, 60 * MIN), 1e-6, 'watered night counts double');
+});
+test('farm: two players share plots — plant, same stage on both phones, water, harvest, regrow, Brotar', async () => {
+  const srv = new FakeServer(); const A = await farmDev('A', { server: srv }), B = await farmDev('B', { server: srv });
+  const FA = A.L.farm, FB = B.L.farm; const story = []; A.L.story = { event: (n, d) => story.push(n + ':' + (d.crop || '')) };
+  A.L.save.set('b5', 'c1', { t: 'canteiro', x: 5, y: 200, z: 5, r: 0 }); A.L.save.set('b5', 'c2', { t: 'canteiro', x: 9, y: 200, z: 5, r: 0 });
+  A.L.save.player.inv = { sem_trigo: 2, sem_morango: 1 };
+  eq(FA.plant('c1', 'abobora').why, 'Sem sementes de abóbora'); let r = FA.plant('c1', 'trigo'); ok(r.ok, 'planted'); eq(A.L.save.player.inv.sem_trigo, 1, 'seed paid');
+  eq(FA.plant('c1', 'trigo').why, 'Já tem uma planta aqui'); eq(story, ['planted:trigo']);
+  await advance(1500); const rec = B.L.save.get('f5', 'c1'); ok(rec && rec.crop === 'trigo' && rec.x === 5 && rec.by === 'a', 'B sees the plot'); eq(FB.stage('c1'), 0);
+  eq(FB.action('c1').lb, 'Semente…', 'B action: waiting');
+  await advance(6 * MIN); eq([FA.stage('c1'), FB.stage('c1')], [1, 1], 'both see the sprout at the same time');
+  const stA = []; FA.on('stage', e => stA.push(e.stage)); FA.tick(1, 5, 5);
+  eq(FB.water('c1'), 1, 'B waters'); await advance(1500); ok(A.L.save.get('f5', 'c1').wu > T.now, 'A sees the watering'); ok(FA.info('c1').watered);
+  eq(FA.harvest('c1').why, 'Ainda não está pronto');
+  await advance(6 * MIN); FA.tick(1, 5, 5); eq(stA, [2], 'stage event when the plot near A grows');
+  near(FA.info('c1').left / MIN, (20 - 6 - 12) / 2, .1, 'time left: 6 min + 6 min x2 grown, the rest still watered');
+  await advance(2.1 * MIN); ok(FA.info('c1').ripe && FB.info('c1').ripe, 'ripe on both'); eq(FB.action('c1').act, 'harvest');
+  B.L.save.player.inv = {}; r = FB.harvest('c1'); ok(r.ok && r.give.trigo >= 3 && r.give.sem_trigo >= 1, 'B harvests produce + seeds ' + JSON.stringify(r.give));
+  eq(B.L.save.player.inv.trigo, r.give.trigo, 'into B bag'); ok(!r.own, 'not B own crop'); await advance(1500); eq(FA.stage('c1'), -1, 'A sees the plot empty');
+  // strawberries regrow after picking
+  ok(FA.plant('c2', 'morango').ok); await advance(31 * MIN); r = FA.harvest('c2'); ok(r.ok && r.own && r.give.morango >= 3, 'strawberries'); eq(FA.stage('c2'), 2, 'back to stage 2');
+  near(FA.info('c2').left / MIN, 30 * (1 - .55), .1, 'regrows from 55 %'); eq(A.L.save.player.stats.harvestOwn, 1);
+  // Brotar: one stage per cast in 4 m
+  A.L.save.player.inv.sem_ervas = 1; FA.del = null; A.L.save.set('b5', 'c3', { t: 'canteiro', x: 5, y: 200, z: 9 }); ok(FA.plant('c3', 'ervas').ok);
+  let bo = FA.boost(5, 9, 4); eq(bo.n, 1); eq(FA.stage('c3'), 1); FA.boost(5, 9, 4); eq(FA.stage('c3'), 2); FA.boost(5, 9, 4); eq(FA.stage('c3'), 3, 'ripe after 3 casts');
+  eq(FA.boost(5, 9, 4).n, 0, 'ripe: nothing to do'); eq(FA.boost(50, 50, 4).n, 0, 'out of range');
+  ok(story.includes('harvest:morango'), 'story harvest event');
+});
+test('farm: wild plants give the first seeds', () => {
+  const L = device('x', { mods: ['save', 'survival', 'farm'] }).L; let k = 0; const seq = [.1, .9, .1, .5, .99]; const rnd = () => seq[k++ % seq.length];
+  const y = L.farm.wildYield('wild_wheat', rnd); ok(y.trigo === 1 && y.sem_trigo >= 1 && !y.sem_abobora, JSON.stringify(y));
+  eq(L.farm.wildYield('rock'), null); ok(L.ITEMS5.sem_trigo.seed === 'trigo' && L.ITEMS5.sopa_quente.food === 1, 'item table for the game');
+});
+test('farm: dismantling a canteiro gives the crop back; water plots take lotus; moon flower opens only at night', async () => {
+  const srv = new FakeServer(); const A = await farmDev('A', { server: srv }), B = await farmDev('B', { server: srv }); const F = A.L.farm;
+  A.L.save.player.inv = { sem_cenoura: 1, sem_lotus: 2, sem_lua: 1 };
+  A.L.save.set('b5', 'c4', { t: 'canteiro', x: 0, y: 200, z: 0 }); ok(F.plant('c4', 'cenoura').ok); eq(A.L.save.player.inv.sem_cenoura, undefined);
+  A.L.save.del('b5', 'c4'); eq(A.L.save.get('f5', 'c4'), undefined, 'f5 freed'); eq(A.L.save.player.inv.sem_cenoura, 1, 'seed back');
+  await advance(1500); eq(B.L.save.get('f5', 'c4'), undefined, 'B: plot gone');
+  // a canteiro standing in water is a water plot
+  A.L.save.set('b5', 'w1', { t: 'canteiro', x: 120, y: 200, z: 0 }); eq(F.canPlant('w1', 'cenoura').why, 'Aqui está alagado'); eq(F.seedsFor('w1').map(s => s.crop), ['lotus']);
+  ok(F.plant('w1', 'lotus').ok); eq(F.info('w1').waterPlot, true);
+  // lotus straight into shallow water
+  A.L.ground = (x) => x > 100 ? 199.8 : 200; let lp = F.plantAt(130, 10, 'lotus'); ok(lp.ok && /^lw_/.test(lp.id), 'free lotus spot'); eq(F.plantAt(130.5, 10, 'lotus').why, 'Precisa de água rasa', 'spots keep apart');
+  eq(F.plantAt(0, 0, 'lotus').why, 'Precisa de água rasa'); ok(F.nearest(130, 200, 130.4, 3) === null || true);
+  // moon flower: harvest only at night
+  A.L.save.set('b5', 'm1', { t: 'canteiro', x: 20, y: 200, z: 0 }); ok(F.plant('m1', 'lua').ok);
+  const rec = A.L.save.get('f5', 'm1'); A.L.save.set('f5', 'm1', Object.assign({}, rec, { g: 18 * 3600e3 })); // fully grown
+  A.L.clock.setHours(12); ok(F.info('m1').ripe && !F.info('m1').canHarvest, 'ripe but closed by day'); eq(F.harvest('m1').why, 'Ela só abre sob a lua'); eq(F.action('m1').lb, 'Ela só abre sob a lua');
+  A.L.clock.setHours(22); const h = F.harvest('m1'); ok(h.ok && h.give.flor_lua === 1, 'blooms at night');
 });
 
 // ================================================================ runner

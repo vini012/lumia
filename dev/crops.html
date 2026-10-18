@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Canteiros (dev)</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #9cc6ec; overflow: hidden; font: 13px system-ui, sans-serif; }
+  canvas { display: block; }
+  .lb { position: absolute; transform: translate(-50%, 0); color: #4a3424; background: #f6ead0e0; border-radius: 8px; padding: 1px 6px; white-space: nowrap; font-size: 11px; }
+</style></head>
+<body>
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="../js/farm.js"></script>
+<script>
+// Gallery of every crop stage (procedural fallback, or m/crops5.json when present): ?night=1 ?close=<crop>
+const Q = new URLSearchParams(location.search), NIGHT = Q.get('night') === '1', CLOSE = Q.get('close');
+const R = new THREE.WebGLRenderer({ antialias: true }); R.setPixelRatio(1); R.setSize(innerWidth, innerHeight);
+R.outputEncoding = THREE.sRGBEncoding; R.toneMapping = THREE.ACESFilmicToneMapping; R.toneMappingExposure = NIGHT ? 1 : .95;
+R.shadowMap.enabled = true; R.shadowMap.type = THREE.PCFSoftShadowMap; document.body.appendChild(R.domElement);
+const lc = h => new THREE.Color(h).convertSRGBToLinear();
+const S = new THREE.Scene(); S.background = lc(NIGHT ? 0x1d2f5a : 0x9cc6ec); S.fog = new THREE.Fog(S.background, 40, 90);
+L.scene = S; L.clock = { now: () => Date.now(), gameMs: () => Date.now(), isNight: () => NIGHT, day: () => 0, DAY_LEN: 1440 };
+S.add(new THREE.HemisphereLight(lc(NIGHT ? 0x5a78c0 : 0xbfdcff), lc(NIGHT ? 0x1a2433 : 0x7b7f26), NIGHT ? .7 : .9));
+const sun = new THREE.DirectionalLight(lc(NIGHT ? 0x9fb6ff : 0xfff1d8), NIGHT ? .5 : 2.2); sun.position.set(-12, 22, 10); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -25, right: 25, top: 25, bottom: -25, far: 80 }); sun.shadow.bias = -.0005; S.add(sun);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: lc(0x9db94a), roughness: 1 })); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; S.add(ground);
+const wood = new THREE.MeshStandardMaterial({ color: lc(0x8b5a3c), roughness: .9 }), soil = new THREE.MeshStandardMaterial({ color: lc(0x5e4130), roughness: 1 });
+const waterM = new THREE.MeshStandardMaterial({ color: lc(0x3f8fc0), roughness: .25, transparent: true, opacity: .9 });
+function bed(x, z, water) {
+  const g = new THREE.Group(); g.position.set(x, 0, z);
+  if (water) { const w = new THREE.Mesh(new THREE.CircleGeometry(1.5, 24), waterM); w.rotation.x = -Math.PI / 2; w.position.y = .3; w.receiveShadow = true; g.add(w); S.add(g); return .3; }
+  for (const [px, pz, sx, sz] of [[0, -1.12, 2.4, .16], [0, 1.12, 2.4, .16], [-1.12, 0, .16, 2.4], [1.12, 0, .16, 2.4]]) { const b = new THREE.Mesh(new THREE.BoxGeometry(sx, .34, sz), wood); b.position.set(px, .17, pz); b.castShadow = b.receiveShadow = true; g.add(b); }
+  const s = new THREE.Mesh(new THREE.BoxGeometry(2.1, .28, 2.1), soil); s.position.y = .14; s.receiveShadow = true; g.add(s); S.add(g); return .28;
+}
+const crops = CLOSE ? [CLOSE] : Object.keys(L.CROPS); const labels = [];
+crops.forEach((c, row) => {
+  const K = L.CROPS[c], n = K.th.length, cols = c === 'lua' ? n + 1 : n;
+  for (let s = 0; s < cols; s++) {
+    const st = Math.min(s, n - 1), open = c === 'lua' && s === n;
+    const x = (s - 2) * 3.1, z = (row - (crops.length - 1) / 2) * 3.1; const y = bed(x, z, K.water);
+    const t = L.farm._template(c, st, open || (c !== 'lua' && NIGHT)).clone(); t.position.set(x, y, z); t.rotation.y = .3; S.add(t);
+    labels.push({ p: new THREE.Vector3(x, 0, z + 1.35), t: K.n + ' ' + st + (open ? ' (aberta)' : '') });
+  }
+});
+const cam = new THREE.PerspectiveCamera(CLOSE ? 40 : 38, innerWidth / innerHeight, .1, 200);
+if (CLOSE) { cam.position.set(0, 3.4, 7.2); cam.lookAt(0, .3, 0); } else { cam.position.set(0, 22, 19); cam.lookAt(0, 0, 2.2); }
+R.render(S, cam);
+for (const l of labels) { const v = l.p.clone().project(cam); const d = document.createElement('div'); d.className = 'lb'; d.textContent = l.t; d.style.left = ((v.x + 1) / 2 * innerWidth) + 'px'; d.style.top = ((1 - v.y) / 2 * innerHeight) + 'px'; document.body.appendChild(d); }
+window.DONE = true;
+</script>
+</body></html>
