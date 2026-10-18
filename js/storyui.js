@@ -590,7 +590,7 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
     const v = (S.spellView() || []).find(s => s.id === id); if (v && v.passive) { toast(v.name, v.desc, svg(SPELL_ICON[id] || P.magic), 3200); return; }
     const r = S.castSpell(id);
     if (r && r.ok) { b.classList.remove('lu-fire'); void b.offsetWidth; b.classList.add('lu-fire'); setTimeout(closeSpells, 380); }
-    else { b.classList.remove('lu-shake'); void b.offsetWidth; b.classList.add('lu-shake'); if (r && r.why === 'place') toast('…', null, svg(SPELL_ICON[id] || P.magic), 1800); }
+    else { b.classList.remove('lu-shake'); void b.offsetWidth; b.classList.add('lu-shake'); if (r && r.why === 'place' && id === 'ponte') toast('Não há para onde estender a ponte', null, svg(SPELL_ICON.ponte), 2200); }
     jobs.add('bar');
   }
   U.cast = id => { const S = SS(); return S.castSpell ? S.castSpell(id) : { ok: false }; };
@@ -719,9 +719,9 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
     S.on('nomana', id => { const b = barNode && barNode.querySelector('[data-id="' + id + '"]'); if (b) { b.classList.remove('lu-shake'); void b.offsetWidth; b.classList.add('lu-shake'); } toast('Mana insuficiente', null, svg(P.drop), 2200); });
     S.on('fragment', d => { starMoment(d); jobs.add('stars'); });
     S.on('forge', d => { const n = d.need || {}; toast('✦ ' + d.f + '/' + (n.fragmento || 5) + '   ' + itemInfo('ouro').n + ' ' + d.o + '/' + (n.ouro || 3) + '   ' + itemInfo('cristal').n + ' ' + d.c + '/' + (n.cristal || 2), null, '⚒', 4200); });
-    S.on('mail', () => toast('…', null, svg(P.bird), 2400));
-    S.on('hint', h => { if (h === 'night') toast('…', null, svg(P.moon), 2200); });
-    S.on('vigil', d => toast('…', null, d && d.done ? '✦' : '🔥', 2400));
+    S.on('mail', () => toast('Chegou uma carta', 'bem perto de você', svg(P.letter), 3000));
+    S.on('hint', h => { if (h === 'night') toast('Melhor esperar a noite', null, svg(P.moon), 2600); });
+    S.on('vigil', d => { if (d && d.done) toast('Amanheceu', 'você passou a noite inteira', svg(P.moon), 3600); else if (d && d.broken) toast('O fogo ficou longe', 'a noite recomeça na próxima', '🔥', 3200); });
     S.on('white', d => { whiteA = d ? clamp(d.a || 0, 0, 1) : 0; whiteText = d && d.text ? d.text : (whiteA < .2 ? null : whiteText); jobs.add('white'); });
     S.on('caption', d => caption(d && d.text));
     S.on('reveal', d => { if (d && d.on) cineStart(true); else if (cineOn && !SS().endingOn) cineEnd(); });

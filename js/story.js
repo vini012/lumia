@@ -334,7 +334,7 @@ window.L = window.L || {};
     MAT.v = (L.MAT && (L.MAT.v5 || L.MAT.v4)) || sty(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .85 }));
     MAT.vd = sty(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .9, side: THREE.DoubleSide }));
     MAT.glow = (L.MAT && L.MAT.glow) || new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color(2, 2, 2), fog: false });
-    MAT.star = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.35, .8), fog: false });
+    MAT.star = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.25, .95, .42), fog: false });
     MAT.paper = sty(new THREE.MeshStandardMaterial({ map: tex('paper'), roughness: .95, side: THREE.DoubleSide }));
     MAT.drawing = sty(new THREE.MeshStandardMaterial({ map: tex('drawing'), roughness: .95 }));
     MAT.rune = new THREE.MeshBasicMaterial({ map: tex('rune'), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0, fog: false });
@@ -456,7 +456,7 @@ window.L = window.L || {};
     },
     star(size) {
       size = size || 1; return grp(new THREE.Mesh(starGeo(.3 * size, .13 * size, .07 * size), mats().star), g => {
-        const gl = glowSprite(0xffe6a8, 2.4 * size, .9); g.add(gl); g.userData.glow = gl; g.add(glowSprite(0xfff8e8, .9 * size, 1));
+        const gl = glowSprite(0xffc96a, 1.9 * size, .5); g.add(gl); g.userData.glow = gl; g.add(glowSprite(0xfff1cf, .55 * size, .7));
       });
     },
     feather() {
@@ -799,7 +799,7 @@ window.L = window.L || {};
   }
   function lightLamp() {
     if (W('lighthouse') || !lh.lamp || !lh.tall) return;
-    if (!isNight()) { say('…', '🌙'); emit('hint', 'night'); return; }
+    if (!isNight()) { emit('hint', 'night'); return; }
     setW('lighthouse', stamp({ x: lh.lamp.x, y: lh.lamp.y, z: lh.lamp.z })); emit('sfx', 'lamp'); worldEvent('lighthouse_lit', {}); needEval = true;
   }
 
@@ -972,7 +972,7 @@ window.L = window.L || {};
     if (b.mesh) {
       b.mesh.position.set(b.x, b.y, b.z);
       const sp = Math.hypot(b.vx, b.vz); if (sp > .2) b.ry = Math.atan2(b.vx, b.vz); b.mesh.rotation.y = b.ry; b.mesh.rotation.x = clamp(-b.vy * .06, -.5, .5);
-      const w = b.mesh.userData; if (w.wl) { w.wl.rotation.z = b.flap; w.wr.rotation.z = -b.flap; }
+      const w = b.mesh.userData; if (w.wl) { const ax = w.axis || 'z'; w.wl.rotation[ax] = (w.l0 || 0) + b.flap; w.wr.rotation[ax] = (w.r0 || 0) - b.flap; }
     }
   }
   function makeBird() {
@@ -981,7 +981,7 @@ window.L = window.L || {};
     root.add(body);
     const wing = s => { const g = new THREE.BufferGeometry(); const v = new Float32Array([0, 0, .1, 0, 0, -.1, s * .27, .02, -.03]); g.setAttribute('position', new THREE.BufferAttribute(v, 3)); g.computeVertexNormals(); const m = new THREE.Mesh(part(g, '#f7f4ee', 0, 0, 0, 0, 0, 0, 1, 1, 1, { flat: true }), mats().bird); m.position.y = .02; return m; };
     const wl = wing(1), wr = wing(-1); root.add(wl); root.add(wr); root.userData.wl = wl; root.userData.wr = wr;
-    modelFile('paperbird').then(sc => { if (!sc) return; const c = sc.clone(true); let l = null, r = null; c.traverse(o => { if (o.isMesh) { o.material = mats().v; o.castShadow = true; } if (/paperbird_wing_l$/i.test(o.name)) l = o; if (/paperbird_wing_r$/i.test(o.name)) r = o; }); root.remove(body); root.remove(wl); root.remove(wr); root.add(c); if (l && r) { root.userData.wl = l; root.userData.wr = r; } });
+    modelFile('paperbird').then(sc => { if (!sc) return; const c = sc.clone(true); let l = null, r = null; c.traverse(o => { if (o.isMesh) { o.material = mats().v; o.castShadow = true; } if (/paperbird_wing_l$/i.test(o.name)) l = o; if (/paperbird_wing_r$/i.test(o.name)) r = o; }); root.remove(body); root.remove(wl); root.remove(wr); root.scale.setScalar(1); root.add(c); if (l && r) Object.assign(root.userData, { wl: l, wr: r, axis: 'y', l0: l.rotation.y, r0: r.rotation.y }); });
     return root;
   }
   // a guide (stuck helper bird, or the lunar deer) leads to a target and waits when the player stops
@@ -1238,7 +1238,7 @@ window.L = window.L || {};
     }
     for (const o of OBJ) {
       if (!o.mesh || !o.mesh.visible) continue; const u = o.mesh.userData;
-      if (o.vis === 'star') { o.mesh.rotation.y += dt * 1.2; o.mesh.position.y = o.base + Math.sin(tNow * 1.6) * .12; if (u.glow) u.glow.material.opacity = .75 + Math.sin(tNow * 2.3) * .15; }
+      if (o.vis === 'star') { o.mesh.rotation.y += dt * 1.2; o.mesh.position.y = o.base + Math.sin(tNow * 1.6) * .12; if (u.glow) u.glow.material.opacity = (isNight() ? .75 : .42) + Math.sin(tNow * 2.3) * .12; }
       else if (o.vis === 'feather') { o.mesh.rotation.y += dt * .8; o.mesh.position.y = o.base + Math.sin(tNow * 2 + 1) * .1; }
       else if (o.float) { const wy = L.waterAt ? L.waterAt(o.pos.x, o.pos.z) : -Infinity; if (wy > o.base - 2 && wy > -1e8) o.mesh.position.y = wy - .03 + Math.sin(tNow * 1.4 + o.pos.x) * .03; o.mesh.rotation.z = Math.sin(tNow * 1.1) * .06; }
       else if (o.vis === 'chest') { if (u.glow) u.glow.material.opacity = .25 + .2 * Math.sin(tNow * 2); }
@@ -1273,7 +1273,7 @@ window.L = window.L || {};
     mistTick(dt); shotTick(dt); endTick(dt); doorTick(dt); restoreTick(dt);
     for (let i = BIRDS.length - 1; i >= 0; i--) { const b = BIRDS[i]; if (b.onArrive === 'guide' && b.state === 'circle') { b.state = 'guide'; b.onArrive = null; } birdTick(b, dt); if (b.dead) { if (b.mesh) L.scene.remove(b.mesh); if (b.lmesh) L.scene.remove(b.lmesh); BIRDS.splice(i, 1); } }
     if (wokeWait > 0) { wokeWait -= dt; if (wokeWait <= 0 && (pendingDream || F.hintDream) && !(L.surv && L.surv.sleeping)) wakeUp(); }
-    bridgeTick(); if (has3D()) { visTick(dt); flyTick(dt); orbTick(dt); beamTick(); sleeperTick(dt); }
+    bridgeTick(); if (has3D()) { visTick(dt); flyTick(dt); orbTick(dt); beamTick(); sleeperTick(dt); if (PART && PART.update) PART.update(dt); }
     deerTick(dt);
     if (thoughtCD > 0) thoughtCD -= dt; else if (thoughtQ.length && !S.busy && !S.uiOpen) { const id = thoughtQ.shift(); emit('thought', { id, text: T('thoughts.' + id + '.text') }); thoughtCD = 8; }
     midT -= dt; if (midT <= 0) { midT = 1; vigilTick(1); lhCheckT -= 1; if (lhCheckT <= 0) { lhCheckT = 3; lhCheck(); } }
@@ -1323,5 +1323,9 @@ window.L = window.L || {};
     lh: () => Object.assign({}, lh),
     birds: () => BIRDS.map(b => ({ state: b.state, note: b.note || null, guide: !!b.tx && !b.letter, x: b.x, y: b.y, z: b.z, tx: b.tx, tz: b.tz })),
     skipShot: () => { if (shot) { shot.t = shot.dur; shotTick(0); } },
+    // dev harness helpers: a fresh visual of a placed-object kind, the sleeper's state, a letter bird on demand
+    visual: kind => (kind === 'spirit' ? makeSpirit() : kind === 'bird' ? makeBird() : makeVisual(kind)),
+    sleeper: () => (sleeper ? { model: sleeper.model || (sleeper.fallback ? 'fallback' : null), pose: Object.assign({}, sleeper.pose) } : null),
+    bird: note => { const b = launchBird({ note: note || null }); if (!note) b.letter = false; return BIRDS.length; },
   };
 })(window.L);

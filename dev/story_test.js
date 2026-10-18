@@ -34,19 +34,28 @@ function shotRun() {
   const RUN = '/home/claude/v5tools/run.js', OUT = '/home/claude/v5tools/shots/story';
   const only = opt('only');
   const W = +(opt('w') || 960), H = +(opt('h') || 540);
-  // every scene is set up by STORYDEV.scene(name) inside dev/story.html; one screenshot each
-  const scenes = ['note', 'note_stone', 'note_rune', 'note_wood', 'journal_cartas', 'journal_sonhos', 'journal_pensamentos', 'journal_tarefas', 'dialog', 'learn', 'spells', 'star', 'dream', 'mist', 'reveal', 'ending_line', 'ending_title', 'ending_personal', 'world_props', 'world_bird', 'world_bridge', 'world_beam', 'world_throne'];
-  const steps = [{ ready: 'window.STORYDEV && STORYDEV.ready', timeout: 120000 }];
-  if (!only) steps.push({ n: 'chain', ev: 'STORYDEV.chain()', max: 4000 });
-  for (const s of scenes) {
-    if (only && s.indexOf(only) < 0) continue;
-    steps.push({ n: s, ev: `STORYDEV.scene(${JSON.stringify(s)})` }, { wait: 1600 }, { ready: 'STORYDEV.settled()', timeout: 60000 }, { shot: 'story/' + s + (W !== 960 ? '_' + W : '') });
-  }
-  const cfg = { root: ROOT, page: 'dev/story.html?shots=1', w: W, h: H, q: 'medio', steps, touch: true };
   fs.mkdirSync(OUT, { recursive: true });
-  const r = cp.spawnSync('node', [RUN], { env: Object.assign({}, process.env, { CFG: JSON.stringify(cfg) }), encoding: 'utf8', maxBuffer: 64 << 20, timeout: 1800000 });
-  process.stdout.write(r.stdout || ''); process.stderr.write(r.stderr || '');
-  return !/PAGEERR|STEPERR|FATAL/.test(r.stdout || '') && /errors 0/.test(r.stdout || '');
+  const run = cfg => {
+    const r = cp.spawnSync('node', [RUN], { env: Object.assign({}, process.env, { CFG: JSON.stringify(cfg) }), encoding: 'utf8', maxBuffer: 64 << 20, timeout: 1800000 });
+    const out = (r.stdout || '') + (r.stderr || ''); process.stdout.write(out); return out;
+  };
+  let good = true;
+  // 1. the whole chain inside the browser, with three.js and the journal UI alive (fresh page)
+  if (!only) {
+    const out = run({ root: ROOT, page: 'dev/story.html?shots=1', w: W, h: H, steps: [{ ready: 'window.STORYDEV && STORYDEV.ready', timeout: 120000 }, { n: 'chain', ev: 'STORYDEV.chain()', max: 4000 }, { shot: 'story/chain_end' }] });
+    const m = /chain: (\{.*\})/.exec(out); let r = null; try { r = m && JSON.parse(m[1]); } catch (e) { }
+    console.log('chain (browser): ' + (r ? r.ok + ' ok, ' + r.bad + ' failed' : 'no result'));
+    good = good && !!r && r.bad === 0 && /errors 0/.test(out);
+  }
+  // 2. one screenshot per scene; each scene is set up by STORYDEV.scene(name) inside dev/story.html (fresh page)
+  const scenes = ['note', 'note_letter', 'note_stone', 'note_diary', 'note_rune', 'note_wood', 'note_drawing', 'journal_cartas', 'journal_sonhos', 'journal_pensamentos', 'journal_tarefas', 'dialog', 'learn', 'spells', 'star', 'dream', 'world_props', 'world_bird', 'world_bridge', 'world_beam', 'world_throne', 'note_last', 'mist', 'reveal', 'ending_line', 'ending_title', 'ending_personal'];
+  const steps = [{ ready: 'window.STORYDEV && STORYDEV.ready', timeout: 120000 }];
+  for (const s of scenes) {
+    if (only && !only.split(',').some(o => s.indexOf(o) >= 0)) continue;
+    steps.push({ n: s, ev: `STORYDEV.scene(${JSON.stringify(s)})` }, { wait: s === 'dream' ? 3600 : 1700 }, { ready: 'STORYDEV.settled()', timeout: 60000 }, { shot: 'story/' + s + (W !== 960 ? '_' + W : '') });
+  }
+  const out = run({ root: ROOT, page: 'dev/story.html?shots=1', w: W, h: H, steps, touch: true });
+  return good && !/PAGEERR|STEPERR|FATAL/.test(out) && /errors 0/.test(out);
 }
 
 let good = true;
