@@ -115,7 +115,8 @@ window.L = window.L || {};
 .lu-k-stone::before,.lu-k-rune::before{border-color:rgba(70,62,54,.22);border-style:dashed}
 .lu-k-stone h2,.lu-k-rune h2{color:#5a534b}
 .lu-k-stone .lu-txt{color:#4a433c;text-shadow:0 1px 0 rgba(255,255,255,.5),0 -1px 0 rgba(0,0,0,.28);font-weight:700;letter-spacing:.01em}
-.lu-k-rune{background-color:#8f8b88;color:#e7f7ff}
+.lu-k-rune{background-color:#4c5764;color:#e7f7ff;border-color:#2f3740;box-shadow:0 2px 0 rgba(20,26,34,.4),0 16px 38px rgba(10,16,30,.5),0 0 34px rgba(110,196,255,.28)}
+.lu-k-rune::before{border-color:rgba(160,220,255,.28)}
 .lu-k-rune h2{color:#e2f4ff;text-shadow:0 0 8px rgba(120,200,255,.7)}
 .lu-k-rune .lu-txt{color:#dff5ff;font-weight:700;text-shadow:0 0 6px rgba(110,196,255,.95),0 0 18px rgba(110,196,255,.6)}
 .lu-k-rune .lu-sig{color:#dff5ff;text-shadow:0 0 6px rgba(110,196,255,.9)}
@@ -130,9 +131,9 @@ window.L = window.L || {};
 .lu-book{display:flex;flex-direction:column;width:min(96vw,940px);height:min(calc(100vh - 20px - var(--sat) - var(--sab)),640px);padding:10px clamp(10px,2vw,18px) 12px;animation:lu-pop .35s cubic-bezier(.2,.9,.3,1.1) both}
 .lu-head{display:flex;align-items:flex-end;gap:10px;min-height:48px;position:relative;z-index:1}
 .lu-head h1{margin:0 6px 4px 6px;font:800 clamp(20px,min(3.4vw,6vh),30px)/1 var(--title);color:var(--ink);white-space:nowrap}
-.lu-tabs{display:flex;gap:4px;align-items:flex-end;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none;padding:6px 2px 0}
+.lu-tabs{display:flex;gap:7px;align-items:flex-end;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none;padding:6px 2px 0}
 .lu-tabs::-webkit-scrollbar{display:none}
-.lu-tab{position:relative;flex:none;min-height:42px;padding:9px clamp(10px,1.8vw,18px) 7px;font:700 clamp(13px,min(1.9vw,3.8vh),17px)/1 var(--title)!important;color:var(--ink2)!important;
+.lu-tab{position:relative;flex:none;min-height:42px;padding:9px clamp(15px,2.3vw,24px) 7px;font:700 clamp(13px,min(1.9vw,3.8vh),17px)/1 var(--title)!important;color:var(--ink2)!important;
  background:repeating-linear-gradient(-45deg,rgba(255,255,255,.22) 0 5px,rgba(255,255,255,0) 5px 11px),var(--c)!important;clip-path:${TAPE};opacity:.62;transform:rotate(var(--r)) translateY(3px);transition:transform .18s,opacity .18s}
 .lu-tab.lu-sel{opacity:1;transform:rotate(var(--r)) translateY(-1px) scale(1.06)}
 .lu-tab .lu-dot{display:inline-block;width:8px;height:8px;margin-left:5px;border-radius:50%;background:#d0583f;vertical-align:2px}
@@ -236,7 +237,7 @@ window.L = window.L || {};
 .lu-th::before{content:'';position:absolute;left:22px;bottom:-15px;width:14px;height:14px;border-radius:50%;background:rgba(255,253,247,.95);border:1.5px solid rgba(122,91,69,.5)}
 .lu-th::after{content:'';position:absolute;left:12px;bottom:-26px;width:8px;height:8px;border-radius:50%;background:rgba(255,253,247,.95);border:1.5px solid rgba(122,91,69,.5)}
 .lu-th.lu-bye{animation:lu-fadeout .6s ease both}
-.lu-say{position:absolute;left:50%;bottom:calc(var(--sab) + clamp(96px,24vh,140px));width:min(88vw,600px);min-height:94px;padding:24px 26px 16px;pointer-events:auto;transform:translateX(-50%);animation:lu-drop .3s ease both;border-radius:24px 14px 28px 16px/16px 28px 14px 24px}
+.lu-say{position:absolute;left:0;right:0;margin:0 auto;bottom:calc(var(--sab) + clamp(96px,24vh,140px));width:min(88vw,600px);min-height:94px;padding:24px 26px 16px;pointer-events:auto;animation:lu-drop .3s ease both;border-radius:24px 14px 28px 16px/16px 28px 14px 24px}
 .lu-say .lu-tail{position:absolute;left:46px;bottom:-14px;width:26px;height:26px;background:var(--paper);border-right:2px solid rgba(122,91,69,.78);border-bottom:2px solid rgba(122,91,69,.78);transform:rotate(40deg) skew(8deg,8deg);border-radius:0 0 6px 0}
 .lu-say .lu-nm{position:absolute;top:-15px;left:20px;padding:6px 16px 5px;font:800 14px/1 var(--title);color:var(--ink2);background:repeating-linear-gradient(-45deg,rgba(255,255,255,.22) 0 5px,rgba(255,255,255,0) 5px 11px),var(--t1);clip-path:${TAPE};transform:rotate(-2deg);z-index:2}
 .lu-say .lu-nm:empty{display:none}
@@ -683,12 +684,13 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
     cine.line.classList.remove('lu-show'); cine.ttl.classList.remove('lu-show'); cine.per.classList.remove('lu-show'); cine.skip.classList.remove('lu-show'); cine.blink.classList.remove('lu-on');
     setTimeout(() => { cine.per.style.display = 'none'; }, 1400); jobs.add('stars'); jobs.add('buttons'); setTimeout(next, 600);
   }
+  function hideCap() { clearTimeout(capTimer); cine.cap.classList.remove('lu-show'); }
   function caption(text, ms) { if (!text) return; txt(cine.cap, text); cine.cap.classList.add('lu-show'); clearTimeout(capTimer); capTimer = setTimeout(() => cine.cap.classList.remove('lu-show'), ms || 5200); }
   function onEnding(d) {
     if (!d) return;
-    if (d.phase === 'start') { U.closeAll(); cineStart(false); cine.skip.classList.toggle('lu-show', !!d.skippable); sfx('ending'); }
+    if (d.phase === 'start') { U.closeAll(); hideCap(); cineStart(false); cine.skip.classList.toggle('lu-show', !!d.skippable); sfx('ending'); }
     else if (d.phase === 'blink') { cine.blink.classList.add('lu-on'); setTimeout(() => cine.blink.classList.remove('lu-on'), 700); }
-    else if (d.phase === 'line') { cine.line.classList.remove('lu-show'); clearTimeout(lineTimer); lineTimer = setTimeout(() => { txt(cine.line, d.text); cine.line.classList.add('lu-show'); }, cine.line.textContent ? 900 : 0); }
+    else if (d.phase === 'line') { hideCap(); cine.line.classList.remove('lu-show'); clearTimeout(lineTimer); lineTimer = setTimeout(() => { txt(cine.line, d.text); cine.line.classList.add('lu-show'); }, cine.line.textContent ? 900 : 0); }
     else if (d.phase === 'title') { cine.line.classList.remove('lu-show'); txt(cine.ttl.querySelector('h1'), d.text); cine.ttl.classList.add('lu-show'); sfx('star'); }
     else if (d.phase === 'personal') {
       cine.ttl.classList.remove('lu-show'); if (!d.text) return;

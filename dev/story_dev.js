@@ -78,9 +78,9 @@
   const sun = new THREE.DirectionalLight(0xfff1d8, 1.7); sun.castShadow = true; sun.shadow.mapSize.set(SHOTS ? 2048 : 1024, SHOTS ? 2048 : 1024);
   Object.assign(sun.shadow.camera, { left: -45, right: 45, top: 45, bottom: -45, near: 1, far: 400 }); sun.shadow.bias = -.0006; sun.shadow.normalBias = .03; scene.add(sun); scene.add(sun.target);
   const PAL = {
-    day: { top: '#3f95e2', mid: '#5aa8ea', hor: '#cfe2f1', low: '#e6ecf3', fog: '#c3dbef', hs: '#b9d3f0', hg: '#7c7a44', hi: .62, sc: '#fff1d8', si: 1.2 },
-    dusk: { top: '#4a5f9e', mid: '#c98f88', hor: '#f7c495', low: '#f0c9a4', fog: '#e3b997', hs: '#e9bfa2', hg: '#5e4e40', hi: .45, sc: '#ffb070', si: .9 },
-    night: { top: '#0b1736', mid: '#18295a', hor: '#33507f', low: '#3a5682', fog: '#2a436e', hs: '#5671b4', hg: '#1c2438', hi: .5, sc: '#a9c0ff', si: .42 },
+    day: { top: '#3f95e2', mid: '#5aa8ea', hor: '#cfe2f1', low: '#e6ecf3', fog: '#c3dbef', hs: '#b9d3f0', hg: '#7c7a44', hi: .62, sc: '#fff1d8', si: 1.2, mist: '#f4f7fb' },
+    dusk: { top: '#4a5f9e', mid: '#c98f88', hor: '#f7c495', low: '#f0c9a4', fog: '#e3b997', hs: '#e9bfa2', hg: '#5e4e40', hi: .45, sc: '#ffb070', si: .9, mist: '#f3d9c6' },
+    night: { top: '#0b1736', mid: '#18295a', hor: '#33507f', low: '#3a5682', fog: '#2a436e', hs: '#5671b4', hg: '#1c2438', hi: .5, sc: '#a9c0ff', si: .42, mist: '#7d8fb8' },
   };
   let hourNow = 9;
   function setHour(h) {
@@ -90,7 +90,7 @@
     const num = k => (dW * PAL.day[k] + kW * PAL.dusk[k] + nW * PAL.night[k]) / tot;
     const u = sky.material.uniforms; u.uTop.value.copy(mix('top')); u.uMid.value.copy(mix('mid')); u.uHor.value.copy(mix('hor')); u.uLow.value.copy(mix('low')); u.uStar.value = nW * .9;
     scene.fog.color.copy(mix('fog')); hemi.color.copy(mix('hs')); hemi.groundColor.copy(mix('hg')); hemi.intensity = num('hi');
-    sun.color.copy(mix('sc')); sun.intensity = num('si');
+    sun.color.copy(mix('sc')); sun.intensity = num('si'); mistCol.copy(mix('mist')); if (puffs.length) paintMist();
     const day = se > -.08; const sd = day ? new THREE.Vector3(Math.cos(a), Math.max(.12, se), .35) : new THREE.Vector3(-Math.cos(a) * .6, .55, -.4); sd.normalize();
     sun.userData.dir = sd; u.uSun.value.copy(day ? sd : new THREE.Vector3(-sd.x, sd.y, -sd.z)); u.uSunC.value.copy(day ? lin('#fff0cf').multiplyScalar(.9 * (1 - nW)) : lin('#dfe8ff').multiplyScalar(.25));
     const hv = document.getElementById('hour'); if (hv) { hv.value = h; document.getElementById('hourv').textContent = h.toFixed(2); }
@@ -111,7 +111,7 @@
       const y = L.ground(x, z); p.setXYZ(i, x, y, z);
       const n = noise(x, z), k = (n + 1) / 2; tmp.copy(GC[Math.floor(k * 5.99)]).lerp(GC[(Math.floor(k * 5.99) + 2) % 6], (n * 3.1) % 1 * .35 + .2);
       tmp.lerp(SHADE, clamp(-noise(x * .4 + 9, z * .4) * .35, 0, .3));
-      if (y < .8) tmp.lerp(SAND, clamp((.8 - y) / 1.2, 0, 1));
+      const db = Math.hypot(x + 330, z - 240); if (db < 86) tmp.lerp(SAND, sst(86, 72, db));
       c.setXYZ(i, tmp.r, tmp.g, tmp.b);
     }
     p.needsUpdate = true; c.needsUpdate = true; gGeo.computeVertexNormals(); gGeo.computeBoundingSphere(); gGeo.computeBoundingBox();
@@ -185,17 +185,32 @@
   L.castleRestore = p => { M.restore = p; for (const c of RUIN) { c.scale.setScalar(.55 + .45 * p); c.material.color.copy(lin('#9f4a38')).lerp(lin('#d8664a'), p); } };
 
   // ------------------------------------------------------------------ the white cloud mass (open path, dissolve)
-  const MIST = new THREE.Group(); scene.add(MIST); const puffs = [], lights = [];
+  const MIST = new THREE.Group(); scene.add(MIST); const puffs = [], lights = []; const mistCol = new THREE.Color(1, 1, 1), GOLD = new THREE.Color(0xffd98a); let mistA = 0, mistDis = 0;
   const cloudTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d'); for (let i = 0; i < 9; i++) { const x = 64 + Math.cos(i * 2.4) * 22 * (i % 3) / 2, y = 64 + Math.sin(i * 2.4) * 16 * (i % 3) / 2, r = 40 - (i % 3) * 6; const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(255,255,255,.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128); } return new THREE.CanvasTexture(c); })();
   function buildMist() {
-    const m = L.MIST; for (let i = 0; i < 70; i++) {
-      const a = hash(i, 3) * TAU, r = Math.sqrt(hash(i, 4)) * m.r * .95, x = m.x + Math.cos(a) * r, z = m.z + Math.sin(a) * r, s = 70 + hash(i, 5) * 90;
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, color: 0xf3f6fb, transparent: true, opacity: .85, depthWrite: false, fog: false })); sp.scale.set(s * 1.4, s, 1); sp.position.set(x, 30 + hash(i, 6) * 160, z); MIST.add(sp); puffs.push(sp);
+    const m = L.MIST, r0 = Math.min(m.r * .8, (S.CFG.clearR || 0) + 12); for (let i = 0; i < 420; i++) { // even over the ring between the clear area and the edge, plus a high layer
+      const low = i < 340, a = hash(i, 3) * TAU, u = hash(i, 4), r = low ? Math.sqrt(lerp(r0 * r0, (m.r * 1.03) ** 2, u)) : m.r * Math.sqrt(u) * .9, x = m.x + Math.cos(a) * r, z = m.z + Math.sin(a) * r;
+      const sz = low ? 26 + hash(i, 5) * 34 : 60 + hash(i, 5) * 70, y = L.ground(x, z) + (low ? 5 + hash(i, 6) * 42 : 58 + hash(i, 6) * 50);
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: .85, depthWrite: false, fog: false })); sp.scale.set(sz * 1.5, sz, 1); sp.position.set(x, y, z); sp.userData = { o: low ? .92 : .7, k: 0 }; MIST.add(sp); puffs.push(sp);
     }
+    paintMist();
   }
+  function paintMist() {
+    for (const p of puffs) { p.material.opacity = p.userData.o * (1 - mistDis) * (1 - mistA * (.18 + .82 * p.userData.k)); p.material.color.copy(mistCol).lerp(GOLD, Math.min(1, mistDis * 1.6)); }
+    MIST.visible = mistDis < .999;
+  }
+  function corridor(pts) { // how much each puff sits on the path of lights (1 on it, 0 far)
+    for (const p of puffs) { let d = 1e9; for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i], ex = b.x - a.x, ez = b.z - a.z, l = ex * ex + ez * ez || 1, t = clamp(((p.position.x - a.x) * ex + (p.position.z - a.z) * ez) / l, 0, 1); d = Math.min(d, Math.hypot(a.x + ex * t - p.position.x, a.z + ez * t - p.position.z)); } p.userData.k = 1 - sst(16, 52, d); }
+  }
+  DEV.mistProj = () => { camera.updateMatrixWorld(); const out = []; for (const p of puffs) { const d = p.position.distanceTo(camera.position); if (d > 140) continue; const v = p.position.clone().project(camera); out.push([Math.round(d), +v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(3), Math.round(p.scale.y), Math.round(p.position.y)]); } return out; };
+  DEV.mistInfo = () => { const cp = camera.position; let near = 0, vis = 0; for (const p of puffs) { if (p.material.opacity > .2) vis++; if (p.position.distanceTo(cp) < 120 && p.material.opacity > .2) near++; } return { visible: MIST.visible, n: puffs.length, vis, near, mistA, mistDis, cam: cp.toArray().map(Math.round), col: mistCol.getHexString() }; };
   L.mistVisual = {
-    open(a, pts) { M.mistOpen = a; M.mistPts = pts ? pts.length : 0; if (pts && lights.length !== pts.length) { lights.forEach(l => MIST.remove(l)); lights.length = 0; pts.forEach(p => { const g = L.glowSprite(0xfff0c0, 2.2, 0); g.position.copy(p); MIST.add(g); lights.push(g); }); } lights.forEach((l, i) => { l.material.opacity = clamp(a * 1.4 - i * .015, 0, 1) * .95; }); for (const p of puffs) p.material.opacity = .85 * (1 - .55 * a); },
-    dissolve(t) { M.dissolve = t; for (const p of puffs) { p.material.opacity = .85 * (1 - t); p.material.color.copy(new THREE.Color(0xf3f6fb).lerp(new THREE.Color(0xffd98a), Math.min(1, t * 1.6))); } MIST.visible = t < .999; },
+    open(a, pts) {
+      M.mistOpen = a; M.mistPts = pts ? pts.length : 0;
+      if (pts && lights.length !== pts.length) { lights.forEach(l => MIST.remove(l)); lights.length = 0; pts.forEach(p => { const g = L.glowSprite(0xfff0c0, 2.2, 0); g.position.copy(p); MIST.add(g); lights.push(g); }); corridor(pts); }
+      lights.forEach((l, i) => { l.material.opacity = clamp(a * 1.4 - i * .015, 0, 1) * .95; }); mistA = a; paintMist();
+    },
+    dissolve(t) { M.dissolve = t; mistDis = t; paintMist(); },
   };
 
   // ------------------------------------------------------------------ lighthouse pieces from the build records
@@ -301,7 +316,13 @@
   const SCENES = {
     async journal(tab) { if (!DEV.midDone) { DEV.mid(); DEV.midDone = true; } at('cottage', 4, 6, 10); view([L.P.x - 4, L.P.y + 2.4, L.P.z + 7], [L.P.x, L.P.y + 1.2, L.P.z]); U.closeAll(); U.openJournal(tab); },
     async note(id) { if (!DEV.midDone) { DEV.mid(); DEV.midDone = true; } at(L.TL('notes.' + id).poi || 'cottage', 3, 5, id === 'r1' ? 21 : 10); view([L.P.x - 3, L.P.y + 2.2, L.P.z + 6], [L.P.x, L.P.y + 1.1, L.P.z]); delete P().notes[id]; quiet(() => { }); D.read(id); },
-    async dialog() { at('turtle_shrine', 2, -7, 10); view([L.P.x + 3, L.P.y + 2.4, L.P.z - 6], [L.P.x, L.P.y + 1.2, L.P.z]); U.closeAll(); tick(.5); S.interact('g_tartaruga'); pumpUI(400); },
+    async dialog() {
+      at('turtle_shrine', 2, -7, 10); U.closeAll(); const tx = L.P.x - .8, tz = L.P.z + 3.8;
+      if (!DEV.turtle) { const src = await L.loadModel('turtle'); if (src) { let I = null; try { I = L.instRigged(src); } catch (e) { } const r = I ? I.root : src.clone(true); r.updateMatrixWorld(true); const sz = new THREE.Box3().setFromObject(r).getSize(new THREE.Vector3()); r.scale.setScalar(3.4 / Math.max(.1, sz.x, sz.z)); r.traverse(o => { if (o.isMesh) o.castShadow = true; }); scene.add(r); DEV.turtle = r; } }
+      if (DEV.turtle) { DEV.turtle.position.set(tx, L.ground(tx, tz), tz); DEV.turtle.rotation.y = Math.atan2(L.P.x - tx, L.P.z - tz); }
+      face(tx, tz); view([L.P.x + 3.6, L.P.y + 2.6, L.P.z - 4.4], [(L.P.x + tx) / 2, L.P.y + .1, (L.P.z + tz) / 2]);
+      tick(.5); S.interact('g_tartaruga'); pumpUI(400);
+    },
     async learn() { at('deer_meadow', 0, 0, 20.5); view([L.P.x - 4, L.P.y + 2, L.P.z + 6], [L.P.x, L.P.y + 1.4, L.P.z]); U.closeAll(); S.emit('learn', { id: 'luz', name: T('spells.luz.name') }); },
     async spells() {
       at('hill_top', 0, 0, 16); camS.yaw = 2.3; camS.pitch = .3; camS.dist = 7; U.closeAll();
@@ -335,23 +356,29 @@
       L.P.x += 30; view([p.x, L.ground(p.x, p.z) + 2.6, p.z + 2.8], [p.x, L.ground(p.x, p.z) + .6, p.z - 3.6]); await models();
     },
     async world_bird() {
-      at('hill_top', 6, 6, 9); U.closeAll(); DEV.view = null; camS.yaw = 2.5; camS.pitch = .12; camS.dist = 6; D.bird('s29');
-      for (let i = 0; i < 400; i++) { tick(.1); const b = D.birds().find(x => x.note === 's29'); if (b && b.state === 'circle' && i > 50) break; }
-      await models();
+      at('hill_top', 6, 6, 9); U.closeAll(); D.endFx(); tick(.2); // the light from the spell scene goes out first
+      D.bird('s29'); const circling = () => D.birds().filter(x => x.state === 'circle').sort((a, c) => Math.hypot(a.x - L.P.x, a.z - L.P.z) - Math.hypot(c.x - L.P.x, c.z - L.P.z))[0];
+      let b = null; for (let i = 0; i < 400; i++) { tick(.1); b = circling(); if (b && b.t > 2) break; }
+      await models(); b = circling();
+      if (b) { const ax = b.x - L.P.x, az = b.z - L.P.z, al = Math.hypot(ax, az) || 1, mx = L.P.x + ax * .45, mz = L.P.z + az * .45; face(b.x, b.z); view([mx + az / al * 6.5 - ax / al * 2, L.P.y + 1.7, mz - ax / al * 6.5 - az / al * 2], [mx, L.P.y + 2, mz]); }
     },
-    async world_bridge() {
-      at('hill_top', -10, 10, 15); U.closeAll(); D.learn('ponte'); U.closeAll(); L.P.ry = camS.yaw = .4; L.save.player.st.mana = 100; S.castSpell('ponte', { yaw: .4, pitch: -.15 }); tick(2.2);
-      const b = S.bridgeState(); view([L.P.x + 14, L.P.y + 6, L.P.z + 2], [L.P.x + Math.sin(.4) * 12, L.P.y + 1, L.P.z + Math.cos(.4) * 12]);
+    async world_bridge() { // from the bluff over the bay, towards the open water
+      const bc = { x: -330, z: 240 }, a0 = .9, sx = bc.x + Math.sin(a0) * 74, sz = bc.z + Math.cos(a0) * 74; L.P.x = sx; L.P.z = sz; L.P.y = L.ground(sx, sz); setHour(16.6);
+      U.closeAll(); D.learn('ponte'); U.closeAll(); const yaw = Math.atan2(bc.x - sx, bc.z - sz), dx = Math.sin(yaw), dz = Math.cos(yaw); L.P.ry = camS.yaw = yaw; tick(.2);
+      L.save.player.st.mana = 100; S.castSpell('ponte', { yaw, pitch: 0 }); tick(2.4);
+      const y0 = L.P.y; L.P.x += dx * 8; L.P.z += dz * 8; L.P.y = y0; L.P.speed = 3; poseHero(.3, tAll += .3); L.P.speed = 0;
+      view([sx - dx * 4 + dz * 13, y0 + 5.5, sz - dz * 4 - dx * 13], [sx + dx * 13, y0 - .6, sz + dz * 13]);
     },
     async world_beam() {
       const lh = L.poi('lighthouse'), gy = L.ground(lh.x, lh.z);
       if (!M.builds.length) { for (let k = 0; k < 5; k++) M.builds.push({ id: 'b' + k, t: 'wall', x: lh.x + 1, y: gy + k * 3, z: lh.z, h: 3 }); M.builds.push({ id: 'lamp1', t: 'lighthouse_lamp', x: lh.x + 1, y: gy + 15, z: lh.z, h: 2 }); }
       setHour(21.5); D.world('lighthouse', { x: lh.x + 1, y: gy + 15, z: lh.z }); at('lighthouse', 30, -26); U.closeAll(); tick(4);
-      const c = L.poi('bay_chest'); view([lh.x + 46, gy + 22, lh.z - 40], [(lh.x + c.x) / 2, 6, (lh.z + c.z) / 2]);
+      const c = L.poi('bay_chest'), mx = (lh.x + c.x) / 2, mz = (lh.z + c.z) / 2, dx = c.x - lh.x, dz = c.z - lh.z, dl = Math.hypot(dx, dz); // from the side of the beam
+      view([mx + dz / dl * 72 + dx / dl * 10, gy + 26, mz - dx / dl * 72 + dz / dl * 10], [mx - dx / dl * 6, 5, mz - dz / dl * 6]);
     },
     async world_throne() {
       const th = L.poi('throne'); at('throne', 1.5, 5.5, 6.2); U.closeAll(); face(th.x, th.z); tick(1.5); await models(); tick(.5);
-      view([th.x + 2.6, L.ground(th.x, th.z) + 2.4, th.z + 5.2], [th.x, L.ground(th.x, th.z) + 1.3, th.z]);
+      view([th.x - 3.4, L.ground(th.x, th.z) + 2.9, th.z + 8], [th.x + .5, L.ground(th.x, th.z) + 1.3, th.z]);
     },
   };
   // order matters a little: the state builds up (middle of the game, then the hidden place, then the finale)
@@ -372,6 +399,7 @@
 
   // ------------------------------------------------------------------ boot
   const list = document.getElementById('scenes'); for (const s of DEV.scenes) { const b = document.createElement('button'); b.dataset.s = s; b.textContent = s; list.appendChild(b); }
+  S.CFG.clearR = 70; // the mock world is compact (cloud disc of 240 m); the real one keeps the default
   setHour(9); buildKeep(); buildMist();
   S.init(); U.init({ onPause: () => { } });
   L.P.x = 6; L.P.z = 14; L.P.y = L.ground(6, 14);

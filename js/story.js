@@ -345,8 +345,8 @@ window.L = window.L || {};
     MAT.beam = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
       uniforms: { uA: { value: 0 }, uT: { value: 0 } },
-      vertexShader: 'varying vec2 vU; void main(){ vU = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }',
-      fragmentShader: 'uniform float uA,uT; varying vec2 vU; void main(){ float along = vU.y; float edge = sin(vU.x*3.14159); float a = uA * (1.-along) * (.35+.65*edge*edge) * (.85+.15*sin(uT*1.7+along*9.)); gl_FragColor = vec4(1.,.92,.68,a*.55); }',
+      vertexShader: 'varying vec2 vU; varying float vF; void main(){ vU = uv; vec4 mv = modelViewMatrix * vec4(position,1.); vF = abs(dot(normalize(normalMatrix * normal), normalize(-mv.xyz))); gl_Position = projectionMatrix * mv; }',
+      fragmentShader: 'uniform float uA,uT; varying vec2 vU; varying float vF; void main(){ float along = vU.y; float a = uA * pow(vF, 1.2) * (1.-.45*along) * (1.-smoothstep(.7,1.,along)) * (.88+.12*sin(uT*1.7-along*9.)); gl_FragColor = vec4(1.,.9,.64,a*.7); }',
     });
     return MAT;
   }
@@ -406,10 +406,14 @@ window.L = window.L || {};
   };
   function starShape(R, r) { const s = new THREE.Shape(); for (let i = 0; i <= 10; i++) { const a = i / 10 * TAU + Math.PI / 2, q = i % 2 ? r : R; if (i) s.lineTo(Math.cos(a) * q, Math.sin(a) * q); else s.moveTo(Math.cos(a) * q, Math.sin(a) * q); } return s; }
   function starGeo(R, r, d) { const g = new THREE.ExtrudeGeometry(starShape(R, r), { depth: d, bevelEnabled: true, bevelThickness: d * .4, bevelSize: R * .1, bevelSegments: 2, steps: 1 }); g.center(); return g; }
+  function glowTex() {
+    if (L.GLOW) return L.GLOW;
+    if (!TEX.glow) TEX.glow = canvas(64, 64, (g) => { const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(.3, 'rgba(255,255,255,.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); });
+    return TEX.glow;
+  }
   function glowSprite(color, size, op) {
     if (L.glowSprite) return L.glowSprite(color, size, op);
-    if (!TEX.glow) TEX.glow = canvas(64, 64, (g) => { const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(.3, 'rgba(255,255,255,.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); });
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: TEX.glow, color, transparent: true, opacity: op == null ? 1 : op, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); s.scale.set(size, size, 1); return s;
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color, transparent: true, opacity: op == null ? 1 : op, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); s.scale.set(size, size, 1); return s;
   }
   const WOOD = '#a8845d', WOOD2 = '#8b5a3c', STONE = '#a59f92', PAPER = '#f3e6c8';
   function paperQuad(w, h, mat) { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat || mats().paper); m.receiveShadow = true; return m; }
@@ -1057,6 +1061,7 @@ window.L = window.L || {};
       else { orbLight = new THREE.PointLight(0xffe6b0, 1.6, 18, 1.6); orb.add(orbLight); }
     }
     if (!orb) return;
+    orb.visible = !EN; // the finale frames her up close: the little light steps aside
     const left = FX.luz - tNow, fade = clamp(left / 3, 0, 1) * clamp((90 - left) / .8, 0, 1);
     const a = (PL.ry || 0) + 2.4, tx = PL.x + Math.sin(a) * .9, tz = PL.z + Math.cos(a) * .9, ty = PL.y + 2.3 + Math.sin(tNow * 1.8) * .18;
     orb.position.x = lerp(orb.position.x, tx, clamp(dt * 3, 0, 1)); orb.position.y = lerp(orb.position.y, ty, clamp(dt * 3, 0, 1)); orb.position.z = lerp(orb.position.z, tz, clamp(dt * 3, 0, 1));
@@ -1069,7 +1074,7 @@ window.L = window.L || {};
     if (bridge) removeBridge();
     const dirx = Math.sin(c.yaw), dirz = Math.cos(c.yaw); const slope = clamp(-(c.pitch || 0) * .35, -.18, .3);
     const y0 = (c.y || 0) - .02; let len = 0;
-    for (let i = 1; i <= 40; i++) { const x = c.x + dirx * i, z = c.z + dirz * i, top = y0 + slope * i; len = i; if (groundY(x, z, -1e9) > top + .25 && i > 2) break; }
+    for (let i = 1; i <= 40; i++) { const x = c.x + dirx * i, z = c.z + dirz * i, top = y0 + slope * i; len = i; if (i > 2 && groundY(x, z, -1e9) > top + (i <= 5 ? 1 : .3)) break; } // small bumps at the start do not stop it
     if (len < 3) return false;
     const y1 = y0 + slope * len;
     const col = L.addCol ? L.addCol({ x: c.x + dirx * len / 2, z: c.z + dirz * len / 2, rot: c.yaw, hx: 1.05, hz: len / 2 + .3, y0: Math.min(y0, y1) - .6, y1: y0, y2: y1, bridge: 1 }) : null;
@@ -1104,15 +1109,15 @@ window.L = window.L || {};
   function beamTick() {
     const L3 = W('lighthouse'), chest = poi('bay_chest'); const want = !!L3 && isNight() && !!chest && has3D();
     if (want && !beam) {
-      const len = 1, g = new THREE.CylinderGeometry(9, .45, len, 24, 1, true); g.translate(0, -len / 2, 0); g.rotateX(-Math.PI / 2);
+      const g = new THREE.CylinderGeometry(6.5, .55, 1, 28, 1, true); g.translate(0, .5, 0); g.rotateX(Math.PI / 2); // narrow at the lamp, wide on the water
       const m = new THREE.Mesh(g, mats().beam); m.frustumCulled = false; m.renderOrder = 4; beam = new THREE.Group(); beam.add(m); beam.userData.m = m;
-      const gl = glowSprite(0xffefc0, 6, .9); beam.add(gl); L.scene.add(beam);
+      const gl = glowSprite(0xffefc0, 6, .9); beam.add(gl); const pool = new THREE.Mesh(new THREE.CircleGeometry(9, 32), new THREE.MeshBasicMaterial({ map: glowTex(), color: 0xffd98a, transparent: true, opacity: .75, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); pool.rotation.x = -Math.PI / 2; beam.userData.pool = pool; L.scene.add(beam); L.scene.add(pool);
     }
     if (!beam) return;
-    if (!want) { L.scene.remove(beam); beam = null; return; }
+    if (!want) { L.scene.remove(beam); L.scene.remove(beam.userData.pool); beam = null; return; }
     const src = lh.lamp || L3; beam.position.set(src.x, src.y + 1.2, src.z);
     const tx = chest.x, tz = chest.z, ty = Math.max(-1, (L.waterAt ? L.waterAt(tx, tz) : 0)); const d = Math.hypot(tx - src.x, ty - src.y, tz - src.z);
-    beam.lookAt(tx, ty, tz); beam.userData.m.scale.set(1, 1, d * 1.0); mats().beam.uniforms.uA.value = 1; mats().beam.uniforms.uT.value = tNow;
+    beam.lookAt(tx, ty, tz); beam.userData.m.scale.set(1, 1, d); beam.userData.pool.position.set(tx, ty + .06, tz); mats().beam.uniforms.uA.value = 1; mats().beam.uniforms.uT.value = tNow;
   }
 
   // ------------------------------------------------------------------ sleeper on the throne + the finale
@@ -1321,8 +1326,9 @@ window.L = window.L || {};
     tasks: () => S.taskView(),
     tick: (sec, step) => { step = step || .1; for (let t = 0; t < sec; t += step) S.tick(step); },
     lh: () => Object.assign({}, lh),
-    birds: () => BIRDS.map(b => ({ state: b.state, note: b.note || null, guide: !!b.tx && !b.letter, x: b.x, y: b.y, z: b.z, tx: b.tx, tz: b.tz })),
+    birds: () => BIRDS.map(b => ({ state: b.state, t: b.t, note: b.note || null, guide: !!b.tx && !b.letter, x: b.x, y: b.y, z: b.z, tx: b.tx, tz: b.tz })),
     skipShot: () => { if (shot) { shot.t = shot.dur; shotTick(0); } },
+    endFx: () => { for (const k in FX) FX[k] = 0; },
     // dev harness helpers: a fresh visual of a placed-object kind, the sleeper's state, a letter bird on demand
     visual: kind => (kind === 'spirit' ? makeSpirit() : kind === 'bird' ? makeBird() : makeVisual(kind)),
     sleeper: () => (sleeper ? { model: sleeper.model || (sleeper.fallback ? 'fallback' : null), pose: Object.assign({}, sleeper.pose) } : null),
