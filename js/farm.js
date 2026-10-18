@@ -304,7 +304,7 @@
     if (MATS) return MATS; const TH = T3(); const M = L.MAT || {};
     const crop = new TH.MeshStandardMaterial({ vertexColors: true, roughness: .85, metalness: 0, side: TH.DoubleSide });
     if (L.stylize) L.stylize(crop, { wrap: .45, rim: .3, transl: .35 }); if (L.addWind) L.addWind(crop, .22, 1.3);
-    const glow = M.glow || new TH.MeshBasicMaterial({ vertexColors: true, color: new TH.Color(2.2, 2.2, 2.2), fog: false });
+    const glow = M.glow || new TH.MeshBasicMaterial({ vertexColors: true, color: new TH.Color(2.2, 2.2, 2.2), fog: false, side: TH.DoubleSide });
     const wet = new TH.MeshBasicMaterial({ color: 0x24170e, transparent: true, opacity: .32, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     return (MATS = { crop, glow, wet });
   }
@@ -497,19 +497,20 @@
   function specks(B, pts, R, h) { for (const [x, z] of pts) for (let k = 0; k < 2; k++) leaf(B, { x: x + (R() - .5) * .05, y: h, z: z + (R() - .5) * .05, yaw: R() * 6.3 }, .06, .035, { n: 1, rise: .7, droop: .1, c0: COL.g1 }); }
   const PROCS = {
     wheat(B, s, R) {
-      const pts = spots(4, 4, 1.85, R);
+      const pts = spots(4, 4, 1.8, R);
       if (s === 0) { mounds(B, pts, R, .13); specks(B, pts.filter((_, i) => i % 2 === 0), R, .045); return; }
       for (const [x, z] of pts) {
-        const n = 3;
+        const n = s === 1 ? 3 : 4;
         for (let k = 0; k < n; k++) {
-          const yaw = R() * 6.3, tilt = (R() - .5) * .35, h = s === 1 ? .16 + R() * .1 : s === 2 ? .5 + R() * .2 : .78 + R() * .22;
-          const T = { x: x + (R() - .5) * .1, y: 0, z: z + (R() - .5) * .1, yaw, tilt };
+          // each tuft fans out a little; ripe stalks are taller, golden and carry a plump ear
+          const yaw = k / n * 6.3 + R() * 1.2, tilt = s === 3 ? .1 + R() * .22 : R() * .3, h = s === 1 ? .18 + R() * .1 : s === 2 ? .55 + R() * .2 : .82 + R() * .22;
+          const T = { x: x + (R() - .5) * .08, y: 0, z: z + (R() - .5) * .08, yaw, tilt };
           if (s === 3) {
-            blade(B, T, h, .045, .06, COL.wheatS, COL.wheat1);
-            const tip = xf(T)(0, h * .98, .06 * .98); bipyr(B, { x: tip[0], y: tip[1], z: tip[2], yaw, tilt: tilt + .25 }, .028, .02, .13, 4, COL.wheat1, COL.wheat0, COL.wheatS);
-          } else blade(B, T, h, s === 1 ? .05 : .06, .05, COL.g0, s === 2 ? COL.g2 : COL.g1);
+            blade(B, T, h, .04, .04, COL.wheatS, COL.wheat1);
+            const tip = xf(T)(0, h * 1.0, .05 * h); bipyr(B, { x: tip[0], y: tip[1], z: tip[2], yaw, tilt: tilt + .3 }, .036, .03, .19, 4, COL.wheat1, COL.wheat0, COL.wheatS);
+          } else blade(B, T, h, s === 1 ? .055 : .065, .05, COL.g0, s === 2 ? COL.g2 : COL.g1);
         }
-        if (s >= 2) leaf(B, { x, y: .02, z, yaw: R() * 6.3 }, .25, .05, { n: 3, flat: true, rise: .5, droop: .5, c0: s === 3 ? COL.gY : COL.g0, c1: s === 3 ? COL.wheat0 : COL.g1 });
+        if (s >= 2) for (let k = 0; k < 2; k++) leaf(B, { x, y: .02, z, yaw: R() * 6.3 }, s === 3 ? .3 : .26, .055, { n: 3, flat: true, rise: .7, droop: .55, c0: s === 3 ? COL.gY : COL.g0, c1: s === 3 ? COL.wheat0 : COL.g1 });
       }
     },
     carrot(B, s, R) {
@@ -543,10 +544,10 @@
       const pts = spots(3, 3, 1.7, R);
       if (s === 0) { mounds(B, pts, R, .16); return; }
       for (const [x, z] of pts) {
-        const nl = s === 1 ? 3 : 7, L0 = s === 1 ? .12 : .2;
-        for (let k = 0; k < nl; k++) leaf(B, { x, y: .01, z, yaw: k / nl * 6.3 + R() * .4 }, L0 * (.8 + R() * .3), L0 * .75, { n: 2, rise: .8, droop: .7, fold: .35, c0: COL.gD, c1: COL.g0 });
-        if (s === 2) for (let k = 0; k < 2; k++) { const a = R() * 6.3; ellip(B, { x: x + Math.cos(a) * .1, y: .14, z: z + Math.sin(a) * .1 }, .03, .012, .03, COL.white, COL.white, { seg: 5, rings: 2 }); }
-        if (s === 3) for (let k = 0; k < 4; k++) { const a = k / 4 * 6.3 + R(), d = .1 + R() * .06; bipyr(B, { x: x + Math.cos(a) * d, y: .06 + R() * .04, z: z + Math.sin(a) * d, yaw: R() * 6 }, .032, .055, .015, 5, COL.g0, COL.berry, COL.berryD); }
+        const nl = s === 1 ? 4 : 7, L0 = s === 1 ? .14 : .24;
+        for (let k = 0; k < nl; k++) leaf(B, { x, y: .01, z, yaw: k / nl * 6.3 + R() * .4 }, L0 * (.8 + R() * .3), L0 * .8, { n: 2, rise: .85, droop: .7, fold: .35, c0: COL.gD, c1: COL.g0 });
+        if (s === 2) for (let k = 0; k < 3; k++) { const a = k * 2.1 + R(), fx = x + Math.cos(a) * .13, fz = z + Math.sin(a) * .13; bipyr(B, { x: fx, y: .16, z: fz, yaw: R() * 6 }, .048, .006, .014, 5, COL.yellow, COL.white, COL.white); }
+        if (s === 3) for (let k = 0; k < 5; k++) { const a = k / 5 * 6.3 + R(), d = .13 + R() * .07; bipyr(B, { x: x + Math.cos(a) * d, y: .07 + R() * .05, z: z + Math.sin(a) * d, yaw: R() * 6, tilt: (R() - .5) * .6 }, .046, .075, .02, 5, COL.g0, COL.berry, COL.berryD); }
       }
     },
     herbs(B, s, R) {
@@ -572,12 +573,13 @@
     moonflower(B, s, R, open, G) {
       if (s === 0) { mounds(B, [[0, 0]], R, .22); ellip(G, { x: 0, y: .1, z: 0 }, .025, .025, .025, COL.moonGlow, COL.moonGlow, { seg: 5, rings: 3 }); return; }
       const h = s === 1 ? .12 : s === 2 ? .45 : .62;
-      const nl = s === 1 ? 2 : 6; for (let k = 0; k < nl; k++) leaf(B, { x: 0, y: .01, z: 0, yaw: k / nl * 6.3 + .4 }, s === 1 ? .12 : .26, .1, { n: 3, rise: .7, droop: .55, fold: .4, c0: COL.moonLeafD, c1: COL.moonLeaf });
-      if (s === 1) return;
+      const nl = s === 1 ? 3 : 7; for (let k = 0; k < nl; k++) leaf(B, { x: 0, y: .01, z: 0, yaw: k / nl * 6.3 + .4 }, (s === 1 ? .14 : .28) * (.85 + R() * .3), s === 1 ? .1 : .12, { n: 3, rise: .7, droop: .55, fold: .4, c0: COL.moonLeafD, c1: COL.moonLeaf });
+      if (s === 1) { ellip(G, { x: 0, y: .1, z: 0 }, .02, .02, .02, COL.moonGlow, COL.moonGlow, { seg: 5, rings: 3 }); return; }
       tube(B, { x: 0, y: 0, z: 0 }, [[0, 0, 0], [.02, h * .5, .01], [0, h, 0]], [.018, .014, .012], [COL.moonLeafD, COL.moonLeaf], 4);
       for (let k = 0; k < 2; k++) leaf(B, { x: 0, y: h * .45, z: 0, yaw: k * 3.1 + .8 }, .15, .07, { n: 2, rise: .4, droop: .4, c0: COL.moonLeafD, c1: COL.moonLeaf });
       if (s === 2 || !open) { const bud = s === 2 ? .05 : .075; bipyr(B, { x: 0, y: h, z: 0 }, bud, .03, bud * 2.6, 6, COL.moon0, COL.moon1, COL.moonLeaf); if (s === 3) ellip(G, { x: 0, y: h + bud, z: 0 }, .02, .03, .02, COL.moonGlow, COL.moonGlow, { seg: 5, rings: 3 }); return; }
-      for (let k = 0; k < 7; k++) leaf(B, { x: 0, y: h, z: 0, yaw: k / 7 * 6.3 }, .2, .12, { n: 3, rise: .5, droop: -.15, fold: .45, c0: COL.moon1, c1: COL.moon0, up: false });
+      // open (only at night): the whole corolla glows softly, the heart brightest
+      for (let k = 0; k < 7; k++) leaf(G, { x: 0, y: h, z: 0, yaw: k / 7 * 6.3 }, .2, .12, { n: 3, rise: .5, droop: -.15, fold: .45, c0: shade(COL.moon1, .2), c1: shade(COL.moon0, .34), up: false });
       for (let k = 0; k < 5; k++) leaf(G, { x: 0, y: h + .01, z: 0, yaw: k / 5 * 6.3 + .4 }, .11, .07, { n: 2, rise: .9, droop: -.1, fold: .5, c0: COL.moonGlow, c1: COL.moon0, up: false });
       ellip(G, { x: 0, y: h + .03, z: 0 }, .035, .03, .035, COL.moonCore, COL.moonGlow, { seg: 6, rings: 3 });
     },
@@ -585,6 +587,7 @@
   function PROC(crop, s, open) {
     const K = CROPS[crop], B = NB(), G = NB(), R = rng(hashS(K.model + s));
     const fn = PROCS[K.model]; if (fn) fn(B, s, R, !!open, G);
+    if (K.night) for (const X of [B, G]) for (let k = 0; k < X.p.length; k++) X.p[k] *= 1.6; // the moon flower stands alone in its bed: make it a presence
     return { main: B, glow: G.i.length ? G : null, tris: (B.i.length + G.i.length) / 3 };
   }
 

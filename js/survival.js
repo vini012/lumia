@@ -267,7 +267,7 @@
       safeT -= dt; posT -= dt;
       if (grounded && !swimming && y > CY + 3) {
         if (safeT <= 0) { safeT = 1; SAFE.push({ x, y, z, t: RT }); if (SAFE.length > 16) SAFE.shift(); }
-        if (posT <= 0 && L.save && L.save.setPos) { posT = 3; L.save.setPos(x, y, z, ctx.ry || 0); }
+        if (posT <= 0 && L.save && L.save.setPos) { posT = 3; L.save.setPos(x, y, z, ctx.ry != null ? ctx.ry : (L.P && L.P.ry) || 0); }
       }
     }
     if (RS.on) tickRespawn(dt);
@@ -325,7 +325,7 @@
     SL.t += dt; const h = C().hours();
     if (!SL.skipped) {
       if (h >= 6 && h < 12 && SL.t > .5) { // dawn arrived (someone skipped, or the night really ended)
-        SL.skipped = true; SL.wakeAt = SL.t + 2.8; const bed = SL.bed || {};
+        SL.skipped = true; SL.wakeAt = SL.t + 3.6; const bed = SL.bed || {};
         emit('slept', { x: bed.x, z: bed.z }); story('slept', { x: bed.x, z: bed.z }); emit('sleep', { phase: 'dawn' });
         return;
       }
