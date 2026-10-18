@@ -39,7 +39,7 @@
  --sat:env(safe-area-inset-top,0px);--sal:env(safe-area-inset-left,0px);
  --paper:#f6ead0;--paper2:#ecd8b0;--ink:#7a5b45;--ink2:#5a3f2c;--soft:#a3876b;--text:#4c3727;--track:rgba(122,91,69,.17);
  --hand:'Caveat','Kalam','Segoe Print','Bradley Hand','Comic Sans MS',cursive;--title:'Grandstander','Itim','Fredoka','Baloo 2',system-ui,sans-serif;
- --gs:clamp(36px,min(6.4vh,4.6vw),48px);font-family:var(--title);color:var(--ink)}
+ --gs:clamp(36px,min(6.4vh,4.6vw),52px);font-family:var(--title);color:var(--ink)}
 #sv[hidden]{display:none}
 #sv *{box-sizing:border-box}
 #sv .sv-i{display:block;width:100%;height:100%}
@@ -62,7 +62,7 @@
 .sv-disc{position:absolute;inset:5px;border-radius:inherit;display:flex;align-items:center;justify-content:center;padding:12%;color:var(--ink2);
  background:radial-gradient(circle at 36% 28%,#fffbf1 0,#fbf1db 55%,#efdfbd 100%);border:1.6px solid var(--ink);transition:background .5s,color .5s}
 .sv-dial::after{content:'';position:absolute;inset:-1px;border-radius:inherit;border:2px solid var(--ink);pointer-events:none}
-.sv-g b{font:700 10px/1 var(--title);letter-spacing:.02em;color:var(--ink2);white-space:nowrap;transition:opacity .8s,max-height .8s;max-height:12px;overflow:hidden}
+.sv-g b{font:700 clamp(10px,calc(var(--gs) * .235),12px)/1 var(--title);letter-spacing:.02em;color:var(--ink2);white-space:nowrap;transition:opacity .8s,max-height .8s;max-height:14px;overflow:hidden}
 #sv.sv-nolabels .sv-g b{opacity:0;max-height:0}
 .sv-fome{--c:#e3874a}.sv-en{--c:#9cba3a}.sv-mana{--c:#4d9be0}.sv-frio{--c:#7cc4ea}
 .sv-fome.sv-low{--c:#d0583f}.sv-fome.sv-low .sv-disc{color:#a8432d}
@@ -128,7 +128,7 @@
 .sv-btn:active{transform:translateY(2px);box-shadow:0 1px 0 rgba(122,91,69,.45)}
 .sv-resp{background:radial-gradient(circle at 30% 35%,#ffffff 0,rgba(255,255,255,0) 38%),radial-gradient(circle at 72% 62%,#ffffff 0,rgba(255,255,255,0) 42%),radial-gradient(120% 120% at 50% 50%,#fbfcfd 0,#eef2f7 70%,#e3e9f1 100%);transition:opacity .75s,visibility 0s .75s}
 .sv-resp.sv-on{transition:opacity .75s,visibility 0s}
-.sv-puffs{position:absolute;inset:0;width:100%;height:100%;opacity:.9;animation:sv-drift 9s ease-in-out infinite alternate}
+.sv-puffs{position:absolute;left:-8%;top:-4%;width:116%;height:108%;opacity:.9;animation:sv-drift 9s ease-in-out infinite alternate}
 .sv-resp>*:not(.sv-puffs){position:relative;z-index:1}
 .sv-resp .sv-big{color:var(--ink2);text-shadow:0 1px 0 #fff;font-size:clamp(28px,min(4.6vw,8vh),44px);opacity:0;transform:translateY(8px);transition:opacity .9s .35s,transform .9s .35s}
 .sv-resp.sv-on .sv-big{opacity:1;transform:none}

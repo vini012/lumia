@@ -188,7 +188,7 @@ async function testMode() {
 // ================================================================ HUD screenshots
 async function shotsMode() {
   const W = +(process.env.W || 844), Hh = +(process.env.H || 390);
-  const P = await phone('Vini', { w: W, h: Hh, dsf: 2, touch: true, world: 'hud', q: (BG ? '&bg=/__bg.jpg' : '') + (process.env.Q || '') });
+  const P = await phone('Vini', { w: W, h: Hh, dsf: +(process.env.DSF || 2), touch: !process.env.DESK, world: 'hud', q: (BG ? '&bg=/__bg.jpg' : '') + (process.env.Q || '') });
   await P.open(); const pre = process.env.PRE || 'hud';
   await P.ev(() => { L.surv.set({ fome: 72, en: 88, mana: 64, frio: 0 }); L.survUI.update(); }); await sleep(900);
   await P.shot(pre + '_1_normal');
