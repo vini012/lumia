@@ -1,5 +1,5 @@
 /* Lumiar v5 flora: painterly foliage atlas (clumpy canopies), foliage card material (world-space wind,
-   soft translucency, lighter tops, see-through hole), card generators kept from v4 (canopyCards, blobCards, frondGeo). */
+   soft translucency, lighter tops, see-through hole), card generators kept from v4 (canopyCards, blobCards, frondGeo), procedural pineCards and broadleafCards. */
 'use strict';
 (function (L) {
   const { clamp, lerp } = L;
@@ -17,24 +17,32 @@
     g.save(); g.translate(x, y); g.rotate(ang); g.beginPath(); g.moveTo(0, -len / 2); g.bezierCurveTo(wid, -len * .25, wid * .8, len * .3, 0, len / 2); g.bezierCurveTo(-wid * .8, len * .3, -wid, -len * .25, 0, -len / 2);
     g.fillStyle = fill; g.fill(); if (rib) { g.strokeStyle = 'rgba(30,40,20,.14)'; g.lineWidth = Math.max(1, wid * .1); g.beginPath(); g.moveTo(0, -len * .42); g.lineTo(0, len * .42); g.stroke(); } g.restore();
   }
-  // a chunky clump: overlapping lobes, each a soft-shaded ball with a scalloped leafy rim (stylized, not noisy)
+  // a leafy clump: a few overlapping masses, each built from many small pointed leaves in three value bands (dark
+  // underside, body, sunlit cap toward the upper left). Leaves at the rim stick out, so the silhouette is ragged and
+  // leafy instead of a ball; the bands read as painted light and shade once the card takes the tree tint.
   function drawClump(g, ox, oy, S, seed, fine) {
     const r = rnd(seed), cx = ox + S / 2, cy = oy + S / 2;
-    const lobes = []; const nl = fine ? 11 : 7;
-    for (let i = 0; i < nl; i++) { const a = r() * TAU, d = (i === 0 ? 0 : .12 + r() * .17) * S; const rad = S * (fine ? .1 + r() * .07 : .14 + r() * .08) * (i === 0 ? 1.25 : 1); lobes.push({ x: cx + Math.cos(a) * d, y: cy + Math.sin(a) * d * .85, r: rad }); }
-    lobes.sort((p, q) => (q.y - p.y)); // lower lobes first, upper lobes drawn on top
+    const lobes = []; const nl = fine ? 8 : 5;
+    for (let i = 0; i < nl; i++) {
+      const a = r() * TAU, d = (i === 0 ? 0 : .1 + r() * .15) * S;
+      const rad = S * (fine ? .1 + r() * .05 : .13 + r() * .06) * (i === 0 ? 1.2 : 1);
+      lobes.push({ x: cx + Math.cos(a) * d, y: cy + Math.sin(a) * d * .8, r: rad });
+    }
+    lobes.sort((p, q) => (q.y - p.y));   // lower masses first, upper ones painted over them
+    const band = (l, n, spread, dy, s0, sj, warm, lenK, keep) => {
+      for (let k = 0; k < n; k++) {
+        const a = r() * TAU, d = Math.sqrt(r()) * l.r * spread, x = l.x + Math.cos(a) * d, y = l.y + Math.sin(a) * d * .9 + dy * l.r;
+        if (keep && !keep(x - l.x, y - l.y)) continue;
+        const len = l.r * lenK * (.75 + r() * .5), ang = a + Math.PI / 2 + (r() - .5) * 1.1;
+        leafShape(g, x, y, len, len * .42, ang, shadeCol(s0 + (r() - .5) * sj, warm), false);
+      }
+    };
+    const lk = fine ? .26 : .3;
     for (const l of lobes) {
-      // scalloped rim: small leaf tips around the lobe
-      const nt = fine ? 16 : 13;
-      for (let k = 0; k < nt; k++) { const a = k / nt * TAU + r() * .3; const ex = l.x + Math.cos(a) * l.r * .92, ey = l.y + Math.sin(a) * l.r * .92; const up = clamp(-Math.sin(a) * .5 + .5, 0, 1); leafShape(g, ex, ey, l.r * (fine ? .5 : .55), l.r * (fine ? .26 : .3), a + Math.PI / 2 + (r() - .5) * .5, shadeCol(.55 + up * .3 + (r() - .5) * .06, .5), false); }
-      const gr = g.createRadialGradient(l.x - l.r * .3, l.y - l.r * .42, l.r * .08, l.x, l.y, l.r * 1.02);
-      gr.addColorStop(0, shadeCol(1.0, .7)); gr.addColorStop(.45, shadeCol(.86, .5)); gr.addColorStop(.85, shadeCol(.66, .3)); gr.addColorStop(1, shadeCol(.58, .2));
-      g.fillStyle = gr; g.beginPath(); g.arc(l.x, l.y, l.r, 0, TAU); g.fill();
-      // a few painted leaf strokes on the lit side
-      for (let k = 0; k < (fine ? 5 : 7); k++) { const a = -Math.PI * (.15 + r() * .7), d = l.r * (.25 + r() * .5); leafShape(g, l.x + Math.cos(a) * d, l.y + Math.sin(a) * d, l.r * .34, l.r * .16, a + Math.PI / 2 + (r() - .5), shadeCol(.95 + r() * .08, .8, .55), false); }
-      // soft contact shadow under the lobe
-      const sg = g.createRadialGradient(l.x, l.y + l.r * .95, l.r * .1, l.x, l.y + l.r * .95, l.r * .8); sg.addColorStop(0, 'rgba(40,52,30,.18)'); sg.addColorStop(1, 'rgba(40,52,30,0)');
-      g.save(); g.globalCompositeOperation = 'source-atop'; g.fillStyle = sg; g.fillRect(l.x - l.r, l.y, l.r * 2, l.r * 1.8); g.restore();
+      band(l, fine ? 60 : 85, 1.0, .1, .5, .07, .1, lk * 1.05);                                         // dark underside, widest
+      band(l, fine ? 55 : 75, .86, -.04, .7, .08, .4, lk);                                             // body
+      band(l, fine ? 34 : 46, .72, -.2, .9, .08, .8, lk * .95, (x, y) => x * .45 + y < l.r * .18);     // sunlit cap, upper left
+      band(l, fine ? 10 : 14, .5, -.38, 1.02, .05, 1, lk * .85, (x, y) => x * .45 + y < -l.r * .05);   // a few bright tips
     }
   }
   // One whorl of a conifer seen from the side: a drooping umbrella with a serrated hem, painted as needle tufts that are
@@ -271,6 +279,40 @@
     const bark = new THREE.CylinderGeometry(H * .014, H * .032, H * .62, lo ? 5 : 7, 1, true); bark.translate(0, H * .29, 0);
     bark.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(bark.attributes.position.count * 3).fill(.8), 3));
     return { canopy: cg, bark, h: H };
+  };
+
+  // ---------- procedural broadleaf: a short trunk forking into boughs, each ending in a leaf mass of cards ----------
+  // opts: {h: height m (9), seed, lo: fewer, larger cards, low: forks near the ground with spreading, low boughs (a
+  // framing tree for close views)}. Returns {canopy, bark, h}. The gaps between the masses
+  // let the boughs show, which reads far less like a ball than a single canopy shell.
+  L.broadleafCards = function (opts) {
+    opts = opts || {}; const r = rnd(opts.seed || 13), H = opts.h || 9, lo = !!opts.lo, low = !!opts.low;
+    const blobs = [], parts = [];
+    const limb = (x0, y0, z0, x1, y1, z1, r0, r1) => {
+      const len = Math.hypot(x1 - x0, y1 - y0, z1 - z0), c = new THREE.CylinderGeometry(r1, r0, len, lo ? 4 : 6, 1, true);
+      c.translate(0, len / 2, 0); const dir = new THREE.Vector3(x1 - x0, y1 - y0, z1 - z0).normalize();
+      c.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir))); c.translate(x0, y0, z0);
+      parts.push(c.index ? c.toNonIndexed() : c);
+    };
+    const fork = H * (low ? .16 + r() * .05 : .3 + r() * .08);
+    limb(0, -.4, 0, 0, fork + H * .06, 0, H * .042, H * .028);
+    const nb = 4 + Math.floor(r() * 2), a0 = r() * TAU;
+    for (let b = 0; b < nb; b++) {
+      const a = a0 + (b + (r() - .5) * .45) / nb * TAU, el = low ? .3 + r() * .5 : .68 + r() * .4, len = H * (low ? .4 + r() * .12 : .33 + r() * .1);
+      const sy = fork - H * .03 + r() * H * .1, ex = Math.cos(a) * Math.cos(el) * len, ey = sy + Math.sin(el) * len, ez = Math.sin(a) * Math.cos(el) * len;
+      limb(0, sy, 0, ex, ey, ez, H * .022, H * .01);
+      const rc = H * (.22 + r() * .05);
+      blobs.push([ex * 1.05, ey + rc * .2, ez * 1.05, rc * 1.12, rc * .95, rc * 1.12]);
+      const t = .5; blobs.push([ex * t + (r() - .5) * H * .1, sy + (ey - sy) * t + rc * .35, ez * t + (r() - .5) * H * .1, rc * .85, rc * .7, rc * .85]);
+    }
+    blobs.push([0, H * .8, 0, H * .26, H * .18, H * .26]);   // crown
+    const canopy = L.blobCards(blobs, { n: lo ? 56 : 170, size: lo ? [H * .3, H * .4] : [H * .19, H * .27], quads: [0, 1], inset: lo ? .2 : .38, seed: (opts.seed || 13) + 1 });
+    let n = 0; for (const p of parts) n += p.attributes.position.count;
+    const P = new Float32Array(n * 3), N = new Float32Array(n * 3); let o = 0;
+    for (const p of parts) { P.set(p.attributes.position.array, o * 3); N.set(p.attributes.normal.array, o * 3); o += p.attributes.position.count; }
+    const bark = new THREE.BufferGeometry(); bark.setAttribute('position', new THREE.BufferAttribute(P, 3)); bark.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+    bark.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(n * 3).fill(.55), 3)); bark.computeBoundingSphere();
+    return { canopy, bark, h: H };
   };
 
   // ---------- legacy grass patch + material (kept for callers outside grass.js; grass.js v5 has its own) ----------

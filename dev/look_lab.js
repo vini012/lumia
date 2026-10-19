@@ -208,7 +208,7 @@
   // ================================================================ presets
   const PRE = {
     a: { pos: [0, 0], eye: 1.35, yaw: 0, pitch: 0, fov: 40, sunAz: .35, focus: [-6, -46], size: [1400, 598], ref: 'd959254a' },
-    b: { pos: [OB[0], OB[1]], eye: 1.8, yaw: 0, pitch: -3, fov: 34, sunAz: -2.55, sunEl: .62, focus: [OB[0] - 4, OB[1] - 40], size: [1400, 650], ref: '57faf138' },
+    b: { pos: [OB[0], OB[1]], eye: 1.8, yaw: 0, pitch: -3, fov: 34, sunAz: -2.55, sunEl: .62, haze: 2, focus: [OB[0] - 4, OB[1] - 40], size: [1400, 650], ref: '57faf138' },
     c: { pos: [OC[0], OC[1]], eye: 3.0, yaw: 0, pitch: -19, fov: 50, sunAz: .75, sunEl: .6, focus: [OC[0], OC[1] - 14], size: [1310, 569], ref: 'be82a764', hero: [OC[0], OC[1] - 4.3], cloudY: 32 },
     k: { pos: [9000, 9000], eye: 260, yaw: 0, pitch: 4, fov: 50, sunAz: 2.2, focus: null, size: [1400, 600], ref: null, test: 'clouds' },   // dev: cloud test bench
     // dev: the Névoa seen from the meadow of area c (?mist=in puts the camera inside it, ?mist=open opens the lit corridor)
@@ -366,11 +366,14 @@
   const treeGeo = {};
   function prepTrees() {
     const partOf = n => n === 'canopy' ? 'canopy' : 'bark';
-    // conifers: procedural whorls of bough cards (L.pineCards); round trees: v4 canopy shell dressed with cards
+    // conifers: procedural whorls of bough cards (L.pineCards); round trees: forked boughs with leaf masses (L.broadleafCards)
     const ph = L.pineCards({ h: 10, seed: 23 }), pl = L.pineCards({ h: 10, seed: 29, lo: true });
     treeGeo.pine = { hi: { canopy: ph.canopy, bark: ph.bark }, lo: { canopy: pl.canopy, bark: pl.bark }, h: 10 };
+    const oh = L.broadleafCards({ h: 9, seed: 31 }), ol = L.broadleafCards({ h: 9, seed: 37, lo: true });
+    treeGeo.oak = { hi: { canopy: oh.canopy, bark: oh.bark }, lo: { canopy: ol.canopy, bark: ol.bark }, h: 9 };
+    const ow = L.broadleafCards({ h: 9, seed: 43, low: true }); treeGeo.oakLow = { hi: { canopy: ow.canopy, bark: ow.bark }, lo: { canopy: ow.canopy, bark: ow.bark }, h: 9 };
     for (const k in TREE_KINDS) {
-      if (k === 'pine') continue;
+      if (k === 'pine' || k === 'oak') continue;
       const A = TREE_KINDS[k]; const hi = L.flatten('tree_' + k, partOf), lo = L.flatten('tree_' + k + '_lo', partOf);
       hi.canopy.computeBoundingBox(); const bb = hi.canopy.boundingBox;
       treeGeo[k] = {
@@ -381,8 +384,8 @@
     }
   }
   const TREES = [];   // {k, x, z, h, tint}
-  const TINT = { pine: [C(0x5d7638), C(0x4d6534), C(0x667f3e)], oak: [C(0x86a843), C(0x779a3e), C(0x94b44c)] };
-  function addTree(k, x, z, h, r) { if (labH(x, z) < 1) return; const T = TINT[k]; TREES.push({ k, x, z, h, tint: T[Math.floor(r() * T.length)] }); }
+  const TINT = { pine: [C(0x5d7638), C(0x4d6534), C(0x667f3e)], oak: [C(0x64a63c), C(0x579737), C(0x72b044)] }; TINT.oakLow = TINT.oak;
+  function addTree(k, x, z, h, r, rot) { if (labH(x, z) < 1) return; const T = TINT[k]; TREES.push({ k, x, z, h, rot, tint: T[Math.floor(r() * T.length)] }); }
   function scatterTrees() {
     const r = rnd(5);
     if (PRESET === 'a') {
@@ -421,7 +424,8 @@
       for (let i = 0; i < 70; i++) { const x = X(-80 + r() * 290), z = Z(-370 - r() * 280); const h = labH(x, z); if (h < 284 || L.slope(x, z) > .35 || Math.hypot(x - X(B_TOWN[0]), z - Z(B_TOWN[1])) < 75) continue; addTree(r() < .5 ? 'pine' : 'oak', x, z, lerp(7, 11, r()), r); }
       for (let i = 0; i < 300; i++) { const x = X(-600 + r() * 1700), z = Z(-560 - r() * 900); const h = labH(x, z); if (h < 300 || L.slope(x, z) > .45 || fbm(x * .006, z * .006, 2, 8) < .48) continue; addTree('pine', x, z, lerp(12, 20, r()), r); }
       for (let i = 0; i < 500; i++) { const x = X(-900 + r() * 1450), z = Z(-950 - r() * 1600); const h = labH(x, z); if (h < 380 || L.slope(x, z) > .45 || fbm(x * .005, z * .005, 2, 8) < .5) continue; addTree('pine', x, z, lerp(14, 22, r()), r); }
-      addTree('oak', X(-9), Z(-12), 15, r); addTree('oak', X(14), Z(-26), 12, r); addTree('oak', X(-2), Z(-160), 8, r);
+      addTree('oakLow', X(-10.6), Z(-8.5), 10, r, 3.14);   // framing tree, turned so its low boughs reach into the top-left corner
+      addTree('oak', X(14), Z(-26), 12, r); addTree('oak', X(-2), Z(-160), 8, r);
     }
   }
   function buildTrees(cam) {
@@ -432,7 +436,7 @@
       const [k, lod] = key.split('|'), list = groups[key], G = treeGeo[k][lod];
       const can = new THREE.InstancedMesh(G.canopy, L.MAT.foliage, list.length); L.applyFoliage(can, L.MAT.foliage);
       const bark = G.bark ? new THREE.InstancedMesh(G.bark, L.MAT.bark, list.length) : null;
-      list.forEach((t, i) => { const sc = t.h / treeGeo[k].h; p.set(t.x, labH(t.x, t.z) - .3, t.z); q.setFromAxisAngle(Y, (t.x * 7.31 + t.z * 3.17) % TAU); s.set(sc, sc, sc); m4.compose(p, q, s); can.setMatrixAt(i, m4); can.setColorAt(i, t.tint); if (bark) bark.setMatrixAt(i, m4); });
+      list.forEach((t, i) => { const sc = t.h / treeGeo[k].h; p.set(t.x, labH(t.x, t.z) - .3, t.z); q.setFromAxisAngle(Y, t.rot != null ? t.rot : (t.x * 7.31 + t.z * 3.17) % TAU); s.set(sc, sc, sc); m4.compose(p, q, s); can.setMatrixAt(i, m4); can.setColorAt(i, t.tint); if (bark) bark.setMatrixAt(i, m4); });
       for (const m of [can, bark]) { if (!m) continue; m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; L.scene.add(m); }
     }
   }
@@ -524,6 +528,7 @@
   function sunFor(name) {
     const tp = L.todPreset(name, QS.get('sun') ? Number(QS.get('sun')) : P.sunAz);   // dev: ?sun=azimuth (rad)
     if (P.sunEl && name === 'day') { const az = Math.atan2(tp.sunDir.z, tp.sunDir.x); tp.sunDir.set(Math.cos(az) * Math.cos(P.sunEl), Math.sin(P.sunEl), Math.sin(az) * Math.cos(P.sunEl)); }
+    tp.haze = P.haze || 1;
     return tp;
   }
   async function bootCloudTest() {

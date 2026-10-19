@@ -115,7 +115,8 @@ window.L = window.L || {};
     float fogFactor = max(1. - exp(-tA * hzB.w), smoothstep(hzE.z, hzE.w, fogDist));
     float fLum = dot(fc, vec3(.2126, .7152, .0722));
     float fS = smoothstep(.0, .4, fLum);
-    fc = mix(fc, mix(hzA.rgb, hzB.rgb, fS), fA * (1. - .45 * fS));   // shade turns deep blue first; sunlit faces keep their colour longer
+    float fAd = (1. - exp(-tA * 2.5)) * hzA.w;
+    fc = mix(fc, mix(hzA.rgb, hzB.rgb, fS), mix(fAd, fA * .5, fS));   // shade turns deep blue early; sunlit faces keep their colour longer
     vec3 fHor = mix(fogColor, hzC.rgb, pow(max(dot(fogRd, hzD.xyz), 0.), hzC.w));
     fc = mix(fc, fHor, fogFactor);
   #else
@@ -214,7 +215,7 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
   float back = (pow(max(-ndl, 0.), 2.) + .15 * (1. - lam)) * uV5m.z;
   rl.directDiffuse += alb * Lc * (lit + back * sh * clamp(dot(V, -Ld) * .5 + .5, .2, 1.));
   float hw = dot(N, up) * .5 + .5, litK = clamp(lit * 1.25, 0., 1.);
-  hw = mix(hw, 1., .4 * (1. - litK));                 // shade is lit by the sky dome more than by the ground bounce: blue
+  hw = mix(hw, 1., .6 * (1. - litK));                 // shade is lit by the sky dome more than by the ground bounce: blue
   vec3 fill = mix(gndC, skyC, hw) * uV5P.z;
   fill *= mix(uV5ShadowTint, vec3(1.), litK);
   rl.indirectDiffuse += alb * (fill + uV5Lift);
@@ -537,8 +538,8 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
   // ================================================================ time of day
   // Palettes (sRGB hex in, linear out). L.TOD holds the blended state that sky/terramat/grass read.
   const PAL = {
-    day: { zen: 0x4b9fe6, mid: 0x5aa8ea, hor: 0x9cc6ec, low: 0xdfe6ee, sun: 0xfff1d8, sunI: 1.32, sky: 0xa8cff4, skyI: .6, gnd: 0xc4bf7a, gndI: .36,
-      veilD: 0x2c5f98, veilL: 0x88cdec, hazeA: 0xa9cdee, hazeS: 0xe4ecf0, cLit: 0xf4f6f8, cBody: 0xd9dde2, cShade: 0xb6c3d3, cDeep: 0x95a9c4, tint: [.5, .66, 1.0], exp: 1 },
+    day: { zen: 0x2f7fdc, mid: 0x3f8fe2, hor: 0x80b9e8, low: 0xdfe6ee, sun: 0xfff1d8, sunI: 1.32, sky: 0x9ac8f6, skyI: .6, gnd: 0xc4bf7a, gndI: .36,
+      veilD: 0x2c5f98, veilL: 0x7cc2e6, hazeA: 0x8ec2ea, hazeS: 0xe4ecf0, cLit: 0xf4f6f8, cBody: 0xd9dde2, cShade: 0xb6c3d3, cDeep: 0x95a9c4, tint: [.42, .6, 1.04], exp: 1 },
     dusk: { zen: 0x2f5aa8, mid: 0x6d86c4, hor: 0xf0b48a, low: 0xffd4a0, sun: 0xffa45c, sunI: 1.25, sky: 0x8c95cc, skyI: .5, gnd: 0xa4805a, gndI: .28,
       veilD: 0x3b4e8c, veilL: 0xc9a2a0, hazeA: 0xb9a5c4, hazeS: 0xffc58e, cLit: 0xffd8b0, cBody: 0xe9b9a6, cShade: 0x8f8db5, cDeep: 0x6c6996, tint: [.66, .62, 1.0], exp: 1 },
     night: { zen: 0x0a1838, mid: 0x112552, hor: 0x24406f, low: 0x2e4b7c, sun: 0xa8c0ff, sunI: .3, sky: 0x4a66aa, skyI: .5, gnd: 0x22304e, gndI: .22,
@@ -552,7 +553,8 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
   function mix3(f, out) { const a = P3.day[f], b = P3.dusk[f], n = P3.night[f]; out.setRGB(a.r * TOD.day + b.r * TOD.dusk + n.r * TOD.night, a.g * TOD.day + b.g * TOD.dusk + n.g * TOD.night, a.b * TOD.day + b.b * TOD.dusk + n.b * TOD.night); return out; }
   function mixN(f) { return P3.day[f] * TOD.day + P3.dusk[f] * TOD.dusk + P3.night[f] * TOD.night; }
   const GREY = C(0x9aa4ae);
-  // o: {sunDir, moonDir, dayW, duskW, nightW, rain}. Missing weights are derived from the sun height.
+  // o: {sunDir, moonDir, dayW, duskW, nightW, rain, haze}. Missing weights are derived from the sun height; haze scales
+  // the aerial perspective (1 = default, kept until changed: a region or a preset can ask for a hazier valley).
   L.setTimeOfDay = function (o) {
     o = o || {};
     if (o.sunDir) TOD.sunDir.copy(o.sunDir).normalize();
@@ -584,7 +586,9 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
     mix3('hazeA', TOD.hazeA); mix3('hazeS', TOD.hazeS);
     if (R > 0) { TOD.hazeA.lerp(_c.copy(GREY).multiplyScalar(1 - TOD.night * .7), R * .8); TOD.hazeS.lerp(TOD.hazeA, R * .8); }
     scene.fog.color.copy(TOD.hazeA); scene.background.copy(TOD.hor);
-    scene.fog.density = .0006 * (1 + R * 2.2 + TOD.dusk * .15);
+    TOD.haze = o.haze != null ? o.haze : (TOD.haze || 1);
+    scene.fog.density = .0006 * TOD.haze * (1 + R * 2.2 + TOD.dusk * .15);
+    HZ.B[3] = .38 / Math.sqrt(TOD.haze);   // extra haze mostly thickens the blue veil, the fade to the horizon colour grows slower
     mix3('veilD', _c); HZ.A[0] = _c.r; HZ.A[1] = _c.g; HZ.A[2] = _c.b;
     mix3('veilL', _c); if (R > 0) _c.lerp(_c2.copy(GREY).multiplyScalar(1 - TOD.night * .7), R * .7); HZ.B[0] = _c.r; HZ.B[1] = _c.g; HZ.B[2] = _c.b;
     HZ.C[0] = TOD.hazeS.r; HZ.C[1] = TOD.hazeS.g; HZ.C[2] = TOD.hazeS.b; HZ.C[3] = 6 - TOD.dusk * 3;
