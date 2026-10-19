@@ -21,7 +21,7 @@ window.L = window.L || {};
     back: '<path d="M15 5.5c-2.6 2.2-4.8 4.4-6.6 6.6 1.8 2.2 4 4.3 6.6 6.4"/>',
     star: '<path d="M12 2.6l2.8 5.9 6.4.8-4.7 4.5 1.2 6.4L12 17.1l-5.7 3.1 1.2-6.4-4.7-4.5 6.4-.8z"/>',
     letter: '<path d="M3.3 6.8l17.4-.3.2 11.2-17.6.3z"/><path d="M3.6 7.2l8.5 6.6 8.5-6.9"/>',
-    stone: '<path d="M4.8 15.6c-1.3-4.4 2.2-8.6 7.4-8.6 5.6 0 8.6 3.4 7.4 7.6-.9 3.2-4.6 4.6-8.6 4.5-3.2-.1-5.5-1.1-6.2-3.5z"/><path d="M9 12.2c1.4-.8 3.6-.9 5.6 0"/>',
+    stone: '<path d="M6.4 19.8c-1.3-3.6-1.5-8.6.6-11.6 1.9-2.8 6-3.9 9.2-2.2 2.9 1.6 3.6 5.6 2.7 9-.5 1.9-1.1 3.6-1.9 4.8z"/><path d="M3.6 20h16.8"/><path d="M12.4 8.8v7.4M10.2 10.6l2.2 1.7 2.2-1.7M10.6 14.4l1.8 1.3"/>',
     rune: '<path d="M5 17.5c-1-4.6 1.6-10 7-10.5 5.4.4 7.8 5.6 7 10.5z"/><path d="M12 9.5v6M9.6 11.2l2.4 1.6 2.4-1.6"/>',
     sign: '<path d="M4 5.2l16.2.4-.3 7.6-15.8-.3z"/><path d="M12 13v7.6M10 20.6h4"/><path d="M7 8.4h7M7 10.4h9"/>',
     bottle: '<path d="M10.2 3h3.6v3.6l2.4 3.4v10H7.8V10l2.4-3.4z"/><path d="M9.5 13.5h5v3h-5z"/>',
@@ -52,8 +52,9 @@ window.L = window.L || {};
 
   // ------------------------------------------------------------------ CSS
   const NOISE = enc('<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="3" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 .42 0 0 0 0 .3 0 0 0 0 .18 0 0 0 .55 0"/></filter><rect width="100%" height="100%" filter="url(#n)" opacity=".42"/></svg>');
-  const FIBRE = enc('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><filter id="f"><feTurbulence type="fractalNoise" baseFrequency=".012 .09" numOctaves="2" seed="4"/><feColorMatrix values="0 0 0 0 .5 0 0 0 0 .36 0 0 0 0 .2 0 0 0 .35 -.05"/></filter><rect width="100%" height="100%" filter="url(#f)"/></svg>');
-  const GRAIN = enc('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="120"><filter id="g"><feTurbulence type="fractalNoise" baseFrequency=".004 .16" numOctaves="3" seed="7"/><feColorMatrix values="0 0 0 0 .3 0 0 0 0 .17 0 0 0 0 .08 0 0 0 .7 -.12"/></filter><rect width="100%" height="100%" filter="url(#g)"/></svg>');
+  // tiles repeat without seams: stitchTiles plus base frequency x tile size = whole numbers (4 and 27; 2 and 18; 153)
+  const FIBRE = enc('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><filter id="f"><feTurbulence type="fractalNoise" baseFrequency=".013333 .09" numOctaves="2" seed="4" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 .5 0 0 0 0 .36 0 0 0 0 .2 0 0 0 .35 -.05"/></filter><rect width="100%" height="100%" filter="url(#f)"/></svg>');
+  const GRAIN = enc('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="120"><filter id="g"><feTurbulence type="fractalNoise" baseFrequency=".005 .15" numOctaves="3" seed="7" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 .3 0 0 0 0 .17 0 0 0 0 .08 0 0 0 .7 -.12"/></filter><rect width="100%" height="100%" filter="url(#g)"/></svg>');
   function enc(s) { return 'url("data:image/svg+xml,' + encodeURIComponent(s) + '")'; }
   const TAPE = 'polygon(2% 6%,98% 0,100% 18%,97% 34%,100% 52%,97% 70%,100% 88%,97% 100%,3% 96%,0 80%,3% 62%,0 46%,3% 28%,0 12%)';
   const CSS = `
@@ -63,9 +64,15 @@ window.L = window.L || {};
  --sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px);--sal:env(safe-area-inset-left,0px);--sar:env(safe-area-inset-right,0px);
  --paper:#f6ead0;--paper2:#ecd8b0;--ink:#7a5b45;--ink2:#5a3f2c;--soft:#a3876b;--text:#4c3727;
  --hand:'Caveat','Kalam','Segoe Print','Bradley Hand','Comic Sans MS',cursive;--title:'Grandstander','Itim','Fredoka','Baloo 2',system-ui,sans-serif;
- --t1:#86bcae;--t2:#e9a88e;--t3:#ecca72;--t4:#a9bce3;--gold:#f2c14e;font-family:var(--title);color:var(--ink)}
+ --t1:#86bcae;--t2:#e9a88e;--t3:#ecca72;--t4:#a9bce3;--gold:#f2c14e;font-family:var(--title);color:var(--ink);
+ /* reserved zones of the game's touch HUD (v4 layout; the game may override these tokens on #lu): action cluster box
+    (bottom right), joystick ring (bottom left), top-right block (clock/icons + minimap) */
+ --actW:236px;--actH:214px;--joyS:110px;--trW:276px;--rbS:54px;
+ --colR:calc(var(--sar) + 24px + var(--actW));--barB:calc(var(--sab) + max(84px,38px + var(--joyS)));--barR:var(--colR);--sayB:calc(var(--sab) + 26px + var(--actH))}
+@media (max-height:430px){#lu{--actW:212px;--actH:188px;--joyS:90px;--trW:256px;--rbS:48px}}
+@media (max-width:640px){#lu{--barB:calc(var(--sab) + max(40px + 2 * var(--rbS),38px + var(--joyS)));--barR:max(var(--colR),calc(var(--sar) + var(--trW) + 10px))}}
 #lu *{box-sizing:border-box}
-#lu button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none}
+:where(#lu) button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none}
 .lu-i{width:24px;height:24px;display:block;flex:none}
 .lu-paper{position:relative;background-color:var(--paper);color:var(--text);
  background-image:radial-gradient(120% 90% at 30% 20%,rgba(255,251,238,.75),rgba(255,251,238,0) 55%),radial-gradient(150% 130% at 50% 50%,rgba(0,0,0,0) 58%,rgba(150,105,50,.22)),${FIBRE},${NOISE};
@@ -134,7 +141,7 @@ window.L = window.L || {};
 .lu-tabs{display:flex;gap:7px;align-items:flex-end;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none;padding:6px 2px 0}
 .lu-tabs::-webkit-scrollbar{display:none}
 .lu-tab{position:relative;flex:none;min-height:42px;padding:9px clamp(15px,2.3vw,24px) 7px;font:700 clamp(13px,min(1.9vw,3.8vh),17px)/1 var(--title)!important;color:var(--ink2)!important;
- background:repeating-linear-gradient(-45deg,rgba(255,255,255,.22) 0 5px,rgba(255,255,255,0) 5px 11px),var(--c)!important;clip-path:${TAPE};opacity:.62;transform:rotate(var(--r)) translateY(3px);transition:transform .18s,opacity .18s}
+ background:repeating-linear-gradient(-45deg,rgba(255,255,255,.22) 0 5px,rgba(255,255,255,0) 5px 11px),var(--c)!important;clip-path:${TAPE};opacity:.86;transform:rotate(var(--r)) translateY(3px);transition:transform .18s,opacity .18s;white-space:nowrap}
 .lu-tab.lu-sel{opacity:1;transform:rotate(var(--r)) translateY(-1px) scale(1.06)}
 .lu-tab .lu-dot{display:inline-block;width:8px;height:8px;margin-left:5px;border-radius:50%;background:#d0583f;vertical-align:2px}
 .lu-x{flex:none;width:44px;height:44px;margin-left:auto;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--ink)!important;background:#fbf2dd!important;box-shadow:0 2px 0 rgba(122,91,69,.45)}
@@ -171,7 +178,7 @@ window.L = window.L || {};
 .lu-tk{position:relative;padding:14px 16px 12px;border:2px solid rgba(122,91,69,.6);border-radius:16px 10px 18px 11px/11px 18px 10px 16px;background:rgba(255,251,240,.6)}
 .lu-tk h3{margin:0 0 4px;font:700 clamp(15px,1.9vw,17px)/1.2 var(--title);color:var(--ink2);padding-right:76px}
 .lu-tk p{margin:0;font:500 clamp(19px,2.3vw,22px)/1.2 var(--hand);color:var(--text)}
-.lu-tk .lu-st{position:absolute;right:10px;top:10px;padding:3px 9px;border-radius:10px;font:700 11px/1.3 var(--title);letter-spacing:.03em;text-transform:lowercase}
+.lu-tk .lu-st{position:absolute;right:10px;top:10px;padding:3px 9px;border-radius:10px;font:700 13px/1.3 var(--title);letter-spacing:.02em;text-transform:lowercase}
 .lu-tk.lu-on .lu-st{background:#f3d98f;color:#6b4d10}
 .lu-tk.lu-ready{border-color:#5d9c8c;box-shadow:0 0 0 3px rgba(93,156,140,.18)}
 .lu-tk.lu-ready .lu-st{background:#bfe1d6;color:#24584b}
@@ -183,11 +190,13 @@ window.L = window.L || {};
 .lu-prog i.lu-f{background:var(--ink)}
 .lu-prog .lu-pbar{flex:1;max-width:180px;height:9px;border:2px solid var(--ink);border-radius:6px;overflow:hidden}
 .lu-prog .lu-pbar b{display:block;height:100%;background:var(--ink)}
-.lu-prog small{font:700 12px/1 var(--title);color:var(--soft);margin-left:4px}
-.lu-chip{display:inline-flex;align-items:center;gap:4px;margin-top:8px;padding:3px 9px;border-radius:10px;background:rgba(122,91,69,.12);font:700 12px/1.3 var(--title);color:var(--ink2)}
+.lu-prog small{font:700 13px/1 var(--title);color:var(--soft);margin-left:4px}
+.lu-chip{display:inline-flex;align-items:center;gap:4px;margin:8px 6px 0 0;padding:3px 9px;border-radius:10px;background:rgba(122,91,69,.12);font:700 13px/1.3 var(--title);color:var(--ink2)}
 .lu-chip .lu-i{width:15px;height:15px}
+.lu-chip .lu-full{color:#c98a12;fill:#ffd35c}
+.lu-chip.lu-by{background:rgba(93,156,140,.16);color:#24584b}
 .lu-sect{margin:14px 4px 6px;font:800 12px/1 var(--title);letter-spacing:.12em;text-transform:uppercase;color:var(--soft)}
-@media (max-width:640px){.lu-split{grid-template-columns:1fr}.lu-split.lu-reading .lu-list{display:none}.lu-split:not(.lu-reading) .lu-read{display:none}.lu-list{border-right:0}.lu-backb{display:inline-flex}.lu-head h1{display:none}}
+@media (max-width:640px){.lu-split{grid-template-columns:1fr}.lu-split.lu-reading .lu-list{display:none}.lu-split:not(.lu-reading) .lu-read{display:none}.lu-list{border-right:0}.lu-backb{display:inline-flex}.lu-head h1,.lu-jstars{display:none}.lu-tab{padding-left:13px;padding-right:13px}}
 @media (max-height:430px){.lu-head{min-height:44px}.lu-pg{margin-top:4px;padding-top:6px}}
 /* ---------- HUD: star slots, round buttons, spell bar */
 .lu-hstars{position:absolute;top:calc(8px + var(--sat));left:50%;transform:translateX(-50%);display:flex;gap:5px;padding:4px 9px;border-radius:14px;background:rgba(30,22,16,.22);opacity:0;transition:opacity 1.4s;pointer-events:none}
@@ -196,48 +205,62 @@ window.L = window.L || {};
 .lu-jstars .lu-i{color:rgba(122,91,69,.55);width:20px;height:20px}
 .lu-hstars .lu-full,.lu-jstars .lu-full{color:#c98a12;fill:#ffd35c;filter:drop-shadow(0 0 4px rgba(255,205,90,.95))}
 .lu-hstars.lu-one{gap:0}.lu-hstars.lu-one .lu-i{width:25px;height:25px}
-.lu-rb{position:absolute;width:54px;height:54px;border-radius:50%;display:flex;align-items:center;justify-content:center;pointer-events:auto;color:var(--ink)!important;
+.lu-rb{position:absolute;width:var(--rbS);height:var(--rbS);border-radius:50%;display:flex;align-items:center;justify-content:center;pointer-events:auto;color:var(--ink)!important;
  background:radial-gradient(circle at 38% 30%,#fffaf0,var(--paper) 60%,var(--paper2))!important;border:2px solid var(--ink)!important;box-shadow:0 3px 0 rgba(122,91,69,.5),0 8px 18px rgba(0,0,0,.28);transition:transform .12s,opacity .5s}
 .lu-rb:active{transform:scale(.93)}
-.lu-rb .lu-i{width:27px;height:27px}
+.lu-rb .lu-i{width:calc(var(--rbS) / 2);height:calc(var(--rbS) / 2)}
 .lu-rb.lu-hide{opacity:0;pointer-events:none}
-.lu-rb .lu-badge{position:absolute;right:-3px;top:-3px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:#d0583f;color:#fff;font:800 11px/18px var(--title);border:2px solid #fff;display:none}
+.lu-rb .lu-badge{position:absolute;right:-4px;top:-4px;min-width:22px;height:22px;padding:0 5px;border-radius:11px;background:#d0583f;color:#fff;font:800 13px/18px var(--title);border:2px solid #fff;display:none}
 .lu-rb.lu-has .lu-badge{display:block}
 .lu-rb.lu-act{animation:lu-glow 1.6s ease-in-out infinite}
-.lu-jb{right:calc(var(--sar) + 322px);bottom:calc(var(--sab) + 18px)}
-.lu-mb{right:calc(var(--sar) + 260px);bottom:calc(var(--sab) + 18px)}
-.lu-bar{position:absolute;right:calc(var(--sar) + 248px);bottom:calc(var(--sab) + 84px);display:flex;gap:clamp(6px,1vw,10px);padding:10px 12px 7px;pointer-events:auto;transform-origin:85% 100%;animation:lu-pop .25s cubic-bezier(.2,.9,.3,1.2) both;border-radius:24px 16px 26px 18px/18px 26px 16px 24px}
+.lu-mb{right:var(--colR);bottom:calc(var(--sab) + 18px)}
+.lu-jb{right:calc(var(--colR) + var(--rbS) + 10px);bottom:calc(var(--sab) + 18px)}
+.lu-bar{position:absolute;right:var(--barR);bottom:var(--barB);display:flex;flex-wrap:wrap;justify-content:flex-end;align-content:flex-end;gap:clamp(6px,1vw,10px);padding:10px 12px 7px;pointer-events:auto;transform-origin:85% 100%;animation:lu-pop .25s cubic-bezier(.2,.9,.3,1.2) both;border-radius:24px 16px 26px 18px/18px 26px 16px 24px;
+ max-width:calc(100vw - var(--barR) - var(--sal) - 12px);max-height:calc(100vh - var(--barB) - var(--sat) - 44px);overflow-y:auto;scrollbar-width:none}
+.lu-bar::-webkit-scrollbar{display:none}
 .lu-bar.lu-bye{animation:lu-fadeout .2s both}
-.lu-sp{position:relative;width:60px;display:flex;flex-direction:column;align-items:center;gap:4px}
+.lu-sp{position:relative;min-width:60px;display:flex;flex-direction:column;align-items:center;gap:4px}
 .lu-disc{position:relative;width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--ink2);
- background:radial-gradient(circle at 36% 28%,#fffaf0 0,var(--c) 62%,color-mix(in srgb,var(--c) 75%,#5a3f2c));border:2px solid var(--ink);box-shadow:0 3px 0 rgba(122,91,69,.45)}
+ background:radial-gradient(circle at 36% 28%,#fffaf0 0,var(--c) 62%,var(--c));border:2px solid var(--ink);box-shadow:0 3px 0 rgba(122,91,69,.45),inset 0 -6px 10px rgba(90,63,44,.22)}
+@supports (background:color-mix(in srgb,red 50%,blue)){.lu-disc{background:radial-gradient(circle at 36% 28%,#fffaf0 0,var(--c) 62%,color-mix(in srgb,var(--c) 75%,#5a3f2c))}}
 .lu-disc .lu-i{width:30px;height:30px;stroke-width:2.1;position:relative;z-index:1}
-.lu-cd{position:absolute;inset:0;border-radius:50%;background:conic-gradient(rgba(58,38,24,.58) calc(var(--p,0) * 1%),rgba(0,0,0,0) 0);pointer-events:none;z-index:2}
+.lu-cd{position:absolute;inset:1px;border-radius:50%;background:conic-gradient(rgba(70,45,28,.82) calc(var(--p,0) * 1%),rgba(0,0,0,0) 0);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 5px),#000 calc(100% - 4.5px));mask:radial-gradient(farthest-side,transparent calc(100% - 5px),#000 calc(100% - 4.5px));pointer-events:none;z-index:2}
+.lu-sp.lu-cool .lu-disc .lu-i{opacity:.55}
 .lu-ring{position:absolute;inset:-7px;border-radius:50%;background:conic-gradient(#ffd35c calc(var(--a,0) * 1%),rgba(255,211,92,.15) 0);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 3.5px));mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 3.5px));opacity:0;transition:opacity .4s}
 .lu-sp.lu-onfx .lu-ring{opacity:1}
-.lu-mana{position:absolute;right:-6px;top:38px;min-width:24px;height:19px;padding:0 5px;border-radius:10px;background:#3f86bd;color:#fff;font:800 11px/16px var(--title);border:1.5px solid #fff;text-align:center;z-index:3}
-.lu-sp>span{font:700 11px/1 var(--title);color:var(--ink2);white-space:nowrap}
+.lu-mana{position:absolute;right:-7px;bottom:-4px;min-width:26px;height:21px;padding:0 5px;border-radius:11px;background:#3f86bd;color:#fff;font:800 13px/18px var(--title);border:1.5px solid #fff;text-align:center;z-index:3}
+.lu-sp>span{font:700 12px/1 var(--title);color:var(--ink2);white-space:pre}.lu-sp>span i{font-style:normal}
 .lu-sp.lu-pass .lu-disc{border-style:dashed;opacity:.85}
 .lu-sp.lu-pass .lu-mana{display:none}
 .lu-sp.lu-low .lu-disc{filter:saturate(.25) brightness(.92)}
 .lu-sp.lu-low .lu-mana{background:#a35d4c}
 .lu-sp.lu-shake .lu-disc{animation:lu-shake .42s}
 .lu-sp.lu-fire .lu-disc{animation:lu-pop .4s}
-@media (max-width:700px){.lu-jb{right:calc(var(--sar) + 16px);bottom:calc(var(--sab) + 300px)}.lu-mb{right:calc(var(--sar) + 16px);bottom:calc(var(--sab) + 240px)}.lu-bar{right:calc(var(--sar) + 80px);bottom:calc(var(--sab) + 232px);flex-wrap:wrap;max-width:calc(100vw - 100px);justify-content:flex-end}}
+@media (max-width:640px){.lu-jb{right:var(--colR);bottom:calc(var(--sab) + 28px + var(--rbS))}}
+@media (max-height:430px){.lu-bar{padding:8px 10px 6px;gap:6px}.lu-sp{min-width:0;width:52px}.lu-sp>span i{display:none}.lu-disc{width:48px;height:48px}.lu-disc .lu-i{width:26px;height:26px}}
+@media (max-height:340px){.lu-sp{width:50px;gap:3px}.lu-disc{width:44px;height:44px}.lu-disc .lu-i{width:24px;height:24px}}
 /* ---------- toasts, thought, dialog */
-.lu-toasts{position:absolute;top:calc(var(--sat) + 40px);left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px;width:min(84vw,520px);pointer-events:none}
+.lu-toasts{position:absolute;top:calc(var(--sat) + 40px);left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px;width:min(84vw,520px,calc(100vw - 2 * (var(--sar) + var(--trW) + 8px)));pointer-events:none}
 .lu-toast{display:flex;align-items:center;gap:8px;max-width:100%;padding:7px 15px 7px 10px;font:700 14px/1.2 var(--title);color:var(--ink2);background:rgba(248,238,214,.97);border:1.5px solid rgba(122,91,69,.62);border-radius:16px 20px 14px 22px/18px 14px 20px 16px;box-shadow:0 5px 16px rgba(36,22,10,.28);animation:lu-drop .35s ease both}
 .lu-toast .lu-ic{flex:none;font-size:18px;line-height:1;width:22px;text-align:center}
 .lu-toast .lu-ic .lu-i{width:20px;height:20px;color:var(--ink)}
 .lu-toast small{display:block;font:600 12px/1.2 var(--title);color:var(--soft);letter-spacing:.03em}
 .lu-toast em{font:600 18px/1 var(--hand);font-style:normal;color:var(--text)}
 .lu-toast.lu-bye{animation:lu-fadeout .45s ease both}
+@media (max-height:430px){.lu-toasts{top:calc(var(--sat) + 92px);width:min(70vw,440px,calc(100vw - 2 * (var(--sar) + 132px)))}.lu-toast{padding:5px 12px 5px 8px;font-size:13px}.lu-th{top:calc(var(--sat) + 52px);max-width:min(44vw,360px);pointer-events:none}}
 .lu-th{position:absolute;left:calc(var(--sal) + 18px);top:calc(var(--sat) + 74px);max-width:min(58vw,400px);padding:12px 20px 13px;pointer-events:auto;
  background:rgba(255,253,247,.95);border:1.5px solid rgba(122,91,69,.5);border-radius:30px 34px 28px 36px/28px 26px 32px 30px;font:500 clamp(19px,min(2.6vw,5vh),24px)/1.2 var(--hand);color:var(--text);box-shadow:0 6px 18px rgba(36,22,10,.22);animation:lu-pop .5s ease both}
 .lu-th::before{content:'';position:absolute;left:22px;bottom:-15px;width:14px;height:14px;border-radius:50%;background:rgba(255,253,247,.95);border:1.5px solid rgba(122,91,69,.5)}
 .lu-th::after{content:'';position:absolute;left:12px;bottom:-26px;width:8px;height:8px;border-radius:50%;background:rgba(255,253,247,.95);border:1.5px solid rgba(122,91,69,.5)}
 .lu-th.lu-bye{animation:lu-fadeout .6s ease both}
-.lu-say{position:absolute;left:0;right:0;margin:0 auto;bottom:calc(var(--sab) + clamp(96px,24vh,140px));width:min(88vw,600px);min-height:94px;padding:24px 26px 16px;pointer-events:auto;animation:lu-drop .3s ease both;border-radius:24px 14px 28px 16px/16px 28px 14px 24px}
+.lu-sayb{position:absolute;inset:0;pointer-events:auto;background:transparent}
+.lu-sayw.lu-bye{animation:lu-fadeout .25s both}.lu-sayw.lu-bye *{pointer-events:none!important}
+.lu-say{position:absolute;left:0;right:0;margin:0 auto;bottom:var(--sayB);width:min(88vw,600px);min-height:94px;padding:24px 26px 28px;pointer-events:auto;animation:lu-drop .3s ease both;border-radius:24px 14px 28px 16px/16px 28px 14px 24px;--sayH:calc(100vh - var(--sayB) - var(--sat) - 12px)}
+.lu-say .lu-txt{max-height:calc(var(--sayH) - 64px);overflow-y:auto;scrollbar-width:none}.lu-say .lu-txt::-webkit-scrollbar{display:none}
+.lu-tap{position:absolute;right:50px;bottom:10px;font:600 13px/1 var(--title);color:var(--soft);letter-spacing:.02em;opacity:0;transition:opacity .5s;pointer-events:none}
+.lu-tap.lu-show{opacity:.9}
+@media (max-height:430px){.lu-say{top:calc(var(--sat) + 48px);bottom:auto;left:calc(var(--sal) + 12px);right:max(var(--colR),calc(var(--sar) + var(--trW) + 10px));width:auto;max-width:600px;min-height:80px;--sayH:calc(100vh - var(--sat) - 48px - var(--sab) - 36px - var(--joyS));padding:20px 20px 26px}
+ .lu-say .lu-txt{font-size:clamp(19px,min(3.2vw,5.8vh),24px)}}
 .lu-say .lu-tail{position:absolute;left:46px;bottom:-14px;width:26px;height:26px;background:var(--paper);border-right:2px solid rgba(122,91,69,.78);border-bottom:2px solid rgba(122,91,69,.78);transform:rotate(40deg) skew(8deg,8deg);border-radius:0 0 6px 0}
 .lu-say .lu-nm{position:absolute;top:-15px;left:20px;padding:6px 16px 5px;font:800 14px/1 var(--title);color:var(--ink2);background:repeating-linear-gradient(-45deg,rgba(255,255,255,.22) 0 5px,rgba(255,255,255,0) 5px 11px),var(--t1);clip-path:${TAPE};transform:rotate(-2deg);z-index:2}
 .lu-say .lu-nm:empty{display:none}
@@ -347,7 +370,7 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
     gate() { noise(0, 2.2, 160, .7, .14, 80); bell(523.25, .9, 2.6, .05); bell(784, 1.1, 2.6, .04); },
     forge() { [1300, 2450, 3900].forEach((f, i) => bell(f / 2.76, 0, 1.6 - i * .3, .06)); noise(0, .12, 3000, 1.5, .1); },
     reveal() { pad([392, 523.25, 659.25, 880], 0, 3.4, .03); for (let i = 0; i < 8; i++) bell(1200 + i * 160, .2 + i * .12, 1, .02); },
-    ending() { pad([261.6, 329.6, 392, 523.25], 0, 6, .035); },
+    morning() { pad([261.6, 329.6, 392, 523.25], 0, 6, .035); },
     lamp() { noise(0, .6, 600, .8, .08, 1800); bell(880, .3, 1.6, .05); },
     cut() { noise(0, .12, 1800, 1.4, .07); },
     build() { noise(0, .1, 500, 1.2, .08); },
@@ -371,20 +394,16 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
   const PRIO = { cine: 0, dream: 1, learn: 2, note: 3, dialog: 4, journal: 5 };
 
   // ------------------------------------------------------------------ init
+  // L.storyUI.init(opts) may be called again with new options (e.g. buttons off when the game draws its own)
   U.init = function (opts) {
     Object.assign(U.opts, opts || {});
-    if (root) return U;
+    if (root) { applyOpts(); return U; }
     const st = el('style'); st.id = 'lu-css'; st.textContent = CSS; document.head.appendChild(st);
     root = el('div', null, null, document.body); root.id = 'lu';
     // HUD
     hud.stars = el('div', 'lu-hstars', null, root);
     toastBox = el('div', 'lu-toasts', null, root);
-    if (U.opts.buttons) {
-      hud.jb = el('button', 'lu-rb lu-jb lu-hide', svg(P.book) + '<span class="lu-badge"></span>', root); hud.jb.title = 'Diário'; hud.jb.setAttribute('aria-label', 'Diário');
-      hud.mb = el('button', 'lu-rb lu-mb lu-hide', svg(P.magic), root); hud.mb.title = 'Magias'; hud.mb.setAttribute('aria-label', 'Magias');
-      hud.jb.addEventListener('click', e => { e.stopPropagation(); U.openJournal(); });
-      hud.mb.addEventListener('click', e => { e.stopPropagation(); U.toggleSpells(); });
-    }
+    applyOpts();
     // cinema layer, white layer
     white.box = el('div', 'lu-white', null, root); white.txt = el('div', 'lu-whisper', null, white.box);
     cine.box = el('div', 'lu-cine', null, root);
@@ -395,7 +414,7 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
     cine.blink = el('div', 'lu-blink', null, cine.box);
     cine.skip = el('button', 'lu-skip', 'Pular' + svg(P.next), cine.box);
     cine.skip.addEventListener('click', e => { e.stopPropagation(); const S = SS(); if (S.skipEnding) S.skipEnding(); });
-    // sound unlock + keys
+    // sound unlock + keyboard
     const un = () => { if (!muted()) unlock(); };
     window.addEventListener('pointerdown', un, { passive: true }); window.addEventListener('keydown', un);
     window.addEventListener('keydown', onKey, true);
@@ -403,6 +422,17 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
     refreshAll();
     return U;
   };
+  function applyOpts() {
+    if (U.opts.buttons && !hud.jb) {
+      hud.jb = el('button', 'lu-rb lu-jb lu-hide', svg(P.book) + '<span class="lu-badge"></span>', root); hud.jb.title = 'Diário'; hud.jb.setAttribute('aria-label', 'Diário');
+      hud.mb = el('button', 'lu-rb lu-mb lu-hide', svg(P.magic), root); hud.mb.title = 'Magias'; hud.mb.setAttribute('aria-label', 'Magias');
+      hud.jb.addEventListener('click', e => { e.stopPropagation(); U.openJournal(); });
+      hud.mb.addEventListener('click', e => { e.stopPropagation(); U.toggleSpells(); });
+      if (white.box) { root.insertBefore(hud.mb, white.box); root.insertBefore(hud.jb, hud.mb); }
+    }
+    if (hud.jb) { const d = U.opts.buttons ? '' : 'none'; hud.jb.style.display = d; hud.mb.style.display = d; }
+    jobs.add('buttons');
+  }
   function onKey(e) {
     if (!cur) return;
     if (e.key === 'Escape' || ((e.key === 'Enter' || e.key === ' ') && cur.kind !== 'journal')) { e.preventDefault(); e.stopPropagation(); if (cur.kind === 'dialog') advanceSay(); else closeCur(); }
@@ -431,7 +461,7 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
   }
   function next() { if (cur || !Q.length || cineOn) return; show(Q.shift()); }
   function setOpen(v) { const S = SS(); S.uiOpen = !!v || !!cur; if (U.opts.onPause) try { U.opts.onPause(S.uiOpen); } catch (e) { } }
-  U.closeAll = function () { Q.length = 0; while (cur) closeCur(true); [...root.querySelectorAll('.lu-modal,.lu-dream,.lu-th,.lu-toast')].forEach(n => n.remove()); closeSpells(); setOpen(false); };
+  U.closeAll = function () { Q.length = 0; while (cur) closeCur(true); [...root.querySelectorAll('.lu-modal,.lu-dream,.lu-sayw,.lu-th,.lu-toast')].forEach(n => n.remove()); closeSpells(); setOpen(false); };
   Object.defineProperty(U, 'open', { get: () => (cur ? cur.kind : null) });
   U.queue = () => Q.map(q => q.kind);
 
@@ -492,23 +522,27 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
 
   // ------------------------------------------------------------------ dialog bubble (typewriter: one text update per frame)
   function showSay(it) {
-    const d = it.data; const b = el('div', 'lu-say lu-paper', null, root); it.node = b;
+    const d = it.data; const w = el('div', 'lu-sayw', null, root); it.node = w;
+    const bk = el('div', 'lu-sayb', null, w); const b = el('div', 'lu-say lu-paper', null, w);
     el('i', 'lu-tail', null, b); const nm = el('div', 'lu-nm', null, b); txt(nm, d.name || '');
     const t = el('div', 'lu-txt', null, b); const dots = el('div', 'lu-dots', null, b);
     const nx = el('button', 'lu-nx', svg(P.next), b); nx.setAttribute('aria-label', 'continuar');
-    say = { it, lines: (d.lines || []).filter(Boolean), i: 0, n: 0, t, dots, nx, b, done: false };
+    const tap = el('div', 'lu-tap', null, b); txt(tap, 'toque para continuar');
+    say = { it, lines: (d.lines || []).filter(Boolean), i: 0, n: 0, t, dots, nx, b, tap, done: false };
     if (d.lines && d.lines.length > 1) for (let i = 0; i < d.lines.length; i++) el('i', null, null, dots);
+    const t0 = performance.now();
     b.addEventListener('click', e => { e.stopPropagation(); advanceSay(); });
+    bk.addEventListener('click', e => { e.stopPropagation(); if (performance.now() - t0 > 250) advanceSay(); });
     setSayLine(0); sfx('pick');
   }
-  function setSayLine(i) { say.i = i; say.n = 0; say.done = false; say.t.textContent = ''; [...say.dots.children].forEach((d, k) => d.classList.toggle('lu-f', k <= i)); jobs.add('say'); }
+  function setSayLine(i) { say.i = i; say.n = 0; say.done = false; say.t.textContent = ''; say.tap.classList.remove('lu-show'); [...say.dots.children].forEach((d, k) => d.classList.toggle('lu-f', k <= i)); jobs.add('say'); }
   function advanceSay() {
     if (!say) return; const line = say.lines[say.i] || '';
-    if (say.n < line.length) { say.n = line.length; say.t.textContent = line; return; }
+    if (say.n < line.length) { say.n = line.length; say.t.textContent = line; say.tap.classList.add('lu-show'); return; }
     if (say.i + 1 < say.lines.length) { setSayLine(say.i + 1); return; }
     const acts = say.it.data.actions;
     if (acts && acts.length && !say.acted) {
-      say.acted = true; say.nx.style.display = 'none'; const row = el('div', 'lu-acts', null, say.b);
+      say.acted = true; say.nx.style.display = 'none'; say.tap.style.display = 'none'; const row = el('div', 'lu-acts', null, say.b);
       for (const a of acts) { const bt = el('button', 'lu-btn', null, row); txt(bt, a.label || a.l || '…'); bt.addEventListener('click', e => { e.stopPropagation(); const fn = a.fn || a.act; closeCur(); if (fn) try { fn(); } catch (er) { console.warn(er); } }); }
       return;
     }
@@ -516,7 +550,8 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
   }
   function sayJob(dt) {
     if (!say) return false; const line = say.lines[say.i] || ''; if (say.n >= line.length) return false;
-    say.n = Math.min(line.length, say.n + Math.max(1, dt * 48)); say.t.textContent = line.slice(0, Math.floor(say.n)); return say.n < line.length;
+    say.n = Math.min(line.length, say.n + Math.max(1, dt * 48)); say.t.textContent = line.slice(0, Math.floor(say.n));
+    if (say.n >= line.length) { say.tap.classList.add('lu-show'); return false; } return true;
   }
 
   // ------------------------------------------------------------------ thoughts and toasts
@@ -543,7 +578,7 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
   }
 
   // ------------------------------------------------------------------ star slots and the star moment
-  function starState() { const S = SS(); const n = S.fragCount ? S.fragCount() : 0; const joined = !!(S.has && S.has('has_key')); const world = S.flags || {}; return { n, joined, used: !!world['w:gate'] }; }
+  function starState() { const S = SS(); const n = S.fragCount ? S.fragCount() : 0; const joined = !!(S.hasStar && S.hasStar()); const world = S.flags || {}; return { n, joined, used: !!world['w:gate'] }; }
   function starsHTML(st, big) { if (st.joined) return svg(P.star, 'lu-i lu-full'); let h = ''; for (let i = 0; i < 5; i++) h += svg(P.star, 'lu-i' + (i < st.n ? ' lu-full' : '')); return h; }
   function starsJob() {
     const st = starState(); const show = st.n > 0 && !st.used && !cineOn;
@@ -580,7 +615,9 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
     for (const s of sp) {
       const b = el('button', 'lu-sp' + (s.passive ? ' lu-pass' : ''), spellDisc(s.id) + '<span></span>', barNode); b.dataset.id = s.id;
       b.querySelector('.lu-disc').insertAdjacentHTML('beforeend', '<i class="lu-cd"></i><i class="lu-ring"></i><b class="lu-mana"></b>');
-      txt(b.querySelector('span'), s.name); b.querySelector('.lu-mana').textContent = s.mana; b.title = s.desc || s.name;
+      // the label: first word, rest hidden on short screens (e.g. a three-word name keeps only its first word there)
+      const nm = String(s.name || ''), cut = nm.indexOf(' '), lb = b.querySelector('span'); txt(lb, cut > 0 ? nm.slice(0, cut) : nm); if (cut > 0) txt(el('i', null, null, lb), nm.slice(cut));
+      b.querySelector('.lu-mana').textContent = s.mana; b.title = s.desc || s.name; b.setAttribute('aria-label', nm);
       b.addEventListener('click', e => { e.stopPropagation(); castFromBar(s.id, b); });
     }
     jobs.add('bar'); barJob();
@@ -603,7 +640,7 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
       const b = barNode.querySelector('[data-id="' + s.id + '"]'); if (!b) continue;
       const p = s.cd > 0 ? clamp(s.left / s.cd * 100, 0, 100) : 0; b.style.setProperty('--p', p.toFixed(1));
       const full = { luz: 90, mare: 20, revelar: 60, ponte: 25 }[s.id] || 1; b.style.setProperty('--a', clamp(s.active / full * 100, 0, 100).toFixed(1));
-      b.classList.toggle('lu-onfx', s.active > 0); b.classList.toggle('lu-low', !s.passive && !s.ok);
+      b.classList.toggle('lu-onfx', s.active > 0); b.classList.toggle('lu-low', !s.passive && !s.ok && !(s.left > 0)); b.classList.toggle('lu-cool', s.left > 0);
     }
   }
 
@@ -623,15 +660,33 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
     m.addEventListener('click', e => { if (e.target === m) closeCur(); });
     badge = 0; jobs.add('buttons'); renderJournal(); sfx('pick');
   }
-  function renderJournal() {
+  function pickNote(S) {
+    if (journalTab !== 'cartas') return; const notes = S.notesRead ? S.notesRead() : [];
+    if (!journalNote || !notes.some(n => n.id === journalNote)) journalNote = innerWidth > 640 && notes.length ? notes[notes.length - 1].id : null;
+  }
+  function journalKey(S) {
+    pickNote(S); const st = starState(); let k = journalTab + '|' + (journalNote || '') + '|' + (innerWidth <= 640) + '|' + st.n + st.joined + '|';
+    if (journalTab === 'cartas') k += (S.notesRead ? S.notesRead() : []).map(n => n.id).join(',');
+    else if (journalTab === 'sonhos') k += (S.dreamsSeen ? S.dreamsSeen() : []).length;
+    else if (journalTab === 'pensamentos') k += (S.thoughtsSeen ? S.thoughtsSeen() : []).length;
+    else k += (S.taskView ? S.taskView() : []).map(t => t.id + t.state + t.n + '/' + t.of + t.by).join(',');
+    return k;
+  }
+  function renderJournal(force) {
     if (!cur || cur.kind !== 'journal') return; const it = cur, S = SS();
+    const key = journalKey(S); if (!force && key === it.key) return; it.key = key;
     for (const b of it.tabs.children) b.classList.toggle('lu-sel', b.dataset.tab === journalTab);
     const st = starState(); it.stars.innerHTML = st.n > 0 ? starsHTML(st) : '';
-    const pg = it.pg; const keep = pg.querySelector('.lu-list'); const scrollList = keep ? keep.scrollTop : 0; pg.innerHTML = '';
+    const pg = it.pg; const sameTab = it.tab === journalTab; it.tab = journalTab;
+    const pos = {}; if (sameTab) for (const c of ['.lu-list', '.lu-scroll', '.lu-read']) { const n = pg.querySelector(c); if (n) pos[c] = n.scrollTop; }
+    pg.innerHTML = ''; drawPage(pg, S);
+    for (const c in pos) { const n = pg.querySelector(c); if (n && (c !== '.lu-read' || it.note === journalNote)) n.scrollTop = pos[c]; }
+    it.note = journalNote;
+  }
+  function drawPage(pg, S) {
     if (journalTab === 'cartas') {
       const notes = (S.notesRead ? S.notesRead() : []).slice().reverse();
       if (!notes.length) return empty(pg, P.letter, 'Nenhuma carta ainda.');
-      if (!journalNote || !notes.some(n => n.id === journalNote)) journalNote = innerWidth > 640 ? notes[0].id : null;
       const sp = el('div', 'lu-split' + (journalNote && innerWidth <= 640 ? ' lu-reading' : ''), null, pg);
       const list = el('div', 'lu-list', null, sp);
       for (const n of notes) {
@@ -639,7 +694,6 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
         txt(b.querySelector('b'), n.title); txt(b.querySelector('small'), dateLabel(n.t, n.sig));
         b.addEventListener('click', e => { e.stopPropagation(); journalNote = n.id; renderJournal(); });
       }
-      list.scrollTop = scrollList;
       const rd = el('div', 'lu-read', null, sp);
       const v = journalNote && S.noteView(journalNote);
       if (v) { const bb = el('button', 'lu-btn lu-backb', svg(P.back) + '<span>Cartas</span>', rd); bb.addEventListener('click', e => { e.stopPropagation(); journalNote = null; renderJournal(); }); rd.appendChild(noteCard(v, false)); }
@@ -662,7 +716,8 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
         txt(c.querySelector('h3'), t.title); txt(c.querySelector('p'), t.text); txt(c.querySelector('.lu-st'), { on: 'em andamento', ready: 'pronta', done: 'concluída' }[t.state] || '');
         if (t.of > 1 && t.state !== 'done') { const pr = el('div', 'lu-prog', null, c); if (t.of <= 10) { for (let i = 0; i < t.of; i++) el('i', i < t.n ? 'lu-f' : null, null, pr); } else { el('div', 'lu-pbar', '<b style="width:' + Math.round(t.n / t.of * 100) + '%"></b>', pr); } txt(el('small', null, null, pr), t.n + '/' + t.of); }
         if (t.state === 'done' && t.spell) { const ch = el('span', 'lu-chip', svg(P.magic) + '<span></span>', c); txt(ch.lastChild, t.spell); }
-        if (t.frag && t.state === 'done') el('span', 'lu-chip', svg(P.star, 'lu-i lu-full'), c).style.marginLeft = '6px';
+        if (t.frag && t.state === 'done') el('span', 'lu-chip', svg(P.star, 'lu-i lu-full'), c);
+        if (t.by) txt(el('span', 'lu-chip lu-by', null, c), 'por ' + t.by);
       }
     }
   }
@@ -670,8 +725,9 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
   function dateLabel(t, sig) { if (!t) return sig || ''; const d = new Date(t); const dd = String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0'); return sig ? dd + '  ·  ' + sig : dd; }
 
   // ------------------------------------------------------------------ white veil of the cloud region
+  let whiteW = '';
   function whiteJob() {
-    const a = whiteA; white.box.style.opacity = a.toFixed(3);
+    const a = whiteA, s = a.toFixed(3); if (s !== whiteW) { white.box.style.opacity = s; whiteW = s; }
     const want = whiteText && a > .25 ? whiteText : '';
     if (want !== whiteShown) { if (want) { txt(white.txt, want); white.txt.classList.add('lu-show'); } else white.txt.classList.remove('lu-show'); whiteShown = want; }
   }
@@ -681,21 +737,22 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
   function cineStart(thin) { cineOn = true; cine.box.classList.add('lu-in'); cine.box.classList.toggle('lu-thin', !!thin); root.classList.add('lu-cinema'); document.body.classList.add('lu-cinema'); closeSpells(); if (thNode) { thNode.remove(); thNode = null; } }
   function cineEnd() {
     cineOn = false; cine.box.classList.remove('lu-in', 'lu-thin'); root.classList.remove('lu-cinema'); document.body.classList.remove('lu-cinema');
+    clearTimeout(lineTimer); lineTimer = null; hideCap(); txt(cine.line, '');
     cine.line.classList.remove('lu-show'); cine.ttl.classList.remove('lu-show'); cine.per.classList.remove('lu-show'); cine.skip.classList.remove('lu-show'); cine.blink.classList.remove('lu-on');
     setTimeout(() => { cine.per.style.display = 'none'; }, 1400); jobs.add('stars'); jobs.add('buttons'); setTimeout(next, 600);
   }
   function hideCap() { clearTimeout(capTimer); cine.cap.classList.remove('lu-show'); }
   function caption(text, ms) { if (!text) return; txt(cine.cap, text); cine.cap.classList.add('lu-show'); clearTimeout(capTimer); capTimer = setTimeout(() => cine.cap.classList.remove('lu-show'), ms || 5200); }
-  function onEnding(d) {
+  function onMorning(d) {
     if (!d) return;
-    if (d.phase === 'start') { U.closeAll(); hideCap(); cineStart(false); cine.skip.classList.toggle('lu-show', !!d.skippable); sfx('ending'); }
+    if (d.phase === 'start') { U.closeAll(); hideCap(); txt(cine.line, ''); cineStart(false); cine.skip.classList.toggle('lu-show', !!d.skippable); }
     else if (d.phase === 'blink') { cine.blink.classList.add('lu-on'); setTimeout(() => cine.blink.classList.remove('lu-on'), 700); }
-    else if (d.phase === 'line') { hideCap(); cine.line.classList.remove('lu-show'); clearTimeout(lineTimer); lineTimer = setTimeout(() => { txt(cine.line, d.text); cine.line.classList.add('lu-show'); }, cine.line.textContent ? 900 : 0); }
-    else if (d.phase === 'title') { cine.line.classList.remove('lu-show'); txt(cine.ttl.querySelector('h1'), d.text); cine.ttl.classList.add('lu-show'); sfx('star'); }
+    else if (d.phase === 'line') { hideCap(); cine.line.classList.remove('lu-show'); clearTimeout(lineTimer); lineTimer = setTimeout(() => { lineTimer = null; if (!cineOn) return; txt(cine.line, d.text); cine.line.classList.add('lu-show'); }, cine.line.textContent ? 900 : 0); }
+    else if (d.phase === 'title') { clearTimeout(lineTimer); lineTimer = null; cine.line.classList.remove('lu-show'); txt(cine.ttl.querySelector('h1'), d.text); cine.ttl.classList.add('lu-show'); sfx('star'); }
     else if (d.phase === 'personal') {
-      cine.ttl.classList.remove('lu-show'); if (!d.text) return;
+      clearTimeout(lineTimer); lineTimer = null; cine.line.classList.remove('lu-show'); cine.ttl.classList.remove('lu-show'); if (!d.text) return;
       cine.per.innerHTML = '<i class="lu-tape a"></i><i class="lu-tape b"></i><h2></h2><div class="lu-txt"></div>'; cine.per.style.display = 'block'; txt(cine.per.querySelector('h2'), d.title || ''); writeWords(cine.per.querySelector('.lu-txt'), d.text, 60, 300);
-      requestAnimationFrame(() => cine.per.classList.add('lu-show'));
+      requestAnimationFrame(() => { if (cineOn) cine.per.classList.add('lu-show'); });
     }
     else if (d.phase === 'end') cineEnd();
   }
@@ -727,10 +784,10 @@ body.lu-cinema #hud{opacity:0;pointer-events:none;transition:opacity .8s}
     S.on('white', d => { whiteA = d ? clamp(d.a || 0, 0, 1) : 0; whiteText = d && d.text ? d.text : (whiteA < .2 ? null : whiteText); jobs.add('white'); });
     S.on('caption', d => caption(d && d.text));
     S.on('reveal', d => { if (d && d.on) cineStart(true); else if (cineOn && !SS().endingOn) cineEnd(); });
-    S.on('ending', onEnding);
+    S.on('morning', onMorning);
     S.on('cast', () => jobs.add('bar'));
     S.on('sfx', n => sfx(n));
-    S.on('refresh', () => { jobs.add('buttons'); jobs.add('stars'); jobs.add('bar'); if (cur && cur.kind === 'journal') jobs.add('journal'); });
+    S.on('refresh', () => { jobs.add('buttons'); jobs.add('stars'); jobs.add('bar'); if (cur && cur.kind === 'journal') jobs.add('journal'); }); // cheap: the journal redraws only on change
     S.on('init', () => refreshAll());
   }
   function refreshAll() { jobs.add('buttons'); jobs.add('stars'); jobs.add('bar'); }

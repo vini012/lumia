@@ -171,7 +171,7 @@
     const lock = new THREE.Group(); lock.position.set(0, L.ground(c.x, c.z + z0) + 3.6, z0 + 2.05); KEEP.add(lock); KO.star_lock = lock;
     const disc = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, .22, 32), new THREE.MeshStandardMaterial({ color: lin('#cbbfa8'), roughness: .8 })); disc.rotation.x = Math.PI / 2; lock.add(disc);
     const glow = L.glowSprite(0xffe2a0, 4, .9); glow.visible = false; lock.add(glow); KO.star_lock_glow = glow;
-    // the far end: dais, throne, lectern, pillars
+    // the far end: dais, seat, reading stand, pillars (pivots at the piece, unlike the authored file where they are baked)
     const ty = L.ground(th.x, th.z); const dais = stone(10, .5, 7, '#cfc2a6'); dais.position.set(th.x - c.x, ty + .25, th.z - c.z); KEEP.add(dais);
     const throne = new THREE.Group(); throne.position.set(th.x - c.x, ty + .5, th.z - c.z); throne.rotation.y = th.ry || 0; KEEP.add(throne); KO.throne = throne;
     const seat = stone(1.5, .62, 1.1, '#a59f92'); seat.position.y = .31; throne.add(seat); const back = stone(1.5, 2.8, .3, '#a59f92'); back.position.set(0, 1.4, -.5); throne.add(back);
@@ -295,12 +295,12 @@
       S.event('fire_lit', { x: 0, z: 0, poi: 'cottage' }); S.event('cooked', { item: 'pao' });
       P().dreams.d1 = t0 + 7200000; P().dreams.d2 = t0 + 86400000;
       tick(3); D.complete('k_fogo'); U.closeAll();
-      D.give('madeira', 10); D.give('corda', 4); D.teleport('windmill_broken'); tick(.5); S.interact('g_windmill'); U.closeAll(); tick(.5);
-      for (let i = 0; i < 2; i++) { D.goObj('mill_' + i); tick(.4); S.interact('mill_' + i); U.closeAll(); }
-      D.teleport('totem_jardim'); tick(.5); S.interact('g_totem_jardim'); U.closeAll(); for (let i = 0; i < 3; i++) S.event('harvest', { crop: 'cenoura', own: true }); tick(3); S.interact('g_totem_jardim'); U.closeAll();
+      D.give('madeira', 10); D.give('corda', 4); D.teleport('windmill_broken'); tick(.5); D.force('g_windmill'); U.closeAll(); tick(.5);
+      for (let i = 0; i < 2; i++) { D.goObj('mill_' + i); tick(.4); D.force('mill_' + i); U.closeAll(); }
+      D.teleport('totem_jardim'); tick(.5); D.force('g_totem_jardim'); U.closeAll(); for (let i = 0; i < 3; i++) S.event('harvest', { crop: 'cenoura', own: true }); tick(3); D.force('g_totem_jardim'); U.closeAll();
       setHour(21); D.teleport('deer_meadow'); tick(.5); S.event('fed', { species: 'cervo_lunar', id: 'c1' }); D.day(1); setHour(22); S.event('fed', { species: 'cervo_lunar', id: 'c1' }); tick(2); U.closeAll();
-      setHour(10); D.teleport('turtle_shrine'); tick(.5); S.interact('g_tartaruga'); U.closeAll();
-      D.give('flor_lua', 1); D.teleport('totem_choro'); tick(.5); S.interact('g_totem_choro'); U.closeAll(); tick(5);
+      setHour(10); D.teleport('turtle_shrine'); tick(.5); D.force('g_tartaruga'); U.closeAll();
+      D.give('flor_lua', 1); D.teleport('totem_choro'); tick(.5); D.force('g_totem_choro'); U.closeAll(); tick(5);
       P().dreams.d3 = Date.now() - 3600000;
       tick(30); U.closeAll(); setHour(10);
     });
@@ -321,12 +321,12 @@
       if (!DEV.turtle) { const src = await L.loadModel('turtle'); if (src) { let I = null; try { I = L.instRigged(src); } catch (e) { } const r = I ? I.root : src.clone(true); r.updateMatrixWorld(true); const sz = new THREE.Box3().setFromObject(r).getSize(new THREE.Vector3()); r.scale.setScalar(3.4 / Math.max(.1, sz.x, sz.z)); r.traverse(o => { if (o.isMesh) o.castShadow = true; }); scene.add(r); DEV.turtle = r; } }
       if (DEV.turtle) { DEV.turtle.position.set(tx, L.ground(tx, tz), tz); DEV.turtle.rotation.y = Math.atan2(L.P.x - tx, L.P.z - tz); }
       face(tx, tz); view([L.P.x + 3.6, L.P.y + 2.6, L.P.z - 4.4], [(L.P.x + tx) / 2, L.P.y + .1, (L.P.z + tz) / 2]);
-      tick(.5); S.interact('g_tartaruga'); pumpUI(400);
+      tick(.5); D.force('g_tartaruga'); pumpUI(400);
     },
     async learn() { at('deer_meadow', 0, 0, 20.5); view([L.P.x - 4, L.P.y + 2, L.P.z + 6], [L.P.x, L.P.y + 1.4, L.P.z]); U.closeAll(); S.emit('learn', { id: 'luz', name: T('spells.luz.name') }); },
     async spells() {
       at('hill_top', 0, 0, 16); camS.yaw = 2.3; camS.pitch = .3; camS.dist = 7; U.closeAll();
-      for (const id of ['faisca', 'brotar', 'brisa', 'luz', 'mare', 'ponte', 'revelar']) D.learn(id); U.closeAll();
+      for (const id of ['faisca', 'brotar', 'brisa', 'luz', 'mare', 'ponte', 'revelar', 'despertar']) D.learn(id); U.closeAll();
       L.save.player.st.mana = 100; S.castSpell('luz'); S.castSpell('faisca'); tick(1.2); L.save.player.st.mana = 32; U.closeAll(); tick(.3); U.toggleSpells(); pumpUI(20);
     },
     async star() { if (!DEV.midDone) { DEV.mid(); DEV.midDone = true; } at('lunar_glade', 0, 3, 21.5); view([L.P.x - 4, L.P.y + 2.2, L.P.z + 7], [L.P.x, L.P.y + 1.6, L.P.z]); U.closeAll(); pumpUI(20); S.emit('fragment', { k: 2, n: 2, text: T('ui.frag_got') }); },
@@ -343,11 +343,11 @@
       for (let i = 0; i < 900 && !(S.busy && S.camera); i++) { const dx = g.x - L.P.x, dz = g.z - L.P.z, d = Math.hypot(dx, dz); L.P.x += dx / d * .7; L.P.z += dz / d * .7; L.P.y = L.ground(L.P.x, L.P.z); L.P.ry = Math.atan2(dx, dz); tick(.1); }
       tick(4.2); pumpUI(30);
     },
-    async ending(phase) {
+    async morning(phase) {
       U.closeAll(); D.learn('despertar'); U.closeAll(); D.world('gate'); D.give('estrela', 1);
       if (!DEV.endT) { const th = L.poi('throne'); at('throne', 0, 3, 6.4); face(th.x, th.z); tick(1); await models(); S.playEnding(); DEV.endT = 0; }
       const want = { line: 49.8, title: 72.5, personal: 78 }[phase]; tick(want - DEV.endT, .1); DEV.endT = want;
-      if (phase === 'personal') S.emit('ending', { phase: 'personal', title: 'Para você', text: '(texto de exemplo: a mensagem pessoal é configurada fora do repositório e aparece aqui, num cartão)' });
+      if (phase === 'personal') S.emit('morning', { phase: 'personal', title: 'Para você', text: '(texto de exemplo: a mensagem pessoal é configurada fora do repositório e aparece aqui, num cartão)' });
       pumpUI(30);
     },
     async world_props() {
@@ -381,20 +381,49 @@
       view([th.x - 3.4, L.ground(th.x, th.z) + 2.9, th.z + 8], [th.x + .5, L.ground(th.x, th.z) + 1.3, th.z]);
     },
   };
-  // order matters a little: the state builds up (middle of the game, then the hidden place, then the finale)
-  DEV.scenes = ['note', 'note_letter', 'note_stone', 'note_diary', 'note_rune', 'note_wood', 'note_drawing', 'journal_cartas', 'journal_sonhos', 'journal_pensamentos', 'journal_tarefas', 'dialog', 'learn', 'spells', 'star', 'dream', 'world_props', 'world_bird', 'world_bridge', 'world_beam', 'world_throne', 'note_last', 'mist', 'reveal', 'ending_line', 'ending_title', 'ending_personal'];
+  // order matters a little: the state builds up (middle of the game, then the hidden place, then the long morning)
+  DEV.scenes = ['note', 'note_letter', 'note_stone', 'note_diary', 'note_rune', 'note_wood', 'note_drawing', 'journal_cartas', 'journal_sonhos', 'journal_pensamentos', 'journal_tarefas', 'dialog', 'learn', 'spells', 'star', 'dream', 'world_props', 'world_bird', 'world_bridge', 'world_beam', 'world_throne', 'note_last', 'mist', 'reveal', 'morning_line', 'morning_title', 'morning_personal'];
   DEV.scene = async function (name) {
     DEV.busy = true; DEV.view = null;
     try {
       if (NOTE_SCENES[name]) await SCENES.note(NOTE_SCENES[name]);
       else if (/^journal_/.test(name)) await SCENES.journal(name.slice(8));
-      else if (/^ending_/.test(name)) await SCENES.ending(name.slice(7));
+      else if (/^morning_/.test(name)) await SCENES.morning(name.slice(8));
       else await SCENES[name]();
       U.flush(); await models(); tick(.05); poseHero(.016, tAll); DEV.render();
     } catch (e) { console.error('scene ' + name, e); }
     DEV.busy = false; return { name, open: U.open, busy: S.busy, frames: DEV.frames };
   };
   DEV.settled = () => !DEV.busy && pending === 0;
+  // layout check for small screens: the story controls stay on screen and off the game's own controls (the #ghud
+  // placeholders mirror the v4 touch layout); returns a list of problems (empty = fine)
+  DEV.layout = function () {
+    const vw = innerWidth, vh = innerHeight, bad = [], R = r => [r.left, r.top, r.right, r.bottom].map(Math.round).join(',');
+    const zones = [...document.querySelectorAll('#ghud i')].map(e => [e.className, e.getBoundingClientRect()]).filter(z => z[1].width);
+    const over = (a, b) => a.left < b.right - 1 && a.right > b.left + 1 && a.top < b.bottom - 1 && a.bottom > b.top + 1;
+    for (const s of ['.lu-jb', '.lu-mb', '.lu-bar', '.lu-bar .lu-sp', '.lu-say', '.lu-skip']) for (const e of document.querySelectorAll('#lu ' + s)) {
+      if (e.classList.contains('lu-hide') || getComputedStyle(e).display === 'none') continue; const r = e.getBoundingClientRect(); if (!r.width) continue;
+      if (r.left < 0 || r.top < 0 || r.right > vw || r.bottom > vh) bad.push(s + ' off-screen [' + R(r) + ']');
+      for (const [n, z] of zones) if (over(r, z)) bad.push(s + ' over ' + n + ' [' + R(r) + ']');
+    }
+    const bar = document.querySelector('#lu .lu-bar'); if (bar && bar.scrollHeight > bar.clientHeight + 2) bad.push('.lu-bar needs scrolling');
+    return bad;
+  };
+  // after skipping a memory nothing of the sequence stays on screen
+  DEV.skipCheck = async function () {
+    U.closeAll(); D.learn('despertar'); U.closeAll(); D.world('gate'); D.world('awake'); const th = L.poi('throne'); at('throne', 0, 3, 6.4); face(th.x, th.z); tick(1);
+    S.playEnding({ replay: true }); for (let t = 18; t < 49; t += .1) S.tick(.1); U.flush(); await new Promise(r => setTimeout(r, 100));
+    const skipped = S.skipEnding(); S.tick(.1); S.tick(.1); U.flush(); await new Promise(r => setTimeout(r, 1600));
+    const ln = document.querySelector('#lu .lu-line'), left = [...document.querySelectorAll('#lu .lu-cine .lu-show')].map(e => e.className);
+    return { skipped, on: S.endingOn, cinema: document.body.classList.contains('lu-cinema'), line: ln.textContent, left };
+  };
+  // the journal keeps its scroll while the game refreshes it
+  DEV.journalScroll = async function () {
+    U.closeAll(); U.openJournal('tarefas'); U.flush(); await new Promise(r => setTimeout(r, 300));
+    const sc = document.querySelector('#lu .lu-scroll'); if (!sc) return { error: 'no list' }; sc.scrollTop = 9999; const before = sc.scrollTop;
+    for (let i = 0; i < 60; i++) { S.tick(.1); U.flush(); } await new Promise(r => setTimeout(r, 200));
+    const sc2 = document.querySelector('#lu .lu-scroll'); const out = { before, after: sc2 && sc2.scrollTop, same: sc === sc2 }; U.closeAll(); return out;
+  };
   DEV.chain = function () { const r = window.CHAIN.run({ verbose: false }); DEV.render(); return { ok: r.ok, bad: r.bad, steps: r.steps.filter(s => /^FAIL/.test(s)) }; };
 
   // ------------------------------------------------------------------ boot

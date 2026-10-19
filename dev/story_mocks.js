@@ -1,10 +1,12 @@
 /* Dev harness mocks for the progression module: a small fake world (POIs, ground, water, white cloud disc), the
    SYSTEMS contract (L.save, L.clock, L.surv, L.farm, L.isSheltered, L.nearFire), the game hooks (L.storyBuilds,
    L.lightFireNear, L.castleObj, L.castleRestore, L.giveTame, L.mistVisual, L.addCol/L.delCol, L.P, L.cam).
-   Works in the browser (dev/story.html) and in Node (dev/story_test.js). Every call is recorded in MOCK.log. */
+   Works in the browser (dev/story.html) and in Node (dev/story_test.js). Every call is recorded in MOCK.log.
+   A reload is simulated in Node by loading the scripts again in a fresh context with G.MOCK_INIT = MOCK.snapshot(). */
 'use strict';
 (function (G) {
   const L = G.L = G.L || {};
+  const INIT = G.MOCK_INIT ? JSON.parse(JSON.stringify(G.MOCK_INIT)) : null;
   const MOCK = G.MOCK = { log: [], cols: [], fires: [], builds: [], sheltered: false, fireNear: false, restore: 0, dissolve: 0, mistOpen: 0, tames: [], boosts: 0, waters: 0, lit: 0 };
   const rec = (k, d) => { MOCK.log.push([k, d]); if (MOCK.log.length > 500) MOCK.log.shift(); };
   // ---- POIs: a compact world around the origin (metres). ry = facing of the POI front.
@@ -34,19 +36,23 @@
   L.MIST = { x: 600, z: -700, r: 240 };
   L.inMist = (x, z) => Math.max(0, Math.min(1, (L.MIST.r - Math.hypot(x - L.MIST.x, z - L.MIST.z)) / L.MIST.r));
   // ---- player & camera
-  L.P = { x: 6, y: ground(6, 14), z: 14, ry: Math.PI, vx: 0, vy: 0, vz: 0 };
+  L.P = INIT && INIT.P ? INIT.P : { x: 6, y: ground(6, 14), z: 14, ry: Math.PI, vx: 0, vy: 0, vz: 0 };
   L.cam = { yaw: Math.PI, pitch: .2, dist: 7 };
   L.storyTeleport = (x, y, z) => { L.P.x = x; L.P.y = y; L.P.z = z; rec('teleport', [x, y, z]); };
   // ---- SYSTEMS contract
-  const W5 = new Map(), listeners = {};
+  const W5 = new Map(INIT ? INIT.w5 : []), listeners = {};
   L.save = {
-    player: { name: 'Ana', inv: {}, st: { mana: 100, fome: 80, en: 100 } }, dirties: 0, status: 'local',
-    dirty() { this.dirties++; }, flush() { }, all(c) { return c === 'w5' ? W5 : new Map(); },
-    set(c, id, d) { if (c === 'w5') W5.set(id, d); rec('save.set', [c, id]); (listeners[c] || []).forEach(fn => fn(id, d)); },
+    player: INIT ? INIT.player : { name: 'Ana', inv: {}, st: { mana: 100, fome: 80, en: 100 } }, dirties: 0, flushes: 0, status: 'local',
+    dirty() { this.dirties++; }, flush() { this.flushes++; }, all(c) { return c === 'w5' ? W5 : new Map(); },
+    set(c, id, d, origin) { if (c === 'w5') W5.set(id, d); rec('save.set', [c, id]); (listeners[c] || []).forEach(fn => fn(id, d, null, origin || 'local')); },
     del(c, id) { if (c === 'w5') W5.delete(id); }, on(c, fn) { (listeners[c] = listeners[c] || []).push(fn); },
   };
-  const clock = L.clock = { h: 8, d: 100, DAY_LEN: 1440, hours() { return this.h; }, dayPhase() { return this.h / 24; }, now() { return (this.d + this.h / 24) * 1440000; }, day() { return this.d; }, isNight() { return this.h >= 18 || this.h < 6; }, skipToDawn() { if (this.h >= 6) this.d++; this.h = 6.05; rec('skipToDawn'); }, moonPhase() { return 0; } };
+  const clock = L.clock = { h: INIT ? INIT.clock.h : 8, d: INIT ? INIT.clock.d : 100, DAY_LEN: 1440, hours() { return this.h; }, dayPhase() { return this.h / 24; }, now() { return (this.d + this.h / 24) * 1440000; }, day() { return this.d; }, isNight() { return this.h >= 18 || this.h < 6; }, skipToDawn() { if (this.h >= 6) this.d++; this.h = 6.05; rec('skipToDawn'); }, moonPhase() { return 0; } };
   MOCK.setHour = (h, nextDay) => { if (nextDay) clock.d++; clock.h = h; };
+  // what a reload keeps: the player record and the world rows (both travel as JSON), the clock, where she stands
+  MOCK.snapshot = () => JSON.parse(JSON.stringify({ player: L.save.player, w5: [...W5], clock: { h: clock.h, d: clock.d }, P: L.P }));
+  // a row written by the partner (arrives through the room, origin 'remote')
+  MOCK.partner = (id, d, by) => L.save.set('w5', id, Object.assign({ by: by || 'Bia', t: clock.now() }, d || {}), 'remote');
   L.surv = { sleeping: false, warm(s) { rec('warm', s); } };
   L.isSheltered = () => MOCK.sheltered;
   L.nearFire = () => MOCK.fireNear;

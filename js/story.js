@@ -1,6 +1,6 @@
 /* Lumiar: data-driven progression. Notes and letters, dreams, thoughts, tasks, guardians, spells, trials, the
-   white cloud region, the gate and the finale. All text comes from the encoded data (L.T / L.TL); this file holds
-   only logic, placement and procedural fallback visuals. Contract: TECH §6 (see dev/story_test.js for a full run). */
+   white cloud region, the old gate and the long morning. All text comes from the encoded data (L.T / L.TL); this
+   file holds only logic, placement and procedural fallback visuals. Contract: TECH §6 (dev/story_test.js runs it). */
 'use strict';
 window.L = window.L || {};
 (function (L) {
@@ -16,11 +16,15 @@ window.L = window.L || {};
   const has3D = () => typeof THREE !== 'undefined' && !!L.scene;
 
   // ------------------------------------------------------------------ ids and tuning
-  const FORGE_TASK = L.TX ? L.TX('vSewND2aHA==') : 'k_forge';
+  const TX = (b, f) => (L.TX && L.TX(b)) || f;
+  const FORGE_TASK = TX('vSewND2aHA==', 'k_forge');
+  // a few lore path segments and authored-model names are kept masked in the sources (see tools/lore/encode.py --word)
+  const LP = { end: TX('sxa3NTKL', 'e'), starName: 'ui.' + TX('vR2qAzKNFG8=', 'x') };
+  const MODEL = { figure: TX('vRG9Ow==', ''), bow: TX('vR2qAy+YGHg=', ''), vines: TX('oBG9OS+zDWJnhAJy', '') };
   const IT = { star: 'estrela', frag: 'fragmento', feather: 'pena_dourada', moonSeed: 'sem_lua', moonFlower: 'flor_lua', soup: 'sopa_quente', lotusSeed: 'sem_lotus', lotus: 'lotus', gold: 'ouro', crystal: 'cristal', wood: 'madeira', rope: 'corda' };
   S.IT = IT;
   // display data for story items (names live in the encoded data)
-  const ITEM_INFO = { fragmento: ['ui.frag_name', '✦'], estrela: ['ui.key_name', '✧'], pena_dourada: ['ui.feather_name', '🪶'], sem_lua: ['ui.moonseed_name', '🌱'], flor_lua: ['ui.moonflower_name', '🌸'] };
+  const ITEM_INFO = { fragmento: ['ui.frag_name', '✦'], estrela: [LP.starName, '✧'], pena_dourada: ['ui.feather_name', '🪶'], sem_lua: ['ui.moonseed_name', '🌱'], flor_lua: ['ui.moonflower_name', '🌸'] };
   S.itemInfo = id => { const i = ITEM_INFO[id]; return i ? { n: T(i[0], id), ic: i[1] } : null; };
   const CFG = S.CFG = {
     stuckAfter: 7200,          // s of play without main progress before a paper bird guides
@@ -37,6 +41,11 @@ window.L = window.L || {};
     bridgePitch0: .3,          // camera pitch (v4 convention, + = looking down) that casts a level cloud bridge
     dawn: [6, 7.5], sunrise: [5, 9], night: [18, 6], dusk: [17, 20.5],
     interactR: 2.4,
+    reach: 1.5,                // m of slack on top of an object's radius before S.interact refuses it
+    guideLeave: 120,           // m: a guiding bird gives up when she is farther than this
+    guideStall: 240,           // s without getting closer to the clue before the guide gives up
+    yNear: 80,                 // m: placed objects re-read the ground/colliders height once she is this close
+    visBudget: 3,              // ms per frame for building new placed-object visuals
   };
 
   // ------------------------------------------------------------------ lore indexes
@@ -63,7 +72,7 @@ window.L = window.L || {};
     const src = (L.save && L.save.player) || MEM.player;
     if (src === P) return;
     P = src; for (const k of ['notes', 'dreams', 'th', 'tasks', 'sp', 'flags']) if (!P[k] || typeof P[k] !== 'object') P[k] = {};
-    F = P.flags; changed();
+    F = P.flags; restoreTimers(); changed();
   }
   function dirty() { if (L.save && L.save.dirty) L.save.dirty(); }
   function worldMap() { if (L.save && L.save.all) { try { return L.save.all('w5'); } catch (e) { } } return MEM.world; }
@@ -131,7 +140,12 @@ window.L = window.L || {};
 
   // ------------------------------------------------------------------ conditions
   function fragCount() { let n = 0; for (let k = 1; k <= 5; k++) if (W('altar_' + k)) n++; return n; }
-  const hasStar = () => inv.count(IT.star) > 0 || !!W('forge_key') || !!W('gate');
+  // the forged star: in her bag (needed at the lock), already in the lock (GDD §5.6), or made by anyone in this world
+  // (opens the next steps for both players)
+  const starInBag = () => inv.count(IT.star) > 0;
+  const starUsable = () => starInBag() || !!W('gate');
+  const hasStar = () => starUsable() || !!W('forge_key');
+  const COND_STAR = TX('vhmgAzeJAA==', '-');
   const learned = id => !!(P && P.sp[id]);
   function has(c) {
     if (!c) return true;
@@ -147,13 +161,14 @@ window.L = window.L || {};
     if ((m = /^w_(\w+)$/.exec(c))) return !!W(m[1]);
     switch (c) {
       case 'night': return isNight(); case 'day': return !isNight(); case 'dawn': return isDawn();
-      case 'has_key': return hasStar(); case 'awake': return !!W('awake');
+      case COND_STAR: return hasStar(); case 'awake': return !!W('awake');
       case 'full_moon': return Math.abs(moon() - .5) < .095; case 'new_moon': return Math.min(moon(), 1 - moon()) < .095;
     }
     return !!F[c] || !!W(c);
   }
   const all = a => !a || a.every(has);
   S.has = c => (P ? has(c) : false);
+  S.hasStar = () => !!P && hasStar();
 
   // ------------------------------------------------------------------ tasks
   // poi: where the task lives (stuck helper / map hint), on(): becomes visible, prog(): [n, of], guard: guardian
@@ -166,19 +181,19 @@ window.L = window.L || {};
   const TK = {
     k_fogo: { poi: 'hermit_tower_vale', on: () => P.notes.n12, prog: () => [(F.fire_cottage ? 1 : 0) + ((F.cooked || 0) > 0 ? 1 : 0), 2], guard: 'auto', spell: 'faisca' },
     k_horta: { poi: 'totem_jardim', on: () => met('totem_jardim'), prog: () => [Math.min(CFG.harvestOwn, F.harvest_own || 0), CFG.harvestOwn], guard: 'totem_jardim', spell: 'brotar' },
-    k_moinho: { poi: 'windmill_broken', on: () => met('windmill') || P.notes.n05, prog: () => [mill(), 4], guard: 'windmill', spell: 'brisa', done: () => mill() >= 4 },
+    k_moinho: { poi: 'windmill_broken', on: () => met('windmill') || P.notes.n05, prog: () => [mill(), 4], guard: 'windmill', spell: 'brisa', done: () => mill() >= 4, wf: 'windmill' },
     k_cervo: { poi: 'deer_meadow', on: () => met('cervo_lunar'), prog: () => [Math.min(CFG.deerNights, (F.deer || []).length), CFG.deerNights], guard: 'auto', spell: 'luz' },
     k_lago: { poi: 'turtle_shrine', on: () => met('tartaruga'), prog: () => { const s = shrine(); return [Math.min(CFG.reeds, s[0]) + Math.min(CFG.lotus, s[1]), CFG.reeds + CFG.lotus]; }, guard: 'tartaruga', spell: 'mare' },
     k_penas: { poi: 'griffin_queen', on: () => met('rainha_grifo') || feathers() > 0, prog: () => [Math.min(CFG.feathers, feathers()), CFG.feathers], guard: 'rainha_grifo', spell: 'ponte' },
-    f1: { poi: 'totem_choro', on: () => met('totem_choro') || P.notes.s07 || P.notes.n07, prog: () => [W('altar_1') ? 2 : inv.count(IT.moonFlower) > 0 ? 1 : 0, 2], done: () => !!W('altar_1') },
-    f2: { poi: 'lunar_glade', on: () => taskState('k_cervo') === 'done', prog: () => [W('altar_2') ? 2 : F.glade ? 1 : 0, 2], done: () => !!W('altar_2') },
-    f3: { poi: 'lighthouse', on: () => P.notes.s03 || F.seen_lighthouse, prog: () => [W('altar_3') ? 4 : (lh.tall || W('lighthouse') ? 1 : 0) + (lh.lamp || W('lighthouse') ? 1 : 0) + (W('lighthouse') ? 1 : 0), 4], done: () => !!W('altar_3') },
-    f4: { poi: 'summit_camp', on: () => P.notes.n06 || met('espirito_iaque') || P.notes.s20, prog: () => [W('altar_4') ? 2 : F.vigil && F.vigil.done ? 1 : 0, 2], done: () => !!W('altar_4') },
-    f5: { poi: 'griffin_nest', on: () => P.notes.s14 || P.notes.s28 || met('rainha_grifo'), prog: () => [W('altar_5') ? 1 : 0, 1], done: () => !!W('altar_5') },
+    f1: { poi: 'totem_choro', on: () => met('totem_choro') || P.notes.s07 || P.notes.n07, prog: () => [W('altar_1') ? 2 : inv.count(IT.moonFlower) > 0 ? 1 : 0, 2], done: () => !!W('altar_1'), wf: 'altar_1' },
+    f2: { poi: 'lunar_glade', on: () => taskState('k_cervo') === 'done', prog: () => [W('altar_2') ? 2 : F.glade ? 1 : 0, 2], done: () => !!W('altar_2'), wf: 'altar_2' },
+    f3: { poi: 'lighthouse', on: () => P.notes.s03 || F.seen_lighthouse, prog: () => [W('altar_3') ? 4 : (lh.tall || W('lighthouse') ? 1 : 0) + (lh.lamp || W('lighthouse') ? 1 : 0) + (W('lighthouse') ? 1 : 0), 4], done: () => !!W('altar_3'), wf: 'altar_3' },
+    f4: { poi: 'summit_camp', on: () => P.notes.n06 || met('espirito_iaque') || P.notes.s20, prog: () => [W('altar_4') ? 2 : F.vigil && F.vigil.done ? 1 : 0, 2], done: () => !!W('altar_4'), wf: 'altar_4' },
+    f5: { poi: 'griffin_nest', on: () => P.notes.s14 || P.notes.s28 || met('rainha_grifo'), prog: () => [W('altar_5') ? 1 : 0, 1], done: () => !!W('altar_5'), wf: 'altar_5' },
     k_ver: { poi: 'totem_ancestral', on: () => hasStar(), prog: () => [learned('revelar') ? 1 : 0, 1], guard: 'totem_ancestral', spell: 'revelar' },
-    k_fim: { poi: 'mist_sign', on: () => learned('revelar'), prog: () => [(F.castle_seen ? 1 : 0) + (W('gate') ? 1 : 0) + (P.notes.n11 ? 1 : 0) + (W('awake') ? 1 : 0), 4], done: () => !!W('awake') },
+    k_fim: { poi: 'mist_sign', on: () => learned('revelar'), prog: () => [(F.castle_seen ? 1 : 0) + (W('gate') ? 1 : 0) + (P.notes.n11 ? 1 : 0) + (W('awake') ? 1 : 0), 4], done: () => !!W('awake'), wf: 'awake' },
   };
-  TK[FORGE_TASK] = { poi: 'royal_forge', on: () => P.notes.n08, prog: () => { const d = W('forge') || {}; if (W('forge_key')) return [10, 10]; return [Math.min(5, d.f || 0) + Math.min(3, d.o || 0) + Math.min(2, d.c || 0), 10]; }, done: () => !!W('forge_key') };
+  TK[FORGE_TASK] = { poi: 'royal_forge', on: () => P.notes.n08, prog: () => { const d = W('forge') || {}; if (W('forge_key')) return [10, 10]; return [Math.min(5, d.f || 0) + Math.min(3, d.o || 0) + Math.min(2, d.c || 0), 10]; }, done: () => !!W('forge_key'), wf: 'forge_key' };
   const met = g => !!(F.met && F.met[g]);
   function meet(g) { F.met = F.met || {}; if (!F.met[g]) { F.met[g] = 1; changed(); } }
   function taskState(id) { const r = P && P.tasks[id]; return r ? r.s : null; }
@@ -212,7 +227,8 @@ window.L = window.L || {};
     if (!P) return [];
     return TASKS.filter(t => TK[t.id] && taskState(t.id)).map(t => {
       const k = TK[t.id], [n, of] = k.prog(); const s = taskState(t.id);
-      return { id: t.id, title: T('tasks.' + t.id + '.title'), text: T('tasks.' + t.id + '.text'), n: s === 'done' ? of : Math.min(n, of), of, state: s, frag: /^f\d$/.test(t.id), spell: k.spell ? T('spells.' + k.spell + '.name') : '', t: (P.tasks[t.id] || {}).t || 0 };
+      const wf = k.wf && W(k.wf), by = s === 'done' && wf && wf.by && wf.by !== me() ? String(wf.by) : ''; // finished by the partner
+      return { id: t.id, title: T('tasks.' + t.id + '.title'), text: T('tasks.' + t.id + '.text'), n: s === 'done' ? of : Math.min(n, of), of, state: s, frag: /^f\d$/.test(t.id), spell: k.spell ? T('spells.' + k.spell + '.name') : '', by, t: (P.tasks[t.id] || {}).t || 0 };
     });
   };
 
@@ -261,18 +277,19 @@ window.L = window.L || {};
   function showDream(id) { P.dreams[id] = wall(); changed(); emit('dream', { id, text: T('dreams.' + id + '.text') }); needEval = true; }
 
   // ------------------------------------------------------------------ stuck helper: ordered main-chain clues
-  // [poi to guide towards, done?, lore path echoed by the softer dream hint (else: the latest note read)]
+  // [poi to guide towards, done?, lore path echoed by the softer dream hint (else: the latest note read),
+  //  wait? (true while the step cannot be done yet, e.g. a plant still growing: the helper skips to the next one)]
   const CLUES = [
     ['cottage', () => P.notes.n01], ['cottage', () => F.fire_cottage, 'notes.n01.text'], ['totem_sorriso', () => P.notes.n03, 'notes.n02.text'],
     ['bakery', () => P.notes.n04], ['hermit_tower_vale', () => P.notes.n12], ['stream_mills', () => P.notes.n05],
     ['windmill_broken', () => learned('brisa'), 'tasks.k_moinho.text'], ['totem_jardim', () => learned('brotar'), 'tasks.k_horta.text'], ['lunar_garden', () => P.notes.n07],
-    ['deer_meadow', () => learned('luz'), 'tasks.k_cervo.text'], ['totem_choro', () => W('altar_1'), 'tasks.f1.text'], ['lunar_glade', () => W('altar_2'), 'tasks.f2.text'],
+    ['deer_meadow', () => learned('luz'), 'tasks.k_cervo.text'], ['totem_choro', () => W('altar_1'), 'tasks.f1.text', () => !!F.moon_planted && !inv.count(IT.moonFlower)], ['lunar_glade', () => W('altar_2'), 'tasks.f2.text'],
     ['turtle_shrine', () => learned('mare'), 'tasks.k_lago.text'], ['lighthouse', () => W('altar_3'), 'tasks.f3.text'], ['summit_camp', () => W('altar_4'), 'tasks.f4.text'],
     ['griffin_queen', () => learned('ponte'), 'tasks.k_penas.text'], ['griffin_nest', () => W('altar_5'), 'tasks.f5.text'], ['royal_forge', () => P.notes.n08],
     ['royal_forge', () => hasStar(), 'tasks.' + FORGE_TASK + '.text'], ['totem_ancestral', () => learned('revelar'), 'tasks.k_ver.text'], ['mist_sign', () => F.castle_seen, 'notes.n10.text'],
     ['castle_gate', () => W('gate'), 'notes.n03.text'], ['throne', () => P.notes.n11], ['throne', () => W('awake'), 'notes.n11.text'],
   ];
-  function clueEntry() { for (const c of CLUES) if (!c[1]() && poi(c[0])) return c; return null; }
+  function clueEntry() { for (const c of CLUES) if (!c[1]() && poi(c[0]) && !(c[3] && c[3]())) return c; return null; }
   function hintText() {
     const c = clueEntry(); let t = c && c[2] ? T(c[2]) : '';
     if (!t) { let best = null, bt = -1; for (const id in P.notes) if (P.notes[id] > bt) { bt = P.notes[id]; best = id; } if (best) t = T('notes.' + best + '.text'); }
@@ -307,25 +324,45 @@ window.L = window.L || {};
     if (o.poi && !o.noSpread) { const k = POI_COUNT[o.poi] = (POI_COUNT[o.poi] || 0) + 1; o.spread = k - 1; }
     return o;
   }
+  // Positions are cached, with two refinements because models and colliders stream in after boot:
+  //  * an object with where() (a named piece of the authored keep) that is not loaded yet gets a provisional spot from
+  //    its POI and asks where() again every second until it answers;
+  //  * the height of a POI-placed object is read again (ground + colliders) when she comes within CFG.yNear, and every
+  //    3 s while she stays there (a floor or collider that streamed in later lifts it).
+  // S.invalidate() (or the events 'castle_ready' / 'colliders') drops every cached position.
+  let posGen = 0;
+  function setPos(o, p, fixedY) { o.pos = p; o.pv = (o.pv || 0) + 1; if (fixedY) o.yOk = true; return p; }
   function resolve(o) {
-    if (o.pos && !o.dynamic) return o.pos;
-    if (o.where) { const w = o.where(); if (w) { o.pos = w; return w; } }
-    let a = L.storyAnchor && L.storyAnchor(o.id);
-    if (a) { o.pos = { x: a.x, y: a.y != null ? a.y : groundY(a.x, a.z), z: a.z, ry: a.ry || 0 }; return o.pos; }
-    const p = poi(o.poi); if (!p) return null;
-    const ry = p.ry || 0; let off = (p.story && p.story[o.id]) || o.off || [0, 0];
+    if (o.pos && !o.dynamic && o.gen === posGen) {
+      if (o.prov) { if (tNow >= o.retry) { o.retry = tNow + 1; const w = o.where(); if (w) { o.prov = false; o.fromWhere = true; setPos(o, w, true); } } }
+      else if (o.ySrc && (!o.yOk || tNow >= o.yT) && hyp(PL.x, PL.z, o.pos.x, o.pos.z) < CFG.yNear) { o.yT = tNow + 3; o.yOk = true; const y = o.ySrc(); if (y === y && y != null && Math.abs(y - o.pos.y) > .01) setPos(o, { x: o.pos.x, y, z: o.pos.z, ry: o.pos.ry }); }
+      return o.pos;
+    }
+    o.gen = posGen; o.prov = false; o.fromWhere = false; o.yOk = false; o.ySrc = null;
+    if (o.where) {
+      const w = o.where(); if (w) { o.fromWhere = true; return setPos(o, w, true); }
+      if (o.dynamic) { o.pos = null; return null; }
+      o.prov = true; o.retry = tNow + 1;
+    }
+    const a = L.storyAnchor && L.storyAnchor(o.id);
+    if (a) return setPos(o, { x: a.x, y: a.y != null ? a.y : groundY(a.x, a.z), z: a.z, ry: a.ry || 0 }, a.y != null);
+    const p = poi(o.poi); if (!p) { o.pos = null; return null; }
+    const ry = p.ry || 0; const off = (p.story && p.story[o.id]) || o.off || [0, 0];
     let dx = off[0], dz = off[1];
     if (o.spread) { const a2 = o.spread * 2.1 + .6; dx += Math.cos(a2) * 2.4; dz += Math.sin(a2) * 2.4; }
     const c = Math.cos(ry), s = Math.sin(ry);
     const x = p.x + dx * c + dz * s, z = p.z - dx * s + dz * c;
-    const base = p.y != null ? p.y : groundY(x, z);
-    let y = L.groundAt ? L.groundAt(x, z, base + 1.5, 3).y : groundY(x, z, base);
-    if (o.fly || (p.y != null && base - y > 4)) y = base; // floating islets: trust the POI height
-    if (o.under && L.waterAt) { const w = L.waterAt(x, z); if (w > y) y = Math.max(y, w - 1.1); }
-    y += (off[2] || 0) + o.dy;
-    o.pos = { x, y, z, ry: ry + (o.ry || 0) };
-    return o.pos;
+    const yAt = () => {
+      const base = p.y != null ? p.y : groundY(x, z);
+      let y = base; try { y = L.groundAt ? L.groundAt(x, z, base + 1.5, 3).y : groundY(x, z, base); } catch (e) { }
+      if (!(y === y) || o.fly || (p.y != null && base - y > 4)) y = base; // floating islets: trust the POI height
+      if (o.under && L.waterAt) { const w = L.waterAt(x, z); if (w > y) y = Math.max(y, w - 1.1); }
+      return y + (off[2] || 0) + o.dy;
+    };
+    o.ySrc = yAt; o.yOk = hyp(PL.x, PL.z, x, z) < CFG.yNear; o.yT = tNow + 3;
+    return setPos(o, { x, y: yAt(), z, ry: ry + (o.ry || 0) });
   }
+  S.invalidate = () => { posGen++; needEval = true; doorDone = false; doorChk = 0; };
 
   // ------------------------------------------------------------------ 3D: materials, procedural props, models
   const MAT = {}; const TEX = {};
@@ -413,7 +450,7 @@ window.L = window.L || {};
     return TEX.glow;
   }
   function glowSprite(color, size, op) {
-    if (L.glowSprite) return L.glowSprite(color, size, op);
+    if (L.glowSprite) { const s = L.glowSprite(color, size, op); if (s && s.material && !s.userData.ownMat) { s.material = s.material.clone(); s.userData.ownMat = 1; } return s; }
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color, transparent: true, opacity: op == null ? 1 : op, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); s.scale.set(size, size, 1); return s;
   }
   const WOOD = '#a8845d', WOOD2 = '#8b5a3c', STONE = '#a59f92', PAPER = '#f3e6c8';
@@ -492,9 +529,23 @@ window.L = window.L || {};
       const gh = new THREE.Mesh(w.geometry, mats().ghost.clone()); gh.castShadow = false;
       return grp(w, g => { g.add(gh); w.visible = false; g.userData.solid = w; g.userData.ghost = gh; });
     },
-    mushrooms() {
-      const parts = []; for (let i = 0; i < 11; i++) { const a = i / 11 * TAU, r = 3 + Math.sin(i * 2.7) * .3; parts.push(part(G.cyl(.05, .07, .22, 6), '#e8e2d0', Math.cos(a) * r, .11, Math.sin(a) * r)); parts.push(part(G.sph(.14, 1), '#7fd8ff', Math.cos(a) * r, .24, Math.sin(a) * r, 0, 0, 0, 1, .5, 1, { flat: true })); }
-      const m = merge(parts, new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color(1.2, 1.4, 1.8) })); m.castShadow = false; return grp(m, g => { g.userData.caps = m; });
+    mushrooms() { // one stem + cap built once, then copied around the ring (cheap to build)
+      const one = merge([part(G.cyl(.05, .07, .22, 6), '#e8e2d0', 0, .11, 0), part(G.sph(.14, 1), '#7fd8ff', 0, .24, 0, 0, 0, 0, 1, .5, 1, { flat: true })]).geometry;
+      const parts = []; for (let i = 0; i < 11; i++) { const a = i / 11 * TAU, r = 3 + Math.sin(i * 2.7) * .3; const g = one.clone(); g.applyMatrix4(new THREE.Matrix4().makeRotationY(a * 1.7).setPosition(Math.cos(a) * r, 0, Math.sin(a) * r)); parts.push(g); }
+      const m = merge(parts, new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color(1.2, 1.4, 1.8) })); m.castShadow = false; one.dispose(); return grp(m, g => { g.userData.caps = m; });
+    },
+    altar() { // small round stone pedestal under a floating light
+      const pts = [[0, 0], [.34, 0], [.36, .06], [.3, .14], [.21, .2], [.19, .58], [.27, .66], [.33, .74], [.31, .8], [0, .8]].map(([x, y]) => new THREE.Vector2(x, y));
+      return grp(merge([part(new THREE.LatheGeometry(pts, 14), '#d9d2c2', 0, 0, 0, 0, 0, 0, 1, 1, 1, { lo: .74 }), part(starGeo(.17, .075, .01), '#b9ae98', 0, .805, 0, -Math.PI / 2, 0, 0, 1, 1, 1, { flat: true })]));
+    },
+    bow() { // the forged star on its stem; the authored model replaces it when present
+      return grp(merge([part(starGeo(.17, .08, .04), '#e8bf55', 0, .44, 0, 0, 0, 0, 1, 1, 1, { lo: .9 }), part(G.cyl(.022, .022, .34, 8), '#d9ac43', 0, .2, 0), part(G.sph(.04, 1), '#e8bf55', 0, .27, 0), part(G.box(.07, .05, .022), '#d9ac43', .045, .05, 0), part(G.box(.05, .03, .022), '#d9ac43', .04, .11, 0)]), g => {
+        const gem = new THREE.Mesh(new THREE.IcosahedronGeometry(.045, 1), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.3, 1.5, 1.7) })); gem.position.set(0, .44, .03); g.add(gem);
+        const gl = glowSprite(0xffd98a, 1.4, .55); gl.position.y = .4; g.add(gl); g.userData.glow = gl;
+      });
+    },
+    sheet() { // a written page lying on the authored reading stand
+      const p = paperQuad(.36, .27); p.rotation.order = 'YXZ'; p.rotation.set(-(Math.PI / 2 - .4), -.38, 0); p.position.y = .012; return grp(p);
     },
     lockDisc() {
       return grp(merge([part(G.cyl(1, 1, .25, 28), '#cbbfa8', 0, 0, 0, Math.PI / 2), part(G.cyl(.82, .82, .27, 28), '#b2a58c', 0, 0, .01, Math.PI / 2)]), g => {
@@ -523,9 +574,35 @@ window.L = window.L || {};
     });
   }
   // kind -> [file, object, what to hide: 'body' | 'paper']
-  const MODEL_FOR = { table: ['items5', 'note_scroll', 'paper'], bottle: ['items5', 'bottle_note', 'body'], lectern: ['items5', 'lectern', 'body'], letter: ['items5', 'note_letter', 'body'], rune: ['items5', 'rune_stone', 'body'], feather: ['items5', 'feather_gold', 'body'], star: ['items5', 'fragment_star', 'body'] };
+  const MODEL_FOR = { table: ['items5', 'note_scroll', 'paper'], bottle: ['items5', 'bottle_note', 'body'], lectern: ['items5', 'lectern', 'body'], letter: ['items5', 'note_letter', 'body'], rune: ['items5', 'rune_stone', 'body'], feather: ['items5', 'feather_gold', 'body'], star: ['items5', 'fragment_star', 'body'], altar: ['items5', 'altar_stone', 'body'] };
+  if (MODEL.bow) MODEL_FOR.bow = ['items5', MODEL.bow, 'body'];
+  // Visual templates: each kind is built once (geometry + materials) and every placed object gets a clone that shares
+  // them. userData references are re-pointed into the clone; the few materials animated per object (fading runes,
+  // ghosts, glows, the lock star, the glade caps) are cloned for it and disposed with it (userData._own).
+  const TPL = {}; const PER_INSTANCE = ['rune', 'glow', 'ghost', 'star', 'caps'];
+  let builtMs = 0; // ms spent building templates (exposed for the perf check)
+  function template(kind, build) {
+    if (TPL[kind]) return TPL[kind];
+    const t0 = now(); const g = build ? build() : (PROPS[kind] ? PROPS[kind]() : new THREE.Group()); builtMs += now() - t0; return (TPL[kind] = g);
+  }
+  const now = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+  function cloneVis(tpl) {
+    const keep = tpl.userData; tpl.userData = {}; let c;
+    try { c = tpl.clone(true); } finally { tpl.userData = keep; }
+    const a = [], b = []; tpl.traverse(o => a.push(o)); c.traverse(o => b.push(o));
+    const ud = {}; for (const k in keep) { const v = keep[k]; const i = v && v.isObject3D ? a.indexOf(v) : -1; ud[k] = i >= 0 ? b[i] : v; }
+    const own = []; ud._own = own;
+    for (const k of PER_INSTANCE) {
+      const v = ud[k]; if (!v) continue;
+      if (v.isMaterial) { const m = v.clone(); own.push(m); b.forEach(o => { if (o.material === v) o.material = m; }); ud[k] = m; }
+      else if (v.material && !Array.isArray(v.material)) { v.material = v.material.clone(); own.push(v.material); }
+    }
+    c.userData = ud; return c;
+  }
+  function disposeVis(m) { if (!m) return; if (m.parent) m.parent.remove(m); const own = m.userData && m.userData._own; if (own) { own.forEach(x => x.dispose && x.dispose()); m.userData._own = []; } if (m.children) m.children.slice().forEach(ch => { if (ch.userData && ch.userData._own) disposeVis(ch); }); }
+  S.disposeVisual = g => { if (g && g.children) g.children.slice().forEach(disposeVis); };
   function makeVisual(kind) {
-    const g = PROPS[kind] ? PROPS[kind]() : new THREE.Group();
+    const g = cloneVis(template(kind));
     const mf = MODEL_FOR[kind];
     if (mf) modelPart(mf[0], mf[1]).then(m => {
       if (!m) return; const old = g.userData[mf[2]]; if (!old) return;
@@ -533,6 +610,16 @@ window.L = window.L || {};
     });
     return g;
   }
+  // build every template now (init calls it; the game may call it again during its loading screen). With withCopies
+  // it returns a group holding one copy of each, e.g. for renderer.compile (dispose it with S.disposeVisual).
+  S.prewarm = function (withCopies) {
+    if (!has3D()) return null;
+    for (const k of Object.keys(PROPS)) if (k !== 'throne' && k !== 'ivy') template(k);
+    template('spirit', spiritBody); template('bird', birdBody);
+    if (!withCopies) return null;
+    const grpAll = new THREE.Group(); for (const k in TPL) grpAll.add(cloneVis(TPL[k]));
+    return grpAll;
+  };
 
   // ------------------------------------------------------------------ objects registry built from the data
   const revealed = () => tNow < FX.luz || tNow < FX.rev;
@@ -545,11 +632,12 @@ window.L = window.L || {};
       if (!n.poi || n.how === 'bird' || n.how === 'totem') continue;
       const kind = n.how;
       const o = addObj({ id: 'note_' + n.id, note: n.id, poi: n.poi, kind: 'note', vis: kind, off: offFor('note:' + n.poi, n.poi, kind), label: LABEL[kind] || 'Ler', icon: ICON[kind] || '📜' });
-      if (n.poi === 'throne') o.where = () => castleWorld('lectern', 1.0);
+      if (n.poi === 'throne') { o.where = () => castleWorld('lectern', 1.0, 'top'); o.visCastle = 'sheet'; } // on the authored stand: only the page
       if (kind === 'rune') { o.can = () => revealed(); o.rune = true; }
       if (n.need) { const need = n.need; o.exists = () => all(need); }
       if (kind === 'bottle') o.float = true;
-      o.act = () => { readNote(n.id); if (n.id === 'n12') meet('hermit_book'); };
+      // the old book greets her once before she reads its page (the dialog shows first, the note waits in the queue)
+      o.act = () => { if (n.id === 'n12' && !met('hermit_book')) { meet('hermit_book'); talk('hermit_book', ['greet']); } readNote(n.id); };
     }
     // guardians
     const gd = (g, p, opt) => addObj(Object.assign({ id: 'g_' + g, guard: g, poi: p, kind: 'guard', off: offFor('g:' + g, p), r: 3.4, noSpread: true, label: 'Tocar', icon: '🗿' }, opt));
@@ -573,20 +661,27 @@ window.L = window.L || {};
     // golden feathers (per player)
     for (let i = 1; i <= 3; i++) addObj({ id: 'feather_' + i, poi: 'feather_' + i, kind: 'pick', vis: 'feather', dy: .9, fly: false, noSpread: true, exists: () => !(F.feath && F.feath[i]), label: 'Pegar', icon: '🪶', act: () => pickFeather(i) });
     // lights that float in place (2 = glade, 5 = nest); 1, 3, 4 are granted by their guardian / chest
+    addObj({ id: 'stand_2', poi: 'lunar_glade', kind: 'decor', vis: 'altar', noSpread: true });
+    addObj({ id: 'stand_5', poi: 'griffin_nest', kind: 'decor', vis: 'altar', noSpread: true });
     addObj({ id: 'altar_2', poi: 'lunar_glade', kind: 'pick', vis: 'star', dy: 1.3, noSpread: true, exists: () => !W('altar_2') && F.glade && isNight(), label: 'Pegar a luz', icon: '✨', act: () => grantFragment(2) });
     addObj({ id: 'glade_ring', poi: 'lunar_glade', kind: 'decor', vis: 'mushrooms', noSpread: true, exists: () => isNight() });
     addObj({ id: 'altar_5', poi: 'griffin_nest', kind: 'pick', vis: 'star', dy: 1.1, noSpread: true, exists: () => !W('altar_5'), label: 'Pegar a luz', icon: '✨', act: () => grantFragment(5) });
     addObj({ id: 'bay_chest', poi: 'bay_chest', kind: 'pick', vis: 'chest', noSpread: true, r: 3.2, under: true, exists: () => !W('altar_3') && !!W('lighthouse'), label: 'Abrir', icon: '🧰', act: openChest });
     // lighthouse lamp (position comes from the build records)
     addObj({ id: 'lamp', kind: 'spot', dynamic: true, where: () => lh.lamp ? { x: lh.lamp.x, y: lh.lamp.y, z: lh.lamp.z, ry: 0 } : null, r: 3, exists: () => !!lh.lamp && lh.tall && !W('lighthouse') && !lh.lamp.lit, label: 'Acender o farol', icon: '🔥', act: lightLamp });
-    // gate lock, throne
-    addObj({ id: 'lock', poi: 'castle_gate', kind: 'spot', vis: 'lockDisc', off: OFF.lock, noSpread: true, r: 4, where: () => castleWorld('star_lock', 0), keepVis: true, exists: () => true, can: () => !W('gate') && hasStar(), label: 'Destrancar', icon: '✧', act: openGate });
+    // gate lock and the seat in the keep
+    addObj({ id: 'lock', poi: 'castle_gate', kind: 'spot', vis: 'lockDisc', off: OFF.lock, noSpread: true, r: 4, where: () => castleWorld('star_lock', 0), visCastle: null, keepVis: true, exists: () => true, can: () => !W('gate') && starInBag(), label: 'Destrancar', icon: '✧', act: openGate });
     addObj({ id: 'throne', poi: 'throne', kind: 'spot', vis: 'throneSet', noSpread: true, r: 3.2, where: () => castleWorld('throne', 0), keepVis: true, exists: () => true,
-      can: () => learned('despertar') || !!W('awake'), label: () => W('awake') ? 'Lembrar' : T('spells.despertar.name', '…'), icon: '✦', act: actThrone });
+      can: () => learned('despertar') || !!W('awake') || !!F.seenEnd, label: () => F.seenEnd ? 'Lembrar' : learned('despertar') ? T('spells.despertar.name', '…') : 'Olhar', icon: '✦', act: actThrone });
   }
-  function castleWorld(name, dy) {
-    if (!L.castleObj) return null; const o = L.castleObj(name); if (!o || !o.getWorldPosition) return null;
+  // world spot of a named piece of the authored keep (hook L.castleObj from the game). Pieces exported with their pivot
+  // at the model origin (geometry baked in place) are located by their bounds instead: centre, and the bottom (or the
+  // top with mode 'top', e.g. the reading surface).
+  function castleWorld(name, dy, mode) {
+    if (!L.castleObj || typeof THREE === 'undefined') return null; let o = null; try { o = L.castleObj(name); } catch (e) { } if (!o || !o.getWorldPosition) return null;
     o.updateMatrixWorld(true); const v = o.getWorldPosition(new THREE.Vector3()); const q = o.getWorldQuaternion(new THREE.Quaternion()); const e = new THREE.Euler().setFromQuaternion(q, 'YXZ');
+    const b = new THREE.Box3().setFromObject(o);
+    if (!b.isEmpty()) { const c = b.getCenter(new THREE.Vector3()); if (Math.hypot(c.x - v.x, c.z - v.z) > 3) return { x: c.x, y: mode === 'top' ? b.max.y : b.min.y, z: c.z, ry: e.y, obj: o, baked: true }; }
     return { x: v.x, y: v.y + (dy || 0), z: v.z, ry: e.y, obj: o };
   }
   const exists = o => (!o.exists || o.exists());
@@ -599,17 +694,29 @@ window.L = window.L || {};
       if (!o.act || !canUse(o)) continue; const p = resolve(o); if (!p) continue;
       const py = o.mesh && o.float ? o.mesh.position.y : p.y;
       if (y != null && Math.abs(py - y) > (o.id === 'bay_chest' ? 8 : 4.5)) continue;
-      const d = hyp(x, z, p.x, p.z); if (d > Math.max(r || 0, o.r)) continue;
+      const d = hyp(x, z, p.x, p.z); if (d > Math.min(Math.max(r || 0, o.r), o.r + CFG.reach)) continue; // never farther than S.interact accepts
       out.push({ id: o.id, x: p.x, y: py, z: p.z, label: typeof o.label === 'function' ? o.label() : o.label, icon: o.icon, d, kind: o.kind });
     }
-    for (const b of BIRDS) if (b.letter && b.state === 'wait') { const d = hyp(x, z, b.lx, b.lz); if (d <= Math.max(r || 0, 2.6)) out.push({ id: 'mail_' + b.note, x: b.lx, y: b.ly, z: b.lz, label: LABEL.letter, icon: ICON.letter, d, kind: 'note' }); }
+    for (const b of BIRDS) if (b.letter && b.state === 'wait') { const d = hyp(x, z, b.lx, b.lz); if (d <= Math.min(Math.max(r || 0, 2.6), 2.6 + CFG.reach)) out.push({ id: 'mail_' + b.note, x: b.lx, y: b.ly, z: b.lz, label: LABEL.letter, icon: ICON.letter, d, kind: 'note' }); }
     return out.sort((a, b) => a.d - b.d);
   };
-  S.interact = function (id) {
+  // she must be within the object's radius (+ CFG.reach) and roughly at its height; tests use S.debug.force(id)
+  function interactAt(id, force) {
     if (!P || S.busy) return false;
-    if (/^mail_/.test(id)) { const b = BIRDS.find(q => 'mail_' + q.note === id); if (b) { pickLetter(b); return true; } return false; }
-    const o = OBJ_BY[id]; if (!o || !canUse(o)) return false; o.act && o.act(); needEval = true; return true;
-  };
+    const me = L.P || MEM.pos || PL; const mx = me.x, mz = me.z, my = me.y;
+    if (/^mail_/.test(id)) {
+      const b = BIRDS.find(q => 'mail_' + q.note === id && q.letter && q.state === 'wait'); if (!b) return false;
+      if (!force && !(hyp(mx, mz, b.lx, b.lz) <= 2.6 + CFG.reach)) return false; pickLetter(b); return true;
+    }
+    const o = OBJ_BY[id]; if (!o || !canUse(o)) return false;
+    if (!force) {
+      const p = resolve(o); if (!p) return false; const py = o.mesh && o.float ? o.mesh.position.y : p.y;
+      if (!(hyp(mx, mz, p.x, p.z) <= o.r + CFG.reach)) return false;
+      if (my != null && my === my && Math.abs(py - my) > (o.id === 'bay_chest' ? 9 : 6)) return false;
+    }
+    o.act && o.act(); needEval = true; return true;
+  }
+  S.interact = id => interactAt(id, false);
 
   // ------------------------------------------------------------------ guardians and trials
   function actGarden() {
@@ -683,7 +790,7 @@ window.L = window.L || {};
     if (put) setW('forge', stamp(d));
     if (d.f >= need.fragmento && d.o >= need.ouro && d.c >= need.cristal) {
       talk('bigorna', ['done']); setW('forge_key', stamp()); inv.give(IT.star, 1); fxBurst(OBJ_BY.g_bigorna, 0xffc46a, 40); emit('sfx', 'forge');
-      finishTask(FORGE_TASK); say(T('ui.key_name'), '✧');
+      finishTask(FORGE_TASK); say(T(LP.starName), '✧');
     } else { talk('bigorna', ['wait']); emit('forge', { f: d.f, o: d.o, c: d.c, need }); }
     needEval = true;
   }
@@ -702,21 +809,25 @@ window.L = window.L || {};
     if (W('gate')) return; if (inv.count(IT.star)) inv.take(IT.star, 1);
     setW('gate', stamp()); emit('sfx', 'gate'); progressMade(); worldEvent('gate_open', {});
   }
+  // per player: her first time is her own (rewards), even when the partner woke him first; then it is a memory
   function actThrone() {
-    if (W('awake')) { if (!S.endingOn) S.playEnding({ replay: true }); return; }
-    tryAwaken();
+    if (S.endingOn) return false;
+    if (F.seenEnd) return S.playEnding({ replay: true });
+    if (W('awake')) return S.playEnding(learned('despertar') ? null : { replay: true });
+    return tryAwaken();
   }
   function tryAwaken() {
     const o = OBJ_BY.throne, p = resolve(o); if (!p || hyp(PL.x, PL.z, p.x, p.z) > 7) { say(T('spells.despertar.desc'), '✦'); return false; }
-    if (!learned('despertar') || !hasStar()) return false;
+    if (F.seenEnd || W('awake')) return actThrone();
+    if (!learned('despertar') || !starUsable()) return false;
     if (!isDawn()) { emit('dialog', { gid: 'throne', name: '', lines: [T('ui.need_dawn')] }); return false; }
-    S.playEnding(); return true;
+    return S.playEnding();
   }
 
   // ------------------------------------------------------------------ world flags from anyone (L.save.on('w5'))
   function onWorld(id, d, local) {
     needEval = true;
-    if (id === 'gate' && d) doorT = doorT == null ? (local ? 0 : (S.near('castle_gate', 200) ? 0 : 5)) : doorT;
+    if (id === 'gate' && d) doorT = doorT == null ? (local ? 0 : (S.near('castle_gate', 200) ? 0 : 8)) : doorT;
     if (id === 'awake' && d && !local && !S.endingOn) restoreT = 0;
     if (/^altar_/.test(id) && d && !local) { const o = OBJ_BY[id]; if (o && o.mesh) o.mesh.visible = false; }
   }
@@ -742,6 +853,7 @@ window.L = window.L || {};
       case 'interact': if (d.poiId) { F.seen = F.seen || {}; F.seen[d.poiId] = 1; changed(); } break;
       case 'enter_region': F.reg = F.reg || {}; if (!F.reg[d.region]) { F.reg[d.region] = 1; changed(); } break;
       case 'item': break;
+      case 'castle_ready': case 'colliders': S.invalidate(); break;
       case 'spell': break;
     }
     needEval = true;
@@ -763,11 +875,13 @@ window.L = window.L || {};
     if (pendingDream) { const id = pendingDream; pendingDream = null; showDream(id); }
     else if (F.hintDream) { F.hintDream = 0; changed(); const txt = hintText(); if (txt) emit('dream', { id: 'hint', text: txt, soft: true }); }
   }
-  // 'slept' arrives when the night is over (SYSTEMS sends it at dawn): sleeping the night through at the camp, under a
-  // roof and by a burning fire, counts as the whole night
+  // 'slept' arrives when the night is over (SYSTEMS sends it at dawn). Sleeping through at the camp, under a roof and by
+  // a burning fire, counts as the whole night only if this night's vigil began at nightfall there (vigilTick opens it
+  // between 18:00 and 22:30 and drops it when she leaves): lying down at 05:00 does not count.
   function sleepVigil() {
     if (W('altar_4') || !taskState('f4') || (F.vigil && F.vigil.done)) return;
-    if (vigilGood()) { F.vigil = { night: nightId(), ok: 999, bad: 0, slept: true, done: true }; changed(); emit('vigil', { done: true }); }
+    const V = F.vigil;
+    if (V && V.night === nightId() && vigilGood()) { V.slept = true; V.done = true; changed(); emit('vigil', { done: true }); }
   }
   function vigilGood() {
     const p = poi('summit_camp'); if (!p) return false; if (hyp(PL.x, PL.z, p.x, p.z) > CFG.summitR) return false;
@@ -811,6 +925,17 @@ window.L = window.L || {};
   // ------------------------------------------------------------------ spells
   const FX = { luz: 0, rev: 0, mare: 0, warm: 0 };
   const CD = {};
+  // cooldowns and effect timers also live in the player record as wall-clock end times (F.cdw / F.fxw), so a reload
+  // neither resets a cooldown nor drops an active effect (e.g. Revelar while inside the white)
+  function setFx(k, sec) { FX[k] = tNow + sec; if (F) { (F.fxw = F.fxw || {})[k] = wall() + sec * 1000; changed(); } }
+  function setCd(id, sec) { CD[id] = tNow + sec; if (F && sec > 0) { (F.cdw = F.cdw || {})[id] = wall() + sec * 1000; changed(); } }
+  function restoreTimers() {
+    const w = wall();
+    for (const [src, dst] of [[F.fxw, FX], [F.cdw, CD]]) {
+      if (!src || typeof src !== 'object') continue;
+      for (const k in src) { const left = (src[k] - w) / 1000; if (left > 0 && left < 3600) dst[k] = tNow + left; else { delete src[k]; if (dst === FX) dst[k] = 0; } }
+    }
+  }
   const mana = {
     st() { return L.save && L.save.player && L.save.player.st; },
     get() { const sv = L.surv; if (sv && typeof sv.mana === 'number') return sv.mana; if (sv && typeof sv.mana === 'function') return sv.mana(); const st = this.st(); if (st && typeof st.mana === 'number') return st.mana; return MEM.mana; },
@@ -831,17 +956,17 @@ window.L = window.L || {};
     if (mana.get() < (sp.mana || 0)) { emit('nomana', id); return { ok: false, why: 'mana' }; }
     const c = Object.assign({ x: PL.x, y: PL.y, z: PL.z }, ctx || {}); const [yaw, pitch] = camYawPitch(); if (c.yaw == null) c.yaw = yaw; if (c.pitch == null) c.pitch = pitch;
     const r = SPELL_FX[id] ? SPELL_FX[id](c) : true; if (r === false) return { ok: false, why: 'place' };
-    mana.use(sp.mana || 0); CD[id] = tNow + (sp.cd || 0);
+    mana.use(sp.mana || 0); setCd(id, sp.cd || 0);
     if (L.onSpell) L.onSpell(id); emit('cast', { id }); emit('sfx', 'spell_' + id);
     return { ok: true };
   };
   const SPELL_FX = {
-    faisca(c) { let lit = false; if (L.lightFireNear) lit = !!L.lightFireNear(c.x, c.z, 6); FX.warm = tNow + 60; if (L.surv && L.surv.warm) L.surv.warm(60); sparks(c, 0xffa040, 26); if (lit) S.event('fire_lit', { x: c.x, z: c.z }); return true; },
-    brotar(c) { if (L.farm && L.farm.boost) L.farm.boost(c.x, c.z, 4); if (L.refillBushes) L.refillBushes(c.x, c.z, 4); sparks(c, 0x9fe070, 30); return true; },
-    luz() { FX.luz = tNow + 90; return true; },
-    mare(c) { FX.mare = tNow + 20; if (L.farm) { if (L.farm.waterArea) L.farm.waterArea(c.x, c.z, 8); else if (L.farm.water) L.farm.water({ x: c.x, z: c.z, r: 8 }); } sparks(c, 0x7fd0ff, 30); return true; },
+    faisca(c) { let lit = false; if (L.lightFireNear) lit = !!L.lightFireNear(c.x, c.z, 6); setFx('warm', 60); if (L.surv && L.surv.warm) L.surv.warm(60); sparks(c, 0xffa040, 26); if (lit) S.event('fire_lit', { x: c.x, z: c.z }); return true; },
+    brotar(c) { if (L.farm && L.farm.boost) L.farm.boost(c.x, c.z, 4); sparks(c, 0x9fe070, 30); return true; },
+    luz() { setFx('luz', 90); return true; },
+    mare(c) { setFx('mare', 20); if (L.farm) { if (L.farm.waterArea) L.farm.waterArea(c.x, c.z, 8); else if (L.farm.water) L.farm.water({ x: c.x, z: c.z, r: 8 }); } sparks(c, 0x7fd0ff, 30); return true; },
     ponte(c) { return makeBridge(c); },
-    revelar() { FX.rev = tNow + 60; if (inMist(PL.x, PL.z) > 0 || distMistEdge() < 400) openPath(); return true; },
+    revelar() { setFx('rev', 60); if (inMist(PL.x, PL.z) > 0 || distMistEdge() < 400) openPath(); return true; },
     despertar() { return tryAwaken(); },
   };
   S.mods = function () {
@@ -858,7 +983,7 @@ window.L = window.L || {};
   S.mistBlock = function (x, z) { if (W('awake')) return false; if (inMist(x, z) <= 0) return false; if (clearZone(x, z)) return false; if (pass || tNow < FX.rev) return false; return true; };
   const MS = { white: 0, phase: 0, t: 0, line: null, safe: null, entry: null, open: 0, pts: null, sprites: [] };
   function mistTick(dt) {
-    const m = M(); if (!m || W('awake')) { if (MS.white > 0) { MS.white = Math.max(0, MS.white - dt); emit('white', { a: MS.white, text: null }); } closePath(dt); return; }
+    const m = M(); if (!m || W('awake')) { if (MS.white > 0) { MS.white = Math.max(0, MS.white - dt); whiteOut(MS.white, null); } closePath(dt); return; }
     const x = PL.x, z = PL.z, depth = inMist(x, z), revOn = tNow < FX.rev;
     if (depth <= 0) { pass = false; MS.safe = [x, PL.y, z]; MS.entry = null; }
     else if (clearZone(x, z)) MS.safe = [x, PL.y, z];
@@ -870,19 +995,25 @@ window.L = window.L || {};
       MS.white = want > MS.white ? Math.min(want, MS.white + dt * 1.5) : Math.max(want, MS.white - dt * .8);
       if (blocked && MS.white > .3 && !MS.line) { const ls = TL('mist') || []; MS.line = ls.length ? ls[(F.mistN = ((F.mistN || 0) + 1)) % ls.length] : ''; emit('sfx', 'whisper'); }
       if (!blocked && MS.white < .05) MS.line = null;
-      emit('white', { a: MS.white, text: MS.white > .3 ? MS.line : null });
+      whiteOut(MS.white, MS.white > .3 ? MS.line : null);
       if (blocked && MS.white >= .999) { MS.phase = 1; MS.t = 0; }
     } else if (MS.phase === 1) {
-      MS.t += dt; emit('white', { a: 1, text: MS.line });
+      MS.t += dt; whiteOut(1, MS.line);
       if (MS.t > .9) { const s = safePoint(); teleport(s[0], s[1], s[2]); MS.phase = 2; MS.t = 0; }
     } else if (MS.phase === 2) {
-      MS.t += dt; MS.white = Math.max(0, 1 - MS.t / 1.8); emit('white', { a: MS.white, text: MS.t < 1 ? MS.line : null });
+      MS.t += dt; MS.white = Math.max(0, 1 - MS.t / 1.8); whiteOut(MS.white, MS.t < 1 ? MS.line : null);
       if (MS.t > 1.8) { MS.phase = 0; MS.line = null; }
     }
     // the path of lights while the word of seeing is active
     if (revOn && (depth > 0 || distMistEdge() < 400)) openPath(); else if (!pass) closePath(dt);
     if (MS.open > 0) MS.open = Math.min(1, MS.open + dt * .5);
     if (pass && depth > .1 && !F.castle_seen && !S.endingOn && !shot) revealShot();
+  }
+  // the white veil goes to the UI only when it changes (not every frame)
+  let whiteA = 0, whiteTx = null;
+  function whiteOut(a, text) {
+    text = text || null; if (Math.abs(a - whiteA) < .01 && (a > 0) === (whiteA > 0) && (a >= 1) === (whiteA >= 1) && text === whiteTx) return;
+    whiteA = a; whiteTx = text; emit('white', { a, text });
   }
   function safePoint() {
     const m = M(); let s = MS.safe;
@@ -948,7 +1079,7 @@ window.L = window.L || {};
     b.mesh = has3D() ? makeBird() : null; if (b.mesh) { b.mesh.position.set(b.x, b.y, b.z); L.scene.add(b.mesh); }
     BIRDS.push(b); emit('sfx', 'bird'); return b;
   }
-  function pickLetter(b) { b.state = 'away'; b.t = 0; b.letter = false; if (b.lmesh) { L.scene.remove(b.lmesh); b.lmesh = null; } readNote(b.note); emit('sfx', 'pick'); }
+  function pickLetter(b) { b.state = 'away'; b.t = 0; b.letter = false; if (b.lmesh) { disposeVis(b.lmesh); b.lmesh = null; } readNote(b.note); emit('sfx', 'pick'); }
   function birdSteer(b, tx, ty, tz, sp, dt, k) {
     const dx = tx - b.x, dy = ty - b.y, dz = tz - b.z, d = Math.hypot(dx, dy, dz) || 1;
     const want = Math.min(sp, d * 1.5 + .2);
@@ -957,19 +1088,23 @@ window.L = window.L || {};
   }
   function birdTick(b, dt) {
     b.t += dt; let flapHz = 9;
+    if ((b.state === 'in' || b.state === 'circle' || b.state === 'land') && hyp(PL.x, PL.z, b.x, b.z) > 300) { // she travelled far away: try again later
+      if (b.onArrive === 'guide') guideLeave(b); else { b.state = 'away'; b.t = 0; } if (b.letter) { b.letter = false; birdCD = 30; }
+    }
     if (b.state === 'in') { const d = birdSteer(b, PL.x, PL.y + 5, PL.z, 11, dt); if (d < 7) { b.state = 'circle'; b.t = 0; b.ca = Math.atan2(b.x - PL.x, b.z - PL.z); } }
     else if (b.state === 'circle') {
       b.ca += dt * 1.25; const r = 4.5; const d = birdSteer(b, PL.x + Math.sin(b.ca) * r, PL.y + 3.4 + Math.sin(b.t * 2) * .4, PL.z + Math.cos(b.ca) * r, 7, dt, 4); flapHz = 6;
       if ((b.t > 5.5 && d < 3) || b.t > 9) {
         b.state = 'land'; b.t = 0; const a = PL.ry || 0; b.lx = PL.x + Math.sin(a) * 2.2 + Math.cos(a) * .6; b.lz = PL.z + Math.cos(a) * 2.2 - Math.sin(a) * .6;
-        b.ly = L.groundAt ? L.groundAt(b.lx, b.lz, PL.y + 1, 2).y : groundY(b.lx, b.lz, PL.y);
+        let gy = groundY(b.lx, b.lz, PL.y); try { if (L.groundAt) gy = L.groundAt(b.lx, b.lz, PL.y + 1, 2).y; } catch (e) { }
+        const wy = L.waterAt ? L.waterAt(b.lx, b.lz) : -Infinity; b.water = wy > gy; b.ly = b.water ? wy : gy; // over water: the letter floats
       }
     } else if (b.state === 'land') {
       const d = birdSteer(b, b.lx, b.ly + .05, b.lz, 4, dt, 3); flapHz = 5;
       if (d < .12) { b.state = 'wait'; b.t = 0; b.x = b.lx; b.y = b.ly + .05; b.z = b.lz; b.vx = b.vy = b.vz = 0; if (b.letter && has3D()) { b.lmesh = makeVisual('letter'); b.lmesh.position.set(b.lx + .35, b.ly, b.lz + .1); b.lmesh.rotation.y = Math.random(); L.scene.add(b.lmesh); } emit('mail', { note: b.note }); }
     } else if (b.state === 'wait') {
       flapHz = 0; b.flap = Math.sin(b.t * 1.3) > .96 ? Math.sin(b.t * 30) * .6 : lerp(b.flap, -.15, dt * 4);
-      if (hyp(PL.x, PL.z, b.lx, b.lz) > 70) { b.state = 'away'; b.t = 0; if (b.lmesh) { L.scene.remove(b.lmesh); b.lmesh = null; } b.letter = false; birdCD = 30; }
+      if (hyp(PL.x, PL.z, b.lx, b.lz) > 70) { b.state = 'away'; b.t = 0; if (b.lmesh) { disposeVis(b.lmesh); b.lmesh = null; } b.letter = false; birdCD = 30; }
     } else if (b.state === 'guide') { flapHz = guideTick(b, dt); }
     else if (b.state === 'away') { b.vy = lerp(b.vy, 6, dt); const a = b.away || (b.away = Math.random() * TAU); b.vx = lerp(b.vx, Math.sin(a) * 10, dt); b.vz = lerp(b.vz, Math.cos(a) * 10, dt); b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt; if (b.t > 12) b.dead = true; }
     else if (b.state === 'burst') { b.vy += dt * 1.2; b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt; flapHz = 11; if (b.t > 14) b.dead = true; }
@@ -980,19 +1115,34 @@ window.L = window.L || {};
       const w = b.mesh.userData; if (w.wl) { const ax = w.axis || 'z'; w.wl.rotation[ax] = (w.l0 || 0) + b.flap; w.wr.rotation[ax] = (w.r0 || 0) - b.flap; }
     }
   }
-  function makeBird() {
+  // the paper bird: procedural folded paper until m/paperbird.json is there; then the template itself becomes the model
+  let birdModel = false;
+  function birdBody() {
     const root = new THREE.Group(); root.scale.setScalar(1.7);
     const body = merge([part(new THREE.ConeGeometry(.045, .3, 4), '#f4f1ea', 0, 0, .02, Math.PI / 2, 0, 0, 1, 1, 1, { lo: .86 }), part(new THREE.ConeGeometry(.03, .1, 3), '#e9e4d8', 0, .05, .2, -.6, 0, 0)], mats().bird);
     root.add(body);
     const wing = s => { const g = new THREE.BufferGeometry(); const v = new Float32Array([0, 0, .1, 0, 0, -.1, s * .27, .02, -.03]); g.setAttribute('position', new THREE.BufferAttribute(v, 3)); g.computeVertexNormals(); const m = new THREE.Mesh(part(g, '#f7f4ee', 0, 0, 0, 0, 0, 0, 1, 1, 1, { flat: true }), mats().bird); m.position.y = .02; return m; };
     const wl = wing(1), wr = wing(-1); root.add(wl); root.add(wr); root.userData.wl = wl; root.userData.wr = wr;
-    modelFile('paperbird').then(sc => { if (!sc) return; const c = sc.clone(true); let l = null, r = null; c.traverse(o => { if (o.isMesh) { o.material = mats().v; o.castShadow = true; } if (/paperbird_wing_l$/i.test(o.name)) l = o; if (/paperbird_wing_r$/i.test(o.name)) r = o; }); root.remove(body); root.remove(wl); root.remove(wr); root.scale.setScalar(1); root.add(c); if (l && r) Object.assign(root.userData, { wl: l, wr: r, axis: 'y', l0: l.rotation.y, r0: r.rotation.y }); });
     return root;
   }
+  function birdFromModel(sc) {
+    const root = new THREE.Group(), c = sc.clone(true); let l = null, r = null;
+    c.traverse(o => { if (o.isMesh) { o.material = mats().v; o.castShadow = true; } if (/paperbird_wing_l$/i.test(o.name)) l = o; if (/paperbird_wing_r$/i.test(o.name)) r = o; });
+    root.add(c); if (l && r) Object.assign(root.userData, { wl: l, wr: r, axis: 'y', l0: l.rotation.y, r0: r.rotation.y }); return root;
+  }
+  function makeBird() {
+    if (!birdModel) { birdModel = true; modelFile('paperbird').then(sc => { if (sc) TPL.bird = birdFromModel(sc); }); }
+    return cloneVis(template('bird', birdBody));
+  }
   // a guide (stuck helper bird, or the lunar deer) leads to a target and waits when the player stops
+  // she went far away, stopped following for a long while, or the clue got done: the bird leaves, and the helper may
+  // come back after CFG.stuckAgain
+  function guideLeave(b) { b.state = 'away'; b.t = 0; b.onArrive = null; F.progT = (F.playT || 0) - CFG.stuckAfter + CFG.stuckAgain; changed(); }
   function guideTick(b, dt) {
     const tx = b.tx, tz = b.tz, dp = hyp(PL.x, PL.z, b.x, b.z), dt2 = hyp(b.x, b.z, tx, tz), pt = hyp(PL.x, PL.z, tx, tz);
     let flap = 7;
+    b.gT = (b.gT || 0) + dt; if (b.best == null || pt < b.best - 2) { b.best = pt; b.bestT = b.gT; }
+    if (dp > CFG.guideLeave || b.gT - b.bestT > CFG.guideStall || (b.guideTo && nextClue() !== b.guideTo)) { guideLeave(b); return 5; }
     if (dt2 < 8 && pt < 28) { b.loops = (b.loops || 0) + dt; b.ca = (b.ca || 0) + dt * 1.2; birdSteer(b, tx + Math.sin(b.ca) * 6, groundY(tx, tz) + 5, tz + Math.cos(b.ca) * 6, 6, dt, 3); if (b.loops > 9) { b.state = 'away'; b.t = 0; F.progT = (F.playT || 0) - CFG.stuckAfter + CFG.stuckAgain; F.hintDream = 1; changed(); } return 6; }
     const moving = PL.v > .35, far = dp > 16;
     if (!moving || far) { b.ha = (b.ha || 0) + dt * 1.6; birdSteer(b, b.hx != null ? b.hx + Math.sin(b.ha) * 2.5 : b.x, (b.hy != null ? b.hy : b.y), b.hz != null ? b.hz + Math.cos(b.ha) * 2.5 : b.z, 2.5, dt, 2); if (b.hx == null) { b.hx = b.x; b.hy = b.y; b.hz = b.z; } flap = 5; }
@@ -1019,7 +1169,7 @@ window.L = window.L || {};
       if (has3D()) { deer.root = new THREE.Group(); const gl = glowSprite(0xc9b8ff, 2.6, .8); gl.position.y = 1.1; deer.root.add(gl); deer.glow = gl; L.scene.add(deer.root);
         modelFile('deer_lunar').then(src => { if (!src || !deer || !L.instRigged) return; const I = L.instRigged(src); deer.I = I; deer.root.add(I.root); }); }
     }
-    if (deer && hyp(PL.x, PL.z, deer.x, deer.z) > 90) { if (deer.root) L.scene.remove(deer.root); deer = null; return; } // she travelled away: appear again near her
+    if (deer && hyp(PL.x, PL.z, deer.x, deer.z) > 90) { dropDeer(); return; } // she travelled away: appear again near her
     if (!deer) return;
     deer.t += dt; const dg = hyp(deer.x, deer.z, g.x, g.z), dp = hyp(PL.x, PL.z, deer.x, deer.z);
     let sp = 0;
@@ -1029,7 +1179,10 @@ window.L = window.L || {};
     else if (dp < 30) deer.ry = lerp(deer.ry, Math.atan2(PL.x - deer.x, PL.z - deer.z), dt * 1.5);
     deer.v = lerp(deer.v, sp, dt * 4);
     if (deer.root) { deer.root.position.set(deer.x, deer.y, deer.z); deer.root.rotation.y = deer.ry; if (deer.I && L.quadAnim) { const s = deer.st; s.speed = deer.v; s.turn = 0; s.t = deer.t; s.dt = dt; s.look = [0, 0]; s.graze = sp ? 0 : .2; s.sit = 0; L.quadAnim(deer.I.rig, s); } }
-    if (!isNight() || W('altar_2')) { if (deer.root) L.scene.remove(deer.root); deer = null; }
+    if (!isNight() || W('altar_2')) dropDeer();
+  }
+  function dropDeer() {
+    if (deer && deer.root) { L.scene.remove(deer.root); if (deer.glow && deer.glow.material) deer.glow.material.dispose(); } deer = null;
   }
 
   // ------------------------------------------------------------------ star flight, sparkles
@@ -1048,7 +1201,7 @@ window.L = window.L || {};
     for (let i = FLY.length - 1; i >= 0; i--) {
       const f = FLY[i]; f.t += dt; const m = f.m;
       if (f.t < 1.8) { const u = sstep(0, 1, f.t / 1.8); m.position.set(f.x0, f.y0 + u * 1.6, f.z0); m.rotation.y += dt * (2 + u * 6); m.scale.setScalar(.6 + u * .6); }
-      else { const u = clamp((f.t - 1.8) / .9, 0, 1), e = u * u; m.position.set(lerp(f.x0, PL.x, e), lerp(f.y0 + 1.6, PL.y + 1.2, e) + Math.sin(u * Math.PI) * .8, lerp(f.z0, PL.z, e)); m.scale.setScalar(1.2 * (1 - e) + .1); m.rotation.y += dt * 9; if (u >= 1) { sparks({ x: PL.x, y: PL.y, z: PL.z }, 0xffe6a8, 30); L.scene.remove(m); FLY.splice(i, 1); } }
+      else { const u = clamp((f.t - 1.8) / .9, 0, 1), e = u * u; m.position.set(lerp(f.x0, PL.x, e), lerp(f.y0 + 1.6, PL.y + 1.2, e) + Math.sin(u * Math.PI) * .8, lerp(f.z0, PL.z, e)); m.scale.setScalar(1.2 * (1 - e) + .1); m.rotation.y += dt * 9; if (u >= 1) { sparks({ x: PL.x, y: PL.y, z: PL.z }, 0xffe6a8, 30); disposeVis(m); FLY.splice(i, 1); } }
     }
   }
 
@@ -1062,13 +1215,13 @@ window.L = window.L || {};
       else { orbLight = new THREE.PointLight(0xffe6b0, 1.6, 18, 1.6); orb.add(orbLight); }
     }
     if (!orb) return;
-    orb.visible = !EN; // the finale frames her up close: the little light steps aside
+    orb.visible = !EN; // the long morning frames her up close: the little light steps aside
     const left = FX.luz - tNow, fade = clamp(left / 3, 0, 1) * clamp((90 - left) / .8, 0, 1);
     const a = (PL.ry || 0) + 2.4, tx = PL.x + Math.sin(a) * .9, tz = PL.z + Math.cos(a) * .9, ty = PL.y + 2.3 + Math.sin(tNow * 1.8) * .18;
     orb.position.x = lerp(orb.position.x, tx, clamp(dt * 3, 0, 1)); orb.position.y = lerp(orb.position.y, ty, clamp(dt * 3, 0, 1)); orb.position.z = lerp(orb.position.z, tz, clamp(dt * 3, 0, 1));
     orb.userData.halo.material.opacity = .55 * fade; orb.children[0].material.opacity = fade; orb.userData.halo.scale.setScalar(3.2 + Math.sin(tNow * 3) * .2);
     if (orbLight && !orbLight.isLight) { orbLight.x = orb.position.x; orbLight.y = orb.position.y; orbLight.z = orb.position.z; orbLight.i = 2.2 * fade; } else if (orbLight) orbLight.intensity = 1.6 * fade;
-    if (!on) { L.scene.remove(orb); orb = null; if (orbLight && !orbLight.isLight && L.LIGHTS) { const i = L.LIGHTS.indexOf(orbLight); if (i >= 0) L.LIGHTS.splice(i, 1); } orbLight = null; }
+    if (!on) { L.scene.remove(orb); orb.traverse(o => { if (o.material) o.material.dispose(); }); orb = null; if (orbLight && !orbLight.isLight && L.LIGHTS) { const i = L.LIGHTS.indexOf(orbLight); if (i >= 0) L.LIGHTS.splice(i, 1); } orbLight = null; }
   }
   let bridge = null;
   function makeBridge(c) {
@@ -1081,7 +1234,8 @@ window.L = window.L || {};
     const col = L.addCol ? L.addCol({ x: c.x + dirx * len / 2, z: c.z + dirz * len / 2, rot: c.yaw, hx: 1.05, hz: len / 2 + .3, y0: Math.min(y0, y1) - .6, y1: y0, y2: y1, bridge: 1 }) : null;
     bridge = { x: c.x, y: y0, z: c.z, dx: dirx, dz: dirz, slope, len, col, t0: tNow, end: tNow + 25, puffs: [] };
     if (has3D()) {
-      const n = Math.round(len * 2.6), geo = new THREE.IcosahedronGeometry(1, 1), mat = mats().cloud.clone(); mat.transparent = true;
+      // the shared, stylized cloud material (a clone would lose the stylize patch); only one bridge exists at a time
+      const n = Math.round(len * 2.6), geo = new THREE.IcosahedronGeometry(1, 1), mat = mats().cloud; mat.transparent = true;
       const im = new THREE.InstancedMesh(geo, mat, n); im.castShadow = false; im.receiveShadow = true; im.frustumCulled = false; const r = rnd(9);
       for (let i = 0; i < n; i++) { const t = (i + r()) / n * len, side = (r() - .5) * 1.9; bridge.puffs.push({ t, side, s: .45 + r() * .5, up: -.25 - r() * .35, ph: r() * TAU }); }
       bridge.mesh = im; L.scene.add(im);
@@ -1104,7 +1258,7 @@ window.L = window.L || {};
     }
     if (left <= 0) removeBridge();
   }
-  function removeBridge() { if (!bridge) return; if (bridge.col && L.delCol) L.delCol(bridge.col); if (bridge.mesh) { L.scene.remove(bridge.mesh); bridge.mesh.geometry.dispose(); bridge.mesh.material.dispose(); } bridge = null; }
+  function removeBridge() { if (!bridge) return; if (bridge.col && L.delCol) L.delCol(bridge.col); if (bridge.mesh) { L.scene.remove(bridge.mesh); bridge.mesh.geometry.dispose(); if (bridge.mesh.dispose) bridge.mesh.dispose(); } bridge = null; }
   S.bridgeState = () => bridge ? { len: bridge.len, left: bridge.end - tNow, col: !!bridge.col } : null;
   let beam = null;
   function beamTick() {
@@ -1115,49 +1269,57 @@ window.L = window.L || {};
       const gl = glowSprite(0xffefc0, 6, .9); beam.add(gl); const pool = new THREE.Mesh(new THREE.CircleGeometry(9, 32), new THREE.MeshBasicMaterial({ map: glowTex(), color: 0xffd98a, transparent: true, opacity: .75, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); pool.rotation.x = -Math.PI / 2; beam.userData.pool = pool; L.scene.add(beam); L.scene.add(pool);
     }
     if (!beam) return;
-    if (!want) { L.scene.remove(beam); L.scene.remove(beam.userData.pool); beam = null; return; }
+    if (!want) { L.scene.remove(beam); L.scene.remove(beam.userData.pool); for (const o of [beam.userData.m, beam.userData.pool, beam.children[1]]) { if (!o) continue; if (o.geometry) o.geometry.dispose(); if (o.material && o.material !== mats().beam) o.material.dispose(); } beam = null; return; }
     const src = lh.lamp || L3; beam.position.set(src.x, src.y + 1.2, src.z);
     const tx = chest.x, tz = chest.z, ty = Math.max(-1, (L.waterAt ? L.waterAt(tx, tz) : 0)); const d = Math.hypot(tx - src.x, ty - src.y, tz - src.z);
     beam.lookAt(tx, ty, tz); beam.userData.m.scale.set(1, 1, d); beam.userData.pool.position.set(tx, ty + .06, tz); mats().beam.uniforms.uA.value = 1; mats().beam.uniforms.uT.value = tNow;
   }
 
-  // ------------------------------------------------------------------ sleeper on the throne + the finale
-  let sleeper = null, doorT = null, restoreT = null;
-  function sleeperTick(dt) {
+  // ------------------------------------------------------------------ the seated figure and the long morning (GDD §5.6)
+  let fig = null, doorT = null, restoreT = null;
+  function figTick(dt) {
     const th = OBJ_BY.throne, p = th && resolve(th); if (!p || !has3D()) return;
     const near = hyp(PL.x, PL.z, p.x, p.z) < 160;
-    if (near && !sleeper) {
-      sleeper = { root: new THREE.Group(), t: 0, pose: { sit: 1, slump: 1, lift: 0, stand: 0, breathe: 1 }, I: null };
-      sleeper.root.position.set(p.x, p.y, p.z); sleeper.root.rotation.y = p.ry; L.scene.add(sleeper.root);
-      if (!castleWorld('throne')) { const t = PROPS.throne(); sleeper.root.add(t); sleeper.throne = t; }
-      const ivy = PROPS.ivy(); ivy.position.z = .1; sleeper.root.add(ivy); sleeper.ivy = ivy;
-      const halo = glowSprite(0xffe6a8, 3, 0); halo.position.set(0, 1.5, .1); sleeper.root.add(halo); sleeper.halo = halo;
-      loadSleeper();
+    if (near && !fig) {
+      fig = { root: new THREE.Group(), t: 0, pose: { sit: 1, slump: 1, lift: 0, stand: 0, breathe: 1 }, I: null, pv: th.pv };
+      fig.root.position.set(p.x, p.y, p.z); fig.root.rotation.y = p.ry; L.scene.add(fig.root);
+      if (!castleWorld('throne')) { const t = PROPS.throne(); fig.root.add(t); fig.seat = t; }
+      const ivy = PROPS.ivy(); ivy.position.z = .1; fig.root.add(ivy); fig.ivy = ivy;
+      const halo = glowSprite(0xffe6a8, 3, 0); halo.position.set(0, 1.5, .1); fig.root.add(halo); fig.halo = halo;
+      loadFigure();
     }
-    if (!sleeper) return;
-    sleeper.t += dt; const s = sleeper, po = s.pose;
-    if (W('awake') && !S.endingOn) { po.sit = 0; po.slump = 0; po.lift = 1; po.stand = 1; if (s.ivy) s.ivy.visible = false; }
-    if (s.I) poseSleeper(s, dt);
+    if (!fig) return;
+    const s = fig, po = s.pose; s.t += dt;
+    if (s.pv !== th.pv) { // the authored keep arrived after the figure: move onto its seat, drop the stand-in seat
+      s.pv = th.pv; s.root.position.set(p.x, p.y, p.z); s.root.rotation.y = p.ry;
+      if (s.seat && castleWorld('throne')) { s.root.remove(s.seat); s.seat = null; }
+    }
+    // the authored keep has its own ivy on the seat: use it instead of the procedural one
+    if (!s.vineObj && MODEL.vines && L.castleObj) { let v = null; try { v = L.castleObj(MODEL.vines); } catch (e) { } if (v) { s.vineObj = v; if (s.ivy) { s.root.remove(s.ivy); s.ivy = null; } } }
+    if (W('awake') && !S.endingOn) { po.sit = 0; po.slump = 0; po.lift = 1; po.stand = 1; po.ivyGone = 1; po.glow = lerp(po.glow || 0, .2, clamp(dt * .5, 0, 1)); }
+    if (s.I) poseFigure(s, dt);
     else if (s.fallback) { s.fallback.position.y = .62 + po.stand * .35; s.fallback.rotation.x = .25 * po.slump; }
-    if (s.ivy) s.ivy.scale.setScalar(Math.max(.001, 1 - (po.ivyGone || 0)));
+    if (s.ivy) { s.ivy.scale.setScalar(Math.max(.001, 1 - (po.ivyGone || 0))); s.ivy.visible = (po.ivyGone || 0) < .999; }
+    if (s.vineObj) s.vineObj.visible = (po.ivyGone || 0) < .6;
   }
-  function loadSleeper() {
-    const tryList = ['king', 'hero_m', 'mage_m'];
-    const next = i => { if (i >= tryList.length || !L.loadModel) return fallbackSleeper(); modelFile(tryList[i]).then(src => { if (!src || !L.instRigged) return next(i + 1); attachSleeper(src, tryList[i]); }); };
+  function loadFigure() {
+    const tryList = [MODEL.figure, 'hero_m', 'mage_m'].filter(Boolean);
+    const next = i => { if (i >= tryList.length || !L.loadModel) return fallbackFigure(); modelFile(tryList[i]).then(src => { if (!src || !L.instRigged) return next(i + 1); attachFigure(src, tryList[i]); }); };
     next(0);
   }
-  function attachSleeper(src, name) {
-    if (!sleeper) return; const I = L.instRigged(src, {}); sleeper.I = I; sleeper.model = name; sleeper.root.add(I.root);
-    if (name !== 'king') { // a stand-in until the dedicated model exists: deep-blue tint, a thin gold circlet, a white beard
+  function attachFigure(src, name) {
+    if (!fig) return; const I = L.instRigged(src, {}); fig.I = I; fig.model = name === MODEL.figure ? 'own' : name; fig.root.add(I.root);
+    if (name !== MODEL.figure) { // a stand-in until the dedicated model exists: deep-blue tint, a thin gold circlet, a white beard
       const mat = (I.meshes[0] && I.meshes[0].material && I.meshes[0].material.clone()) || null; if (mat) { mat.color = new THREE.Color(.55, .62, 1.15); I.meshes.forEach(m => m.material = mat); }
-      const head = I.rig.e('head'); if (head) { const h = head.o; const crown = merge([part(new THREE.TorusGeometry(.11, .012, 6, 18), '#e2b84f', 0, .22, 0, Math.PI / 2), ...[0, 1, 2, 3, 4].map(i => part(G.cone(.018, .06, 4), '#e2b84f', Math.sin(i / 5 * TAU) * .11, .26, Math.cos(i / 5 * TAU) * .11))]); h.add(crown); const beard = merge([part(G.cone(.09, .32, 7), '#f2efe8', 0, -.04, .09, Math.PI, 0, 0, 1, 1, .6)]); h.add(beard); sleeper.crown = crown; } }
-    else I.root.traverse(o => { if (/crown_glow/.test(o.name)) { o.visible = false; sleeper.crownGlow = o; } });
+      const head = I.rig.e('head'); if (head) { const h = head.o; const circlet = merge([part(new THREE.TorusGeometry(.11, .012, 6, 18), '#e2b84f', 0, .22, 0, Math.PI / 2), ...[0, 1, 2, 3, 4].map(i => part(G.cone(.018, .06, 4), '#e2b84f', Math.sin(i / 5 * TAU) * .11, .26, Math.cos(i / 5 * TAU) * .11))]); h.add(circlet); const beard = merge([part(G.cone(.09, .32, 7), '#f2efe8', 0, -.04, .09, Math.PI, 0, 0, 1, 1, .6)]); h.add(beard); }
+    }
+    else I.root.traverse(o => { if (/_glow$/.test(o.name) && /^c/.test(o.name)) { o.visible = false; fig.circletGlow = o; } });
   }
-  function fallbackSleeper() {
-    if (!sleeper) return; const g = new THREE.Group(); g.add(merge([part(G.cyl(.32, .45, 1.2, 10), '#2f4b8f', 0, .6, 0), part(G.sph(.17, 1), '#e9cfb4', 0, 1.35, .02), part(G.cone(.12, .4, 7), '#f2efe8', 0, 1.15, .14, Math.PI, 0, 0), part(new THREE.TorusGeometry(.15, .02, 6, 16), '#e2b84f', 0, 1.5, 0, Math.PI / 2)]));
-    g.position.y = .62; sleeper.root.add(g); sleeper.fallback = g;
+  function fallbackFigure() {
+    if (!fig) return; const g = new THREE.Group(); g.add(merge([part(G.cyl(.32, .45, 1.2, 10), '#2f4b8f', 0, .6, 0), part(G.sph(.17, 1), '#e9cfb4', 0, 1.35, .02), part(G.cone(.12, .4, 7), '#f2efe8', 0, 1.15, .14, Math.PI, 0, 0), part(new THREE.TorusGeometry(.15, .02, 6, 16), '#e2b84f', 0, 1.5, 0, Math.PI / 2)]));
+    g.position.y = .62; fig.root.add(g); fig.fallback = g;
   }
-  function poseSleeper(s, dt) {
+  function poseFigure(s, dt) {
     const I = s.I, rig = I.rig, po = s.pose; rig.reset();
     const H = rig.hipH || .95, seat = .62, sit = po.sit * (1 - po.stand), slump = po.slump * (1 - po.lift), br = Math.sin(s.t * 1.1) * .03 * (po.breathe || 0);
     for (const sd of ['L', 'R']) { const sg = sd === 'L' ? 1 : -1; rig.r('thigh.' + sd, -1.5 * sit, 0, sg * .08 * sit); rig.r('shin.' + sd, 1.5 * sit); rig.r('foot.' + sd, -.1 * sit); rig.r('upperarm.' + sd, -.55 * sit, 0, sg * -.45 * (1 - .4 * sit)); rig.r('forearm.' + sd, -.75 * sit); }
@@ -1165,81 +1327,139 @@ window.L = window.L || {};
     rig.r('spine', .28 * slump + br); rig.r('chest', .12 * slump - br * .5); rig.r('neck', .25 * slump); rig.r('head', .55 * slump - .1 * po.lift * (1 - po.stand));
     rig.apply();
     I.root.position.set(0, 0, .08 * sit);
-    if (s.crownGlow) s.crownGlow.visible = (po.glow || 0) > .3;
+    if (s.circletGlow) s.circletGlow.visible = (po.glow || 0) > .3;
     if (s.halo) s.halo.material.opacity = (po.glow || 0) * .7;
   }
-  // timeline (seconds) of the finale; text and camera come from here, overlay drawing from storyui
+  // timeline (seconds); text and camera come from here, overlay drawing from storyui (event 'morning')
   const END = { start: 0, star: 2.6, ivy: 7, lift: 14, out: 18, restore: [19, 33], mist: [31, 41], birds: 33, back: 42, stand: [43, 47], lines: [47.5, 53, 58.5, 64], title: 70, personal: 77, end: 88 };
   let EN = null;
   S.endingOn = false;
+  // Who sees what. Her first time plays everything and grants her rewards at the end (not skippable). When the shared
+  // world flag is already set (her partner was first, or a reload cut her own sequence) the first part is skipped and
+  // the keep stays healed, but her lines, title and rewards still play in full. After that it is a skippable memory without rewards.
+  // opt.replay: a look without rewards (someone who has not learned the word yet).
   S.playEnding = function (opt) {
-    if (S.endingOn) return; const th = OBJ_BY.throne, p = resolve(th); if (!p) return;
-    const c = poi('castle') || p;
-    EN = { t: 0, p, c, replay: !!(opt && opt.replay), skippable: !!F.seenEnd || !!(opt && opt.replay), lineI: -1, flags: {}, personal: !!T('ending.personal_text', '') };
-    S.endingOn = true; F.endStarted = 1;
-    if (!W('awake')) { setW('awake', stamp()); worldEvent('awake', {}); }
-    emit('ending', { phase: 'start', skippable: EN.skippable }); emit('sfx', 'ending');
+    opt = opt || {};
+    if (S.endingOn) return false; const th = OBJ_BY.throne, p = th && resolve(th); if (!p) return false;
+    const c = poi('castle') || p, awake = !!W('awake'), own = !F.seenEnd && !opt.replay;
+    EN = { t: awake ? END.out : 0, p, c, own, worldDone: awake, skippable: !own, lineI: -1, flags: {}, personal: !!T(LP.end + '.personal_text', '') };
+    S.endingOn = true;
+    if (own) { F.endStarted = wall(); changed(); }
+    if (!awake) { setW('awake', stamp()); worldEvent('awake', {}); }
+    if (L.save && L.save.flush) { try { L.save.flush(); } catch (e) { } }
+    emit('morning', { phase: 'start', skippable: EN.skippable }); emit('sfx', 'morning');
+    return true;
   };
   S.skipEnding = function () { if (!EN || !EN.skippable) return false; EN.t = Math.max(EN.t, END.end - .1); return true; };
   function endTick(dt) {
     if (!EN) return; const e = EN; e.t += dt; const t = e.t, p = e.p, c = e.c;
     const fx = Math.sin(p.ry), fz = Math.cos(p.ry), sx = Math.cos(p.ry), sz = -Math.sin(p.ry);
-    const po = sleeper ? sleeper.pose : {};
+    const po = fig ? fig.pose : {};
     const once = (k, fn) => { if (!e.flags[k]) { e.flags[k] = 1; fn(); } };
     // camera
     if (t < END.out) { const u = sstep(0, END.out, t); const d = lerp(7.5, 3.2, u), up = lerp(2.6, 1.75, u), side = Math.sin(u * 2.2) * 1.2; setCam(p.x + fx * d + sx * side, p.y + up, p.z + fz * d + sz * side, p.x, p.y + lerp(1.3, 1.55, u), p.z, 45); }
     else if (t < END.back) { const u = sstep(END.out, END.back, t); const a = Math.atan2(p.x - c.x, p.z - c.z) + Math.PI + lerp(-.5, .35, u); const R = lerp(150, 230, u), H = lerp(55, 120, u); setCam(c.x + Math.sin(a) * R, (c.y || p.y) + H, c.z + Math.cos(a) * R, c.x, (c.y || p.y) + lerp(30, 45, u), c.z, 50); }
     else { const u = (t - END.back) / (END.end - END.back); const a = Math.sin(u * 2.4) * .55; const d = lerp(5.5, 7.5, u); setCam(p.x + (fx * Math.cos(a) + sx * Math.sin(a)) * d, p.y + lerp(1.7, 2.6, u), p.z + (fz * Math.cos(a) + sz * Math.sin(a)) * d, p.x, p.y + lerp(1.7, 1.95, u * u), p.z, 45); }
-    if (Math.abs(t - END.out) < dt || Math.abs(t - END.back) < dt) emit('ending', { phase: 'blink' });
-    // the star travels to the throne
-    once('star', () => { if (has3D()) { const m = makeVisual('star'); m.position.set(PL.x, PL.y + 1.2, PL.z); L.scene.add(m); e.star = m; } });
-    if (e.star) { const u = sstep(0, END.star, t); e.star.position.set(lerp(PL.x, p.x + fx * .3, u), lerp(PL.y + 1.2, p.y + .95, u) + Math.sin(u * Math.PI) * .6, lerp(PL.z, p.z + fz * .3, u)); e.star.rotation.y += dt * 4; e.star.scale.setScalar(t > END.lift ? Math.max(.01, 1 - (t - END.lift) / 2) : 1 + Math.sin(t * 3) * .05); if (t > END.lift + 2) { L.scene.remove(e.star); e.star = null; } }
-    po.glow = sstep(END.star, END.star + 2, t); po.ivyGone = sstep(END.ivy, END.ivy + 5, t); po.breathe = 1;
-    po.lift = sstep(END.lift - 2, END.lift + 2.5, t); po.slump = 1; po.sit = 1; po.stand = sstep(END.stand[0], END.stand[1], t);
-    // the place heals, the white clears, the birds fly out
-    const rp = sstep(END.restore[0], END.restore[1], t); if (L.castleRestore) L.castleRestore(rp); emit('restore', rp);
-    const mp = sstep(END.mist[0], END.mist[1], t); if (L.mistVisual && L.mistVisual.dissolve) L.mistVisual.dissolve(mp);
+    if (Math.abs(t - END.out) < dt || Math.abs(t - END.back) < dt) emit('morning', { phase: 'blink' });
+    // the forged star travels to the seat
+    if (!e.worldDone) once('star', () => { if (has3D()) { const m = makeVisual('bow'); m.position.set(PL.x, PL.y + 1.2, PL.z); L.scene.add(m); e.star = m; } });
+    if (e.star) { const u = sstep(0, END.star, t); e.star.position.set(lerp(PL.x, p.x + fx * .3, u), lerp(PL.y + 1.2, p.y + .95, u) + Math.sin(u * Math.PI) * .6, lerp(PL.z, p.z + fz * .3, u)); e.star.rotation.y += dt * 4; e.star.scale.setScalar(t > END.lift ? Math.max(.01, 1 - (t - END.lift) / 2) : 1 + Math.sin(t * 3) * .05); if (t > END.lift + 2) { disposeVis(e.star); e.star = null; } }
+    if (e.worldDone) Object.assign(po, { glow: 1, ivyGone: 1, breathe: 1, lift: 1, slump: 1, sit: 1, stand: 1 });
+    else {
+      po.glow = sstep(END.star, END.star + 2, t); po.ivyGone = sstep(END.ivy, END.ivy + 5, t); po.breathe = 1;
+      po.lift = sstep(END.lift - 2, END.lift + 2.5, t); po.slump = 1; po.sit = 1; po.stand = sstep(END.stand[0], END.stand[1], t);
+      // the place heals, the white clears (shared world: only the first time in this world)
+      const rp = sstep(END.restore[0], END.restore[1], t); heal(rp); emit('restore', rp);
+      clearWhite(sstep(END.mist[0], END.mist[1], t));
+    }
     if (t >= END.birds) once('birds', () => burstBirds(c)); if (t >= END.birds + 2.5) once('birds2', () => burstBirds(c));
     // words
-    for (let i = END.lines.length - 1; i >= 0; i--) if (t >= END.lines[i]) { if (e.lineI < i) { e.lineI = i; emit('ending', { phase: 'line', i, text: T('ending.lines.' + i) }); } break; }
-    if (t >= END.title) once('title', () => emit('ending', { phase: 'title', text: T('ui.title_end') }));
-    if (t >= END.personal && e.personal) once('pers', () => emit('ending', { phase: 'personal', title: T('ending.personal_title', ''), text: T('ending.personal_text', '') }));
+    for (let i = END.lines.length - 1; i >= 0; i--) if (t >= END.lines[i]) { if (e.lineI < i) { e.lineI = i; emit('morning', { phase: 'line', i, text: T(LP.end + '.lines.' + i) }); } break; }
+    if (t >= END.title) once('title', () => emit('morning', { phase: 'title', text: T('ui.title_end') }));
+    if (t >= END.personal && e.personal) once('pers', () => emit('morning', { phase: 'personal', title: T(LP.end + '.personal_title', ''), text: T(LP.end + '.personal_text', '') }));
     const endAt = e.personal ? END.end : END.personal + 2;
     if (t >= endAt) finishEnding();
   }
   function burstBirds(c) { for (let i = 0; i < 14; i++) { const a = Math.random() * TAU; const b = launchBird({ state: 'burst', letter: false }); b.x = c.x + Math.sin(a) * 8; b.y = (c.y || 0) + 25 + Math.random() * 20; b.z = c.z + Math.cos(a) * 8; b.vx = Math.sin(a) * (6 + Math.random() * 5); b.vz = Math.cos(a) * (6 + Math.random() * 5); b.vy = 2 + Math.random() * 3; b.t = Math.random(); } }
+  // always hands control back (camera, input), even when a hook throws on the way out
   function finishEnding() {
     const e = EN; EN = null; S.endingOn = false; clearCam();
-    if (L.castleRestore) L.castleRestore(1); if (L.mistVisual && L.mistVisual.dissolve) L.mistVisual.dissolve(1);
-    if (!e.replay) {
-      F.seenEnd = 1; F.crown = 1; changed(); setW('home_keep', stamp()); setW('lit_village', stamp());
-      if (L.giveTame) { try { L.giveTame('dragao_bebe'); } catch (er) { console.warn(er); } }
-      if (L.onStoryLook) L.onStoryLook(S.look()); emit('look', S.look());
-      const c = e.c, gt = poi('castle_gate') || c; const x = lerp(c.x, gt.x, .2), z = lerp(c.z, gt.z, .2); teleport(x, groundY(x, z, e.p.y) + .1, z);
-    }
-    emit('ending', { phase: 'end' }); progressMade(); needEval = true;
+    try {
+      if (e && e.star) { disposeVis(e.star); e.star = null; }
+      heal(1); clearWhite(1);
+      if (e && e.own) grantEnd(e);
+    } catch (er) { console.warn('[story] morning end', er); }
+    finally { emit('morning', { phase: 'end' }); progressMade(); needEval = true; }
   }
+  // her rewards, once per player: seen flag, the star circlet, the young dragon; the shared ones only when missing
+  function grantEnd(e) {
+    if (F.seenEnd) return false;
+    F.seenEnd = wall(); F.crown = 1; delete F.endStarted; changed();
+    if (!W('home_keep')) setW('home_keep', stamp()); if (!W('lit_village')) setW('lit_village', stamp());
+    hook('giveTame', L.giveTame, 'dragao_bebe');
+    hook('onStoryLook', L.onStoryLook, S.look()); emit('look', S.look());
+    if (e && e.c) { const c = e.c, gt = poi('castle_gate') || c; const x = lerp(c.x, gt.x, .2), z = lerp(c.z, gt.z, .2); teleport(x, groundY(x, z, e.p.y) + .1, z); }
+    if (L.save && L.save.flush) { try { L.save.flush(); } catch (er) { } }
+    return true;
+  }
+  // a sequence of hers was cut (reload, app closed): near the seat it resumes (first part skipped), elsewhere the
+  // rewards are given quietly with a short note
+  let resumeT = -1;
+  function resumeTick(dt) {
+    if (resumeT < 0) return; resumeT -= dt; if (resumeT > 0 || S.busy || S.uiOpen) return; resumeT = -1;
+    if (F.seenEnd || !W('awake')) return;
+    const th = OBJ_BY.throne, p = th && resolve(th);
+    if (p && hyp(PL.x, PL.z, p.x, p.z) < 60 && S.playEnding()) return;
+    grantEnd(null); say(T('ui.title_end'), '✦');
+  }
+  // the lock takes the star and sinks, then the doors swing inwards (castle5 manifest: left +90°, right -90° about the
+  // vertical axis); the procedural stand-in disc lights up
+  // Once open (doorT = 8) the final pose is applied again whenever the keep pieces (re)appear: every second until the
+  // doors are found, and after S.invalidate() / 'castle_ready'.
+  let doorDone = false, doorChk = 0;
   function doorTick(dt) {
-    if (doorT == null) return; doorT += dt; const u = sstep(0, 5, doorT);
-    if (L.castleObj) { const l = L.castleObj('gate_door_l'), r = L.castleObj('gate_door_r'); if (l) { l.userData.ry0 = l.userData.ry0 != null ? l.userData.ry0 : l.rotation.y; l.rotation.y = l.userData.ry0 - 1.7 * u; } if (r) { r.userData.ry0 = r.userData.ry0 != null ? r.userData.ry0 : r.rotation.y; r.rotation.y = r.userData.ry0 + 1.7 * u; } const g = L.castleObj('star_lock_glow'); if (g) g.visible = true; }
-    const lk = OBJ_BY.lock; if (lk && lk.mesh && lk.mesh.userData.star) { lk.mesh.userData.star.material.color.setRGB(lerp(.25, 1.6, u), lerp(.22, 1.3, u), lerp(.18, .7, u)); }
-    if (doorT > 5.2) doorT = 5.2;
+    if (doorT == null) return;
+    if (doorT >= 8) { if (doorDone) return; doorChk -= dt; if (doorChk > 0) return; doorChk = 1; doorT = 8; } else doorT = Math.min(8, doorT + dt);
+    const u = sstep(2.5, 7.5, doorT);
+    if (L.castleObj) {
+      const l = L.castleObj('gate_door_l'), r = L.castleObj('gate_door_r'); if (doorT >= 8 && (l || r)) doorDone = true;
+      if (l) { const d = l.userData; if (d.ry0 == null) d.ry0 = l.rotation.y; l.rotation.y = d.ry0 + Math.PI / 2 * u; }
+      if (r) { const d = r.userData; if (d.ry0 == null) d.ry0 = r.rotation.y; r.rotation.y = d.ry0 - Math.PI / 2 * u; }
+      const s = L.castleObj('star_lock'); if (s) { const d = s.userData; if (d.y0 == null) d.y0 = s.position.y; s.position.y = d.y0 - 2.5 * sstep(1, 3, doorT); }
+      const g = L.castleObj('star_lock_glow'); if (g) g.visible = doorT < 3.2;
+    }
+    const lk = OBJ_BY.lock; if (lk && lk.mesh && lk.mesh.userData.star) { const k = sstep(0, 1.5, doorT); lk.mesh.userData.star.material.color.setRGB(lerp(.25, 1.6, k), lerp(.22, 1.3, k), lerp(.18, .7, k)); }
   }
-  function restoreTick(dt) { if (restoreT == null || S.endingOn) return; restoreT += dt; const u = sstep(0, 15, restoreT); if (L.castleRestore) L.castleRestore(u); if (L.mistVisual && L.mistVisual.dissolve) L.mistVisual.dissolve(u); if (u >= 1) restoreT = null; }
+  function restoreTick(dt) { if (restoreT == null || S.endingOn) return; restoreT += dt; const u = sstep(0, 15, restoreT); heal(u); clearWhite(u); if (u >= 1) restoreT = null; }
+  // the game's hooks for the keep and the white: a failing hook is reported once and never stops the sequence
+  const HOOKERR = {};
+  function hook(name, fn, a) { if (typeof fn !== 'function') return; try { fn(a); } catch (er) { if (!HOOKERR[name]) { HOOKERR[name] = 1; console.warn('[story] hook ' + name + ' failed:', er); } } }
+  function heal(u) { hook('castleRestore', L.castleRestore, u); }
+  function clearWhite(u) { if (L.mistVisual) hook('mistVisual.dissolve', L.mistVisual.dissolve && (v => L.mistVisual.dissolve(v)), u); }
 
   // ------------------------------------------------------------------ visuals of placed objects (lazy, near the player)
   const VIS_R = 140; let visT = 0;
+  const visKind = o => (o.fromWhere && o.visCastle !== undefined ? o.visCastle : o.vis);
+  function dropMesh(o) { disposeVis(o.mesh); o.mesh = null; o.mkind = null; }
+  // every 0.4 s: build the visuals that came into range (within CFG.visBudget ms per frame, the rest next frame), move
+  // the ones whose position got refined, drop the far ones (their per-object materials are disposed)
   function visTick(dt) {
     visT -= dt; if (visT <= 0) {
-      visT = .4;
+      visT = .4; const t0 = now(); let built = 0;
       for (const o of OBJ) {
-        const p = resolve(o); if (!p || !o.vis) continue;
+        const p = resolve(o), kind = visKind(o);
+        if (!p || !kind || kind === 'throneSet') { if (o.mesh) dropMesh(o); continue; }
+        if (o.mesh && o.mkind !== kind) dropMesh(o); // e.g. the page moved onto the authored reading stand
         const d = hyp(PL.x, PL.z, p.x, p.z), show = d < VIS_R && (o.keepVis || exists(o));
-        if (show && !o.mesh && has3D() && o.vis !== 'throneSet') {
-          if (o.vis === 'spirit') o.mesh = makeSpirit(); else if (o.vis === 'lockDisc' && L.castleObj && L.castleObj('star_lock')) o.mesh = new THREE.Group(); else o.mesh = makeVisual(o.vis);
-          o.mesh.position.set(p.x, p.y, p.z); o.mesh.rotation.y = p.ry || 0; o.base = p.y; L.scene.add(o.mesh); o.fade = 0;
+        if (show && !o.mesh) {
+          if (built && now() - t0 > CFG.visBudget) { visT = 0; continue; }
+          o.mesh = kind === 'spirit' ? makeSpirit() : makeVisual(kind); o.mkind = kind; built++;
+          o.mesh.position.set(p.x, p.y, p.z); o.mesh.rotation.y = p.ry || 0; o.base = p.y; o.mpv = o.pv; L.scene.add(o.mesh); o.fade = 0;
         }
-        if (o.mesh) { o.mesh.visible = show || (o.fade > .02 && o.rune); o.near = show && d < 60; if (!show && !o.rune && d > VIS_R + 60) { L.scene.remove(o.mesh); o.mesh = null; } }
+        if (o.mesh) {
+          if (o.mpv !== o.pv) { o.mesh.position.set(p.x, p.y, p.z); o.mesh.rotation.y = p.ry || 0; o.base = p.y; o.mpv = o.pv; }
+          o.mesh.visible = show || (o.fade > .02 && o.rune); o.near = show && d < 60; if (!show && !o.rune && d > VIS_R + 60) dropMesh(o);
+        }
       }
     }
     for (const o of OBJ) {
@@ -1256,7 +1476,8 @@ window.L = window.L || {};
       if (o.lidT != null && u.lid) { o.lidT += dt; u.lid.rotation.x = -sstep(0, 1.2, o.lidT) * 1.6; }
     }
   }
-  function makeSpirit() {
+  function makeSpirit() { return cloneVis(template('spirit', spiritBody)); }
+  function spiritBody() {
     const g = new THREE.Group(); const parts = [part(G.sph(1, 1), '#e9f2ff', 0, 1.35, 0, 0, 0, 0, .95, .75, 1.45), part(G.sph(.5, 1), '#f4f8ff', 0, 1.35, 1.35, 0, 0, 0, .8, .8, 1), part(G.sph(.3, 1), '#cfdcf2', 0, 1.0, 1.75), part(G.cone(.09, .55, 6), '#fff6dc', .42, 1.9, 1.3, 0, 0, -1.0), part(G.cone(.09, .55, 6), '#fff6dc', -.42, 1.9, 1.3, 0, 0, 1.0)];
     for (const [x, z] of [[-.45, .7], [.45, .7], [-.45, -.7], [.45, -.7]]) parts.push(part(G.cyl(.16, .13, 1.0, 7), '#dde8fb', x, .5, z));
     for (let i = 0; i < 10; i++) { const a = i / 10 * TAU; parts.push(part(G.cone(.18, .6, 5), '#eef4ff', Math.cos(a) * .85, .75, Math.sin(a) * 1.2, Math.PI, 0, 0)); }
@@ -1270,24 +1491,47 @@ window.L = window.L || {};
   function evalAll() {
     needEval = false; updateTasks(); checkThoughts(); checkLook(); emit('refresh', null);
   }
+  // Each subsystem runs guarded: an exception (e.g. from a game hook) is logged once, the subsystem pauses 2 s and,
+  // after 3 failures in a row, stays off for the session; the others keep running. A failing long morning still hands
+  // the camera and input back (finishEnding).
+  const ERR = {};
+  const CLEANUP = { morning: () => { if (EN) finishEnding(); }, shot: () => { if (shot) { shot = null; clearCam(); F.castle_seen = 1; changed(); emit('reveal', { on: false }); } }, mist: () => { MS.phase = 0; whiteOut(0, null); } };
+  function sub(name, fn, dt) {
+    const r = ERR[name]; if (r && (r.off || tNow < r.until)) return;
+    try { fn(dt); if (r) r.n = 0; }
+    catch (er) {
+      const q = ERR[name] || (ERR[name] = { n: 0, all: 0, until: 0, off: false }); q.n++; q.all++; q.until = tNow + 2;
+      if (q.all === 1) console.warn('[story] ' + name + ' failed:', er);
+      if (q.n >= 3 && !q.off) { q.off = true; console.warn('[story] ' + name + ' paused for this session'); }
+      if (CLEANUP[name]) { try { CLEANUP[name](); } catch (e2) { } }
+    }
+  }
+  function birdsTick(dt) {
+    for (let i = BIRDS.length - 1; i >= 0; i--) {
+      const b = BIRDS[i]; if (b.onArrive === 'guide' && b.state === 'circle') { b.state = 'guide'; b.onArrive = null; }
+      birdTick(b, dt); if (b.dead) { disposeVis(b.mesh); disposeVis(b.lmesh); BIRDS.splice(i, 1); }
+    }
+  }
+  function sleepTick(dt) { if (wokeWait > 0) { wokeWait -= dt; if (wokeWait <= 0 && (pendingDream || F.hintDream) && !(L.surv && L.surv.sleeping)) wakeUp(); } }
+  function thoughtTick(dt) { if (thoughtCD > 0) thoughtCD -= dt; else if (thoughtQ.length && !S.busy && !S.uiOpen) { const id = thoughtQ.shift(); emit('thought', { id, text: T('thoughts.' + id + '.text') }); thoughtCD = 8; } }
+  function midTick() { vigilTick(1); lhCheckT -= 1; if (lhCheckT <= 0) { lhCheckT = 3; lhCheck(); } }
+  function seenTick() { for (const [id, r, f] of SEEN) if (!F[f] && S.near(id, r)) setF(f); }
   S.tick = function (dt) {
     bindPlayer();
-    dt = Math.min(dt || 0, .1); tNow += dt; readPlayer(dt);
+    dt = +dt; if (!(dt > 0)) dt = 0; dt = Math.min(dt, .1); tNow += dt; readPlayer(dt);
     if (!S.busy && !S.uiOpen) F.playT = (F.playT || 0) + dt;
     if (birdCD > 0) birdCD -= dt;
     if (!MEM_SAVE() && MEM.mana < 100) MEM.mana = Math.min(100, MEM.mana + dt * 1.5);
-    mistTick(dt); shotTick(dt); endTick(dt); doorTick(dt); restoreTick(dt);
-    for (let i = BIRDS.length - 1; i >= 0; i--) { const b = BIRDS[i]; if (b.onArrive === 'guide' && b.state === 'circle') { b.state = 'guide'; b.onArrive = null; } birdTick(b, dt); if (b.dead) { if (b.mesh) L.scene.remove(b.mesh); if (b.lmesh) L.scene.remove(b.lmesh); BIRDS.splice(i, 1); } }
-    if (wokeWait > 0) { wokeWait -= dt; if (wokeWait <= 0 && (pendingDream || F.hintDream) && !(L.surv && L.surv.sleeping)) wakeUp(); }
-    bridgeTick(); if (has3D()) { visTick(dt); flyTick(dt); orbTick(dt); beamTick(); sleeperTick(dt); if (PART && PART.update) PART.update(dt); }
-    deerTick(dt);
-    if (thoughtCD > 0) thoughtCD -= dt; else if (thoughtQ.length && !S.busy && !S.uiOpen) { const id = thoughtQ.shift(); emit('thought', { id, text: T('thoughts.' + id + '.text') }); thoughtCD = 8; }
-    midT -= dt; if (midT <= 0) { midT = 1; vigilTick(1); lhCheckT -= 1; if (lhCheckT <= 0) { lhCheckT = 3; lhCheck(); } }
-    seenT -= dt; if (seenT <= 0) { seenT = 2; for (const [id, r, f] of SEEN) if (!F[f] && S.near(id, r)) setF(f); }
-    mailT -= dt; if (mailT <= 0) { mailT = 2; mailTick(); }
-    stuckT -= dt; if (stuckT <= 0) { stuckT = 5; stuckTick(); }
-    slowT -= dt; if (needEval || slowT <= 0) { slowT = 2; evalAll(); }
-    if (L.storyUI && L.storyUI.tick) L.storyUI.tick(dt);
+    sub('mist', mistTick, dt); sub('shot', shotTick, dt); sub('morning', endTick, dt); sub('doors', doorTick, dt); sub('restore', restoreTick, dt); sub('resume', resumeTick, dt);
+    sub('birds', birdsTick, dt); sub('sleep', sleepTick, dt); sub('bridge', bridgeTick, dt);
+    if (has3D()) { sub('visuals', visTick, dt); sub('fly', flyTick, dt); sub('orb', orbTick, dt); sub('beam', beamTick, dt); sub('figure', figTick, dt); if (PART && PART.update) sub('particles', d => PART.update(d), dt); }
+    sub('deer', deerTick, dt); sub('thoughts', thoughtTick, dt);
+    midT -= dt; if (midT <= 0) { midT = 1; sub('vigil', midTick, 1); }
+    seenT -= dt; if (seenT <= 0) { seenT = 2; sub('seen', seenTick, 0); }
+    mailT -= dt; if (mailT <= 0) { mailT = 2; sub('mail', mailTick, 0); }
+    stuckT -= dt; if (stuckT <= 0) { stuckT = 5; sub('stuck', stuckTick, 0); }
+    slowT -= dt; if (needEval || slowT <= 0) { slowT = 2; sub('eval', evalAll, 0); }
+    if (L.storyUI && L.storyUI.tick) sub('ui', L.storyUI.tick, dt);
   };
   const MEM_SAVE = () => !!(L.surv || (L.save && L.save.player && L.save.player.st && typeof L.save.player.st.mana === 'number'));
 
@@ -1297,9 +1541,13 @@ window.L = window.L || {};
     if (L.save && L.save.on && !S._listening) { S._listening = true; try { L.save.on('w5', (id, d, old, origin) => onWorld(id, d, origin === 'local')); } catch (e) { } }
     if (L.save && L.save.player) { /* nothing else: state lives in the record */ }
     if (F.progT == null) { F.progT = F.playT || 0; F.mainN = mainProgress(); }
-    if (W('gate')) doorT = 5; if (W('awake')) { if (L.castleRestore) L.castleRestore(1); if (L.mistVisual && L.mistVisual.dissolve) L.mistVisual.dissolve(1); }
+    if (W('gate')) doorT = 8;
+    if (W('awake')) { heal(1); clearWhite(1); }
+    if (W('awake') && F.endStarted && !F.seenEnd) resumeT = 2; // her sequence was cut: resume it or grant its rewards
+    if (has3D()) { try { S.prewarm(); } catch (e) { console.warn('[story] prewarm', e); } }
     S.ready = true; needEval = true; emit('init', null);
-    if (L.storyUI && L.storyUI.init) L.storyUI.init();
+    // the game can open the UI itself (L.storyUIOpts.defer) or pass its options here
+    const uo = L.storyUIOpts || {}; if (L.storyUI && L.storyUI.init && !uo.defer) L.storyUI.init(uo);
     return S;
   };
   Object.defineProperty(S, 'flags', { get: () => { const o = Object.assign({}, F || {}); const m = worldMap(); if (m && m.forEach) m.forEach((v, k) => { if (v != null) o['w:' + k] = v; }); return o; } });
@@ -1320,6 +1568,7 @@ window.L = window.L || {};
     hour: h => { dbgHour = h == null ? null : h; },
     day: n => { dbgDay += n || 1; },
     read: id => readNote(id),
+    force: id => interactAt(id, true),
     learn: id => learn(id),
     world: (id, d) => setW(id, d === undefined ? stamp() : d),
     eval: () => evalAll(),
@@ -1327,12 +1576,17 @@ window.L = window.L || {};
     tasks: () => S.taskView(),
     tick: (sec, step) => { step = step || .1; for (let t = 0; t < sec; t += step) S.tick(step); },
     lh: () => Object.assign({}, lh),
-    birds: () => BIRDS.map(b => ({ state: b.state, t: b.t, note: b.note || null, guide: !!b.tx && !b.letter, x: b.x, y: b.y, z: b.z, tx: b.tx, tz: b.tz })),
+    birds: () => BIRDS.map(b => ({ state: b.state, t: b.t, note: b.note || null, guide: !!b.guideTo, x: b.x, y: b.y, z: b.z, tx: b.tx, tz: b.tz })),
     skipShot: () => { if (shot) { shot.t = shot.dur; shotTick(0); } },
-    endFx: () => { for (const k in FX) FX[k] = 0; },
-    // dev harness helpers: a fresh visual of a placed-object kind, the sleeper's state, a letter bird on demand
+    endFx: () => { for (const k in FX) FX[k] = 0; if (F.fxw) { F.fxw = {}; changed(); } },
+    // dev harness helpers: a fresh visual of a placed-object kind, the seated figure's state, a letter bird on demand
     visual: kind => (kind === 'spirit' ? makeSpirit() : kind === 'bird' ? makeBird() : makeVisual(kind)),
-    sleeper: () => (sleeper ? { model: sleeper.model || (sleeper.fallback ? 'fallback' : null), pose: Object.assign({}, sleeper.pose) } : null),
+    figure: () => (fig ? { model: fig.model || (fig.fallback ? 'fallback' : null), pose: Object.assign({}, fig.pose), seat: !!fig.seat, vines: !!fig.vineObj } : null),
+    errors: () => JSON.parse(JSON.stringify(ERR)),
+    perf: () => ({ builtMs: +builtMs.toFixed(1), templates: Object.keys(TPL).length, visuals: OBJ.filter(o => o.mesh).length, birds: BIRDS.length }),
+    vigil: () => (F.vigil ? Object.assign({}, F.vigil) : null),
+    timers: () => ({ fx: Object.assign({}, FX), cd: Object.assign({}, CD), now: tNow }),
+    doors: () => ({ t: doorT, done: doorDone }),
     bird: note => { const b = launchBird({ note: note || null }); if (!note) b.letter = false; return BIRDS.length; },
   };
 })(window.L);

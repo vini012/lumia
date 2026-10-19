@@ -1,0 +1,3 @@
+# dev pages, test harnesses and build tools are not part of the published game
+dev/
+tools/

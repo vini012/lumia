@@ -25,7 +25,7 @@
     const sleep = () => { S.event('slept', { x: L.P.x, z: L.P.z }); L.clock.skipToDawn(); S.event('woke', {}); tick(.5); ui(); };
     function useObj(id, label) { D.goObj(id); tick(.3); return use(id, label); }
     const fill = () => { L.save.player.st.mana = 100; };
-    function readAt(note) { const n = L.TL('notes.' + note); go(n.poi); use('note_' + note, 'read ' + note + ' at ' + n.poi); ok(noteRead(note), note + ' read'); }
+    function readAt(note) { const n = L.TL('notes.' + note); go(n.poi); D.goObj('note_' + note); tick(.3); use('note_' + note, 'read ' + note + ' at ' + n.poi); ok(noteRead(note), note + ' read'); }
     function walk(tx, tz, speed, maxT, stopIf) { const dt = .1; for (let t = 0; t < (maxT || 120); t += dt) { const dx = tx - L.P.x, dz = tz - L.P.z, d = Math.hypot(dx, dz); if (d < .5 || (stopIf && stopIf())) return true; const s = Math.min(d, speed * dt); L.P.x += dx / d * s; L.P.z += dz / d * s; L.P.y = L.ground(L.P.x, L.P.z); L.P.ry = Math.atan2(dx, dz); S.tick(dt); } return false; }
 
     S.CFG.clearR = 70; S.CFG.birdEvery = 5; hour(7);
@@ -64,7 +64,7 @@
     readAt('n05'); ok(task('k_moinho').state === 'on', 'k_moinho started by the bottle');
     go('windmill_broken'); use('g_windmill', 'look at the old windmill');
     D.give('madeira', 10); D.give('corda', 4);
-    for (let i = 0; i < 4; i++) { use('mill_' + i, 'repair spot ' + i); }
+    for (let i = 0; i < 4; i++) { useObj('mill_' + i, 'repair spot ' + i); }
     ok(W('windmill') && learned('brisa') && task('k_moinho').state === 'done', 'windmill fixed: brisa learned');
     ok(S.mods().doubleJump && S.mods().glide, 'brisa mods: double jump + glide');
     go('totem_jardim'); use('g_totem_jardim', 'meet the garden totem'); ok(task('k_horta').state === 'on', 'k_horta on');
@@ -108,20 +108,20 @@
     // ---------- light 4: a night at the summit
     readAt('n06'); readAt('s23'); ok(S.recipes().indexOf('receita_sopa_quente') >= 0, 'soup recipe');
     go('summit_camp'); hour(18); tick(1.5); useObj('g_espirito_iaque', 'meet the yak spirit at dusk'); ok(task('f4').state === 'on', 'f4 on');
-    // night A: awake by the fire, then she wanders off for too long -> the vigil breaks (soft, no penalty)
+    // night A: up by the fire, then she wanders off for too long -> the vigil breaks (soft, no penalty)
     M.sheltered = true; M.fireNear = true; hour(20); tick(3); ok(S.flags.vigil && !S.flags.vigil.done, 'vigil starts at nightfall under a roof by the fire');
     M.fireNear = false; tick(S.CFG.vigilGrace + 10); ok(!S.flags.vigil, 'away from the fire for a while: the vigil breaks');
-    // night B: asleep in a bed at the camp, roof and fire: the night counts when she wakes at dawn
+    // night B: in bed at the camp, roof and fire, from nightfall: the night counts when she gets up at dawn
     M.fireNear = true; nextNight(19); tick(2); sleep(); ok(S.flags.vigil && S.flags.vigil.done && S.flags.vigil.slept, 'slept the night through at the camp: counts');
-    L.save.player.flags.vigil = null; // (test only) forget it to check the awake path too
-    // night C: awake the whole night
+    L.save.player.flags.vigil = null; // (test only) forget it to check the sleepless path too
+    // night C: up the whole night
     nextNight(19.5); tick(3);
     for (let h = 20; h < 30; h += .5) { M.setHour(h % 24, h >= 24 && h < 24.5); tick(4); }
-    M.setHour(6.2); tick(2); ok(S.flags.vigil && S.flags.vigil.done, 'whole night awake with roof and fire');
+    M.setHour(6.2); tick(2); ok(S.flags.vigil && S.flags.vigil.done, 'whole night up with roof and fire');
     D.give('sopa_quente', 1); M.setHour(6.5); tick(1); useObj('g_espirito_iaque', 'give the hot soup at sunrise'); ok(W('altar_4') && S.fragCount() === 4, 'fragment 4');
     M.sheltered = false; M.fireNear = false;
     // ---------- Ponte de Vento and light 5
-    hour(11); go('griffin_queen'); use('g_rainha_grifo', 'meet the griffin queen'); ok(task('k_penas').state === 'on', 'k_penas on');
+    hour(11); go('griffin_queen'); use('g_rainha_grifo', 'meet the griffin guardian'); ok(task('k_penas').state === 'on', 'k_penas on');
     for (let i = 1; i <= 3; i++) useObj('feather_' + i, 'golden feather ' + i);
     go('griffin_queen'); tick(2.5); use('g_rainha_grifo', 'bring the feathers'); ok(learned('ponte') && inv('pena_dourada') === 0, 'ponte learned');
     fill(); L.cam.yaw = 0; L.cam.pitch = 0; ok(S.castSpell('ponte').ok && S.bridgeState() && M.cols.length > 0, 'cloud bridge with collider'); tick(26); ok(S.bridgeState() && M.cols.length === 1, 'the bridge waits while she still stands on it'); tick(9); ok(!S.bridgeState() && M.cols.length === 0, 'bridge dissolves, collider removed');
@@ -131,7 +131,7 @@
     go('royal_forge'); use('g_bigorna', 'the old anvil before the note'); ok(!W('forge_key'), 'anvil waits for the note');
     readAt('n08'); ok(task(D.forgeTask()).state === 'on', 'forge task on');
     go('royal_forge'); use('g_bigorna', 'deposit stars'); ok((W('forge') || {}).f === 5 && !W('forge_key'), 'stars deposited, gold/crystal missing');
-    D.give('ouro', 3); D.give('cristal', 2); use('g_bigorna', 'forge'); ok(W('forge_key') && inv('estrela') === 1 && S.has('has_key'), 'forged');
+    D.give('ouro', 3); D.give('cristal', 2); use('g_bigorna', 'forge'); ok(W('forge_key') && inv('estrela') === 1 && S.hasStar(), 'forged');
     hour(22); sleep(); ok(st().dreams.indexOf('d5') >= 0, 'dream d5 with the forged star');
     // ---------- Revelar
     go('totem_ancestral'); use('g_totem_ancestral', 'the ancestral totem'); ok(noteRead('n10') && learned('revelar') && task('k_ver').state === 'done', 'revelar learned');
@@ -147,13 +147,13 @@
     ok(seen, 'reveal shot frames the hidden place'); tick(9); ok(S.flags.castle_seen && !S.busy, 'reveal done');
     walk(gate.x, gate.z + 4, 7, 120); ok(L.inMist(L.P.x, L.P.z) > 0 && !S.mistBlock(L.P.x, L.P.z), 'inside with the path open');
     use('lock', 'unlock the gate'); ok(W('gate') && inv('estrela') === 0, 'gate open, star in the lock');
-    // ---------- the last letter and the finale
+    // ---------- the last letter and the long morning
     go('throne'); tick(1); use('note_n11', 'the last letter'); ok(learned('despertar'), 'despertar learned');
     hour(13); tick(.5); go('throne'); use('throne', 'try at noon'); ok(!S.endingOn && !W('awake'), 'not at noon');
     hour(6.5); go('throne'); use('throne', 'at dawn');
-    ok(S.endingOn && S.busy && W('awake'), 'finale started');
+    ok(S.endingOn && S.busy && W('awake'), 'the long morning started');
     const e0 = M.restore; tick(40); ok(M.restore > e0 && M.restore > .5 && M.dissolve > .5, 'the place heals, the white dissolves');
-    tick(60); ok(!S.endingOn && !S.busy && S.camera === null, 'finale over, control back');
+    tick(60); ok(!S.endingOn && !S.busy && S.camera === null, 'sequence over, control back');
     ok(M.tames.indexOf('dragao_bebe') >= 0 && S.look().crown && W('home_keep') && W('lit_village'), 'rewards granted');
     ok(task('k_fim').state === 'done', 'k_fim done');
     // ---------- every side note and the bird letters
@@ -168,8 +168,8 @@
     tick(20); const allT = L.TL('thoughts').filter(t => st().th.indexOf(t.id) < 0).map(t => t.id); ok(!allT.length, 'every thought' + (allT.length ? ' (missing ' + allT.join(',') + ')' : ''));
     const notDone = S.taskView().filter(t => t.state !== 'done').map(t => t.id); ok(S.taskView().length === L.TL('tasks').length && !notDone.length, 'every task done' + (notDone.length ? ' (' + notDone.join(',') + ')' : ''));
     ok(S.spells.length === L.TL('spells').length, 'every spell learned (' + S.spells.join(',') + ')');
-    ok(!S.mistBlock(mc.x + 100, mc.z), 'after the finale the white no longer blocks');
-    tick(5); ok(!S.nextClue() && !D.birds().some(x => x.guide), 'after the finale nothing left to guide to');
+    ok(!S.mistBlock(mc.x + 100, mc.z), 'afterwards the white no longer blocks');
+    tick(5); ok(!S.nextClue() && !D.birds().some(x => x.guide), 'afterwards nothing left to guide to');
     if (opt.verbose !== false) console.log(out.join('\n'));
     return { ok: CHAIN.ok, bad: CHAIN.bad, steps: out };
   }
