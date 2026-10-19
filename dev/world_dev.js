@@ -125,6 +125,7 @@
     if (L.stars && !L.skyInit) L.stars.position.copy(cam.position);
     L.terrainUpdate(cam.position, 6);
     if (DEV.scatter && L.scatterUpdate) L.scatterUpdate(cam, 4);
+    if (L.worldUpdate && L.worldReady && L.POIGROUPS) L.worldUpdate(dt, T);
     L.trimTiles(cam.position.x, cam.position.z);
   }
   DEV.render = function () {

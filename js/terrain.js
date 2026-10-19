@@ -174,11 +174,11 @@
     const fl = _gate;
     // small rolling detail where the macro ground is gentle
     if (fl > .001) h += ((vnoise(x * .055 + 17.1, z * .055 - 3.3) - .5) * 1.5 + (vnoise(x * .17 - 5.2, z * .17 + 9.4) - .5) * .45) * fl;
-    let path = 0, rd = 1e9, rw = 0, rs = -Infinity, pad = 0;
+    let path = 0, rd = 1e9, rw = 0, rs = -Infinity, pad = 0, bd2 = 1e18, bw = 0;
     if (x > -WS && x < WS && z > -WS && z < WS) {
       const c = ((((z + WS) / IC) | 0) * IN + (((x + WS) / IC) | 0));
       const e = IDX0[c + 1];
-      let bd2 = 1e18, by = 0, bw = 0, rd2 = 1e18, rk = -1, rt = 0, np = 0;
+      let by = 0, rd2 = 1e18, rk = -1, rt = 0, np = 0;
       for (let k = IDX0[c]; k < e; k++) {
         const it = IDX[k], ty = it >>> 24, q = it & 0xffffff;
         if (ty === 1) {        // road: nearest wins
@@ -218,7 +218,7 @@
         }
       }
     }
-    if (info !== NOINFO && info) { info.path = path; info.rd = rd; info.rw = rw; info.rs = rs; info.pad = pad; info.gate = fl; }
+    if (info !== NOINFO && info) { info.path = path; info.rd = rd; info.rw = rw; info.rs = rs; info.pad = pad; info.gate = fl; info.pd = bd2 < 1e17 ? Math.sqrt(bd2) - bw * .5 : 1e9; }
     return h;
   }
   const rawH = (x, z) => hgt(x, z, NOINFO);

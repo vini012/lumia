@@ -181,7 +181,11 @@ def place_generic(F, D, fixed, lakes, rivs, cloud_y, log=print, walk=None):
     for reg, kinds in enumerate(D.GENERIC):
         js, is_ = np.nonzero(F.R == reg)
         n_ok = 0
-        for kind in kinds:
+        queue = list(kinds)            # a kind that finds no spot is replaced by a fallback kind (>= 6 per region)
+        qi = 0
+        while qi < len(queue):
+            kind = queue[qi]
+            qi += 1
             placed = False
             for attempt in range(900):
                 k = rng.randint(len(js))
@@ -262,6 +266,8 @@ def place_generic(F, D, fixed, lakes, rivs, cloud_y, log=print, walk=None):
                 break
             if not placed:
                 log('  generic', kind, 'not placed in region', reg + 1)
+                if len(queue) < len(kinds) + 4:
+                    queue.append(['ruin', 'camp', 'shrine', 'standing_stones'][len(queue) % 4])
     counts = np.bincount([p['region'] for p in out], minlength=16)
     log('generic POIs', len(out), counts.tolist())
     return out

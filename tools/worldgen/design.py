@@ -436,7 +436,11 @@ CLEAR = [
 MIST = dict(x=6000.0, z=-6000.0, r=1250.0)
 
 # thin cloud (holes) to open views of the ocean: (x, z, radius, coverage multiplier)
-CLOUD_THIN = [(350, 5600, 1500, 0.35), (-300, 3400, 600, 0.6)]
+CLOUD_THIN = [(350, 5600, 1500, 0.62), (-300, 3400, 600, 0.6)]
+
+# open ground kept free of forest (x, z, radius, keep factor): the spawn view corridor to the village and the falls
+FOREST_OPEN = [(-1110, 5100, 170, 0.0), (-1050, 4980, 170, 0.05), (-950, 4880, 170, 0.12), (-800, 4700, 160, 0.3),
+               (-1250, 5000, 150, 0.35), (-1000, 5230, 160, 0.3)]
 
 # ------------------------------------------------------------------ flora / ground per region (masks + scatter)
 # forest: base density, clump: 1 = groves/clumps, 0 = evenly scattered lone trees; meadow: flower/field share
@@ -464,16 +468,19 @@ FLORA = [
 # `search` metres (default 90), records its height and flattens a pad of radius `flat` (default = r).
 POIS = [
     # R1
-    ('spawn', 'spawn', -1130, 5185, 6, dict(ry=2.29, search=40)),  # ry: facing (sin ry, cos ry), towards the village
+    # at the lip of the meadow step, so the village below is not hidden by the brow of the hill
+    ('spawn', 'spawn', -1097, 5092, 5, dict(ry=2.6, search=0)),  # ry: facing (sin ry, cos ry), towards the village
     ('cottage', 'cottage', -1940, 5330, 10, {}),
-    ('vila_ventura', 'village', -760, 4860, 30, dict(search=60)),
-    ('tower_house', 'house', -610, 4700, 11, {}),
-    ('bakery', 'house', -890, 4760, 10, {}),
-    ('well_vila', 'well', -740, 4900, 4, {}),
-    ('village_house_a', 'house', -930, 4960, 9, {}),
-    ('village_house_b', 'house', -620, 5030, 9, {}),
+    # the village sits on the lower terrace just below the spawn lip: the round-tower house ~150 m away, slightly
+    # left of the three falls, the other houses spread to the right (the concept-art framing)
+    ('vila_ventura', 'village', -955, 4895, 26, dict(search=25)),
+    ('tower_house', 'house', -1042, 4969, 11, dict(search=6)),
+    ('bakery', 'house', -1010, 4835, 10, dict(search=25)),
+    ('well_vila', 'well', -1000, 4935, 4, dict(search=12)),
+    ('village_house_a', 'house', -880, 4850, 9, dict(search=30)),
+    ('village_house_b', 'house', -930, 4995, 9, dict(search=30)),
     ('hermit_tower_vale', 'tower', -2650, 6250, 9, {}),
-    ('totem_sorriso', 'totem', -1175, 5215, 3, dict(search=30)),
+    ('totem_sorriso', 'totem', -1106, 5077, 2, dict(search=0)),
     ('totem_jardim', 'totem', -1150, 6150, 3, {}),
     ('tt_r1', 'travel_totem', -1380, 5330, 5, {}),
     # R2

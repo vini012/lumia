@@ -125,6 +125,9 @@ def masks(G, H, R, D, rivs, lakes_out, lake_ids, pads, step=2, log=print):
     fslope = 1 + 0.6 * sstep(0.12, 0.45, slope) * (1 - sstep(0.7, 1.0, slope))
     forest = base_f * (0.15 + 1.45 * clump) * fs * fslope * (1 - near_w * 0.9) * (1 + far_w * 0.25)
     forest = np.where(lake_ids > 0, 0, forest)
+    for (x, z, r, keep) in getattr(D, 'FOREST_OPEN', []):
+        d = np.hypot(X - x, Z - z)
+        forest = forest * (keep + (1 - keep) * sstep(r * 0.6, r * 1.25, d))
     forest = np.where(h < 1.5, 0, forest)
     # meadow / flower fields: open ground away from forests
     n3 = fbm(X / 420. + 9, Z / 420. + 2, 3, 507)
