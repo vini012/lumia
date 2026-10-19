@@ -627,13 +627,13 @@
     const n = Q.rainDrops; const pos = new Float32Array(n * 4 * 3), cor = new Float32Array(n * 4 * 2), idx = new (n * 4 < 65536 ? Uint16Array : Uint32Array)(n * 6); const r = rnd(12);
     for (let i = 0; i < n; i++) { const x = r() * 40 - 20, y = r() * 24, z = r() * 40 - 20; for (let k = 0; k < 4; k++) { pos.set([x, y, z], (i * 4 + k) * 3); } cor.set([-1, 0, 1, 0, 1, 1, -1, 1], i * 8); idx.set([i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3], i * 6); }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aC', new THREE.BufferAttribute(cor, 2)); g.setIndex(new THREE.BufferAttribute(idx, 1));
-    const m = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, uniforms: { uT: L.uTime, uA: { value: 0 }, uCol: { value: new THREE.Color(.8, .85, .95) } },
+    const m = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, uniforms: { uT: L.uTime, uA: { value: 0 }, uCol: { value: new THREE.Color(.8, .85, .95) } },
       vertexShader: `attribute vec2 aC; uniform float uT; varying float vA; varying float vX;
         void main(){ vec3 p = position; p.y = mod(p.y - uT * 9. , 24.) - 8.; p.x = mod(p.x + uT * 1.2 - cameraPosition.x + 20., 40.) - 20.; p.z = mod(p.z - cameraPosition.z + 20., 40.) - 20.;
           vec3 w = cameraPosition + p; vec3 dir = normalize(vec3(.12, -1., 0.)); vec4 a = viewMatrix * vec4(w, 1.); vec4 b = viewMatrix * vec4(w + dir * .7, 1.);
-          vec2 sd = normalize(b.xy - a.xy + 1e-5); vec2 nn = vec2(-sd.y, sd.x); vec4 mv = mix(a, b, aC.y); mv.xy += nn * aC.x * .012;
+          vec2 sd = normalize(b.xy - a.xy + 1e-5); vec2 nn = vec2(-sd.y, sd.x); vec4 mv = mix(a, b, aC.y); mv.xy += nn * aC.x * .014;
           gl_Position = projectionMatrix * mv; vA = smoothstep(1., 4., -mv.z) * (1. - smoothstep(18., 22., length(p.xz))); vX = aC.x; }`,
-      fragmentShader: `uniform float uA; uniform vec3 uCol; varying float vA; varying float vX; void main(){ gl_FragColor = vec4(uCol, uA * vA * (1. - abs(vX)) * .35);
+      fragmentShader: `uniform float uA; uniform vec3 uCol; varying float vA; varying float vX; void main(){ gl_FragColor = vec4(uCol, uA * vA * (1. - abs(vX)) * .32);
 #include <encodings_fragment>
 }` });
     rain = new THREE.Mesh(g, m); rain.frustumCulled = false; rain.renderOrder = 7; rain.visible = false; L.scene.add(rain);
@@ -653,7 +653,7 @@
     cloudU.uSunCol.value.copy(T.sunCol).multiplyScalar((1 - T.night) * (1 - T.rain * .8));
     cloudU.uSunW.value.copy(T.lightDir); cloudU.uNight.value = T.night;
     if (L.stars) L.stars.material.uniforms.uA.value = T.night * (1 - T.rain) * .95;
-    if (rain) { rain.visible = T.rain > .02; rain.material.uniforms.uA.value = T.rain; rain.material.uniforms.uCol.value.copy(T.hor).lerp(_c.setRGB(1, 1, 1), .4); }
+    if (rain) { rain.visible = T.rain > .02; rain.material.uniforms.uA.value = T.rain; rain.material.uniforms.uCol.value.copy(T.hor).lerp(_c.setRGB(1, 1, 1), .65); }
     seaU.uCov.value = .5 + T.rain * .12;
     // re-shade clusters when the light moved enough
     const ld = T.lightDir; if (!lastShade || lastShade.distanceTo(ld) > .08) { lastShade = (lastShade || new THREE.Vector3()).copy(ld); reshade = true; }

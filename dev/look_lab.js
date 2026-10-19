@@ -169,7 +169,7 @@
   function inB(x) { return x < -3300; }
 
   // ground tint (linear, the lit colour WORLD would paint) + layer weights
-  const COL = { meadow: C(0xc6c254), plateau: C(0xb4c051), valley: C(0xb9cc5c), dry: C(0xcdbf63), grey: C(0x95928b), sand: C(0xdcc79a) };
+  const COL = { meadow: C(0xc6c254), plateau: C(0xb4c051), valley: C(0x9cc453), dry: C(0xc4c060), grey: C(0x95928b), sand: C(0xdcc79a) };
   const inC = x => x > OC[0] - 2500 && x < OC[0] + 3000;
   // rock tint WORLD would paint into `color` where aT.x is high: cream sandstone terraces, grey plateau walls
   function rockTint(x, z, h) {
@@ -187,7 +187,7 @@
     let forest = 0;
     if (inB(x)) forest = sstep(.56, .66, forestN(x, z)) * sstep(420, 300, h) * (1 - rock);
     _pc.copy(inB(x) ? COL.valley : h > 200 ? COL.plateau : COL.meadow);
-    if (inB(x)) _pc.lerp(COL.dry, sstep(.55, .75, fbm(x * .003, z * .003, 2, 19)) * .5);
+    if (inB(x)) _pc.lerp(COL.dry, sstep(.55, .75, fbm(x * .003, z * .003, 2, 19)) * .35);
     _pc.multiplyScalar(.94 + .12 * vn(x * .01, z * .01, 33));
     if (rock > .01) _pc.lerp(rockTint(x, z, h), rock);
     out.c = out.c || [0, 0, 0]; out.c[0] = _pc.r; out.c[1] = _pc.g; out.c[2] = _pc.b;
@@ -208,7 +208,7 @@
   // ================================================================ presets
   const PRE = {
     a: { pos: [0, 0], eye: 1.35, yaw: 0, pitch: 0, fov: 40, sunAz: .35, focus: [-6, -46], size: [1400, 598], ref: 'd959254a' },
-    b: { pos: [OB[0], OB[1]], eye: 1.8, yaw: 0, pitch: -3, fov: 34, sunAz: -2.55, sunEl: .62, haze: 2, focus: [OB[0] - 4, OB[1] - 40], size: [1400, 650], ref: '57faf138' },
+    b: { pos: [OB[0], OB[1]], eye: 1.8, yaw: 0, pitch: -3, fov: 34, sunAz: -2.55, sunEl: .62, haze: 2.6, focus: [OB[0] - 4, OB[1] - 40], size: [1400, 650], ref: '57faf138' },
     c: { pos: [OC[0], OC[1]], eye: 3.0, yaw: 0, pitch: -19, fov: 50, sunAz: .75, sunEl: .6, focus: [OC[0], OC[1] - 14], size: [1310, 569], ref: 'be82a764', hero: [OC[0], OC[1] - 4.3], cloudY: 32 },
     k: { pos: [9000, 9000], eye: 260, yaw: 0, pitch: 4, fov: 50, sunAz: 2.2, focus: null, size: [1400, 600], ref: null, test: 'clouds' },   // dev: cloud test bench
     // dev: the Névoa seen from the meadow of area c (?mist=in puts the camera inside it, ?mist=open opens the lit corridor)
