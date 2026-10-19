@@ -304,6 +304,7 @@
       const rc = H * (.22 + r() * .05);
       blobs.push([ex * 1.05, ey + rc * .2, ez * 1.05, rc * 1.12, rc * .95, rc * 1.12]);
       const t = .5; blobs.push([ex * t + (r() - .5) * H * .1, sy + (ey - sy) * t + rc * .35, ez * t + (r() - .5) * H * .1, rc * .85, rc * .7, rc * .85]);
+      blobs.push([ex * .78 + (r() - .5) * H * .06, sy + (ey - sy) * .78 + rc * .22, ez * .78 + (r() - .5) * H * .06, rc * .62, rc * .5, rc * .62]);   // leaves along the outer limb, so it never reads as a bare stick
     }
     blobs.push([0, H * .8, 0, H * .26, H * .18, H * .26]);   // top mass
     const canopy = L.blobCards(blobs, { n: lo ? 56 : 170, size: lo ? [H * .3, H * .4] : [H * .19, H * .27], quads: [0, 1], inset: lo ? .2 : .38, seed: (opts.seed || 13) + 1 });
