@@ -77,7 +77,7 @@
       L.skyInit();
       L.setTimeOfDay(L.todPreset ? L.todPreset(TODN, num('sunaz', -.9)) : { sunDir: sunVec(TODN) });
       if (L.cloudSea) { L.cloudSea.setY(L.CLOUD_Y); L.cloudSea.setDensityMap(L.cloudMaskTexture(), -L.WS, -L.WS, 2 * L.WS); }
-      if (L.mistVisual && L.mistVisual.setDisc) try { L.mistVisual.setDisc(L.MIST.x, L.MIST.z, L.MIST.r); } catch (e) { }
+      if (L.mistVisual && L.mistVisual.setDisc) try { L.mistVisual.setDisc(L.MIST.x, L.MIST.z, L.MIST.r); } catch (e) { console.warn('mist', e.message); }
       DEV.engine = 'v5';
     } else {                                                  // v4 engine: its sky dome + lights, interim cloud sea
       if (L.makeSky) L.makeSky();

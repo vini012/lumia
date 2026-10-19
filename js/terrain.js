@@ -27,6 +27,9 @@
   let PAL = [], LAKES = [], RIVERS = [], ROADS = [], PADS = [];
   L.REGIONS = []; L.POIS = []; L.LAKES = LAKES; L.RIVERS5 = RIVERS; L.ROADS = ROADS; L.FALLS5 = [];
   L.MIST = { x: 6000, z: -6000, r: 1250 };
+  // provisional spawn until world5.json is parsed (v4 modules read L.SPAWN at script load); the arrays/objects are
+  // updated in place on parse so early references stay valid
+  L.SPAWN = [-1097, 5092]; L.SPAWN5 = { x: -1097, z: 5092, y: 227, ry: 2.6 };
   const POIMAP = new Map();
   L.poi = id => POIMAP.get(id) || null;
 
@@ -65,7 +68,7 @@
     L.POIS.length = 0; POIMAP.clear();
     for (const p of meta.pois) { L.POIS.push(p); POIMAP.set(p.id, p); }
     L.MAPLABELS = (meta.labels || []).slice();
-    const sp = meta.spawn || { x: 0, z: 0, y: 100, ry: 0 }; L.SPAWN5 = sp; L.SPAWN = [sp.x, sp.z];
+    const sp = meta.spawn || { x: 0, z: 0, y: 100, ry: 0 }; Object.assign(L.SPAWN5, sp); L.SPAWN[0] = sp.x; L.SPAWN[1] = sp.z;
     buildFeatures(meta);
     buildGate();
     buildMinMax();
@@ -716,8 +719,27 @@
 
   // far ocean beyond the quadtree root
   function buildOcean() {
-    const g = new THREE.RingGeometry(ROOT * .5 * 1.41, 60000, 64, 1); g.rotateX(-Math.PI / 2);
-    g.setAttribute('aDepth', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count).fill(40), 1));
+    // a square annulus whose inner edge is exactly the root square (per-node water covers the inside), out to 60 km;
+    // four trapezoids, each subdivided so per-vertex terms stay smooth
+    const A = ROOT * .5, B = 60000, NA = 8, NR = 6; const pos = [], nor = [], uv = [], idx = [];
+    const OUT = [[-B, -B], [B, -B], [B, B], [-B, B]], INN = [[-A, -A], [A, -A], [A, A], [-A, A]];
+    for (let e = 0; e < 4; e++) {
+      const o0 = OUT[e], o1 = OUT[(e + 1) % 4], i0 = INN[e], i1 = INN[(e + 1) % 4], base = pos.length / 3;
+      for (let r = 0; r <= NR; r++) {
+        const f = Math.pow(r / NR, 2.2);   // denser near the coast
+        for (let a = 0; a <= NA; a++) {
+          const t = a / NA; const ix = i0[0] + (i1[0] - i0[0]) * t, iz = i0[1] + (i1[1] - i0[1]) * t, ox = o0[0] + (o1[0] - o0[0]) * t, oz = o0[1] + (o1[1] - o0[1]) * t;
+          const x = ix + (ox - ix) * f, z = iz + (oz - iz) * f; pos.push(x, 0, z); nor.push(0, 1, 0); uv.push(x / 100, z / 100);
+        }
+      }
+      for (let r = 0; r < NR; r++) for (let a = 0; a < NA; a++) {
+        const p0 = base + r * (NA + 1) + a, p1 = p0 + 1, q0 = p0 + NA + 1, q1 = q0 + 1;   // r = 0: inner edge
+        idx.push(q0, p0, q1, q1, p0, p1);
+      }
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx);
+    g.setAttribute('aDepth', new THREE.BufferAttribute(new Float32Array(pos.length / 3).fill(40), 1));
     const m = new THREE.Mesh(g, WMAT); m.renderOrder = 1; m.frustumCulled = false; m.name = 'ocean'; waterGroup.add(m);
     // under the root square: deep floor plate so the canyon floors never show the void
     const p = new THREE.PlaneGeometry(ROOT * 1.42, ROOT * 1.42, 1, 1); p.rotateX(-Math.PI / 2);

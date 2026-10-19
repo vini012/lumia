@@ -244,7 +244,7 @@
   // ------------------------------------------------------------ geometry: AW-nature models when loaded, else v4 models + cards
   const SRC = {};           // loaded AW-nature scenes: { trees5, rocks5 }
   const nodeOf = (file, name) => { const s = SRC[file]; if (!s) return null; let o = null; s.traverse(c => { if (!o && c.name === name) o = c; }); return o; };
-  // merge an object's meshes (baked relative to the object) into geometries grouped by key(meshName)
+  // merge an object's meshes (baked relative to the object) into geometries grouped by part name: keyOf(meshName)
   function flat(obj, keyOf, skip) {
     const groups = {}; obj.updateMatrixWorld(true); const inv = new THREE.Matrix4().copy(obj.matrixWorld).invert(); const mm = new THREE.Matrix4();
     obj.traverse(o => {
