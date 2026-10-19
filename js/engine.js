@@ -114,7 +114,8 @@ window.L = window.L || {};
     float fA = (1. - exp(-tA)) * hzA.w;
     float fogFactor = max(1. - exp(-tA * hzB.w), smoothstep(hzE.z, hzE.w, fogDist));
     float fLum = dot(fc, vec3(.2126, .7152, .0722));
-    fc = mix(fc, mix(hzA.rgb, hzB.rgb, smoothstep(.0, .4, fLum)), fA);
+    float fS = smoothstep(.0, .4, fLum);
+    fc = mix(fc, mix(hzA.rgb, hzB.rgb, fS), fA * (1. - .45 * fS));   // shade turns deep blue first; sunlit faces keep their colour longer
     vec3 fHor = mix(fogColor, hzC.rgb, pow(max(dot(fogRd, hzD.xyz), 0.), hzC.w));
     fc = mix(fc, fHor, fogFactor);
   #else
@@ -130,7 +131,7 @@ window.L = window.L || {};
 
   // ================================================================ tone curve + grade (per material, before haze)
   // Hue-preserving soft shoulder (no ACES desaturation), saturation boost, cool darks, warm highlights.
-  const GRADE = L.GRADE = { knee: .62, mixPerChannel: .3, sat: 1.12, cool: [.9, .97, 1.1], warm: [1.05, 1.0, .92] };
+  const GRADE = L.GRADE = { knee: .62, mixPerChannel: .3, sat: 1.08, cool: [.9, .97, 1.1], warm: [1.04, 1.0, .95] };
   const f3 = a => `vec3(${a.map(v => v.toFixed(3)).join(',')})`;
   THREE.ShaderChunk.tonemapping_pars_fragment = THREE.ShaderChunk.tonemapping_pars_fragment.replace(
     'vec3 CustomToneMapping( vec3 color ) { return color; }',

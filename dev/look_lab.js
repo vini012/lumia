@@ -2,6 +2,7 @@
    ?p=a|b|c   a = terraço da vila + paredão com 3 cachoeiras (d959254a)
               b = vale + cidade alta no planalto + mar (57faf138)
               c = terceira pessoa no prado junto à cerca acima do mar de nuvens (be82a764)
+              n = a Névoa vista do prado (?mist=in dentro dela, ?mist=open com o corredor aberto); k = bancada de nuvens
    ?t=day|golden|night|rain|dawn   ?q=alto|medio|baixo   ?hud=1
    window.step(n) renders n frames and returns render stats; window.ready is set once the first frame is drawn. */
 'use strict';
@@ -10,6 +11,7 @@
   const TAU = Math.PI * 2, D2R = Math.PI / 180;
   const QS = new URLSearchParams(location.search);
   const PRESET = (QS.get('p') || 'a').toLowerCase(), TODN = QS.get('t') || 'day';
+  const AREA = PRESET === 'n' ? 'c' : PRESET;                 // n = the Névoa test view, dressed like area c
   if (QS.get('hud')) document.body.classList.add('hud');
 
   // ================================================================ noise
@@ -121,11 +123,11 @@
     h += (fbm(x * .02, z * .02, 2, 11) - .5) * 3;
     return h;
   } });
-  mesa({ poly: B_T, warp: 10, seed: 22, w: 14, foot: 140, prof: ledges(3, .7), top(x, z) { return 290 + (fbm(x * .01, z * .01, 3, 12) - .5) * 6 + .05 * Math.max(0, OB[1] - 560 - z); } });
+  mesa({ poly: B_T, warp: 10, seed: 22, w: 12, foot: 140, top(x, z) { return 290 + (fbm(x * .01, z * .01, 3, 12) - .5) * 6 + .05 * Math.max(0, OB[1] - 560 - z); } });
   mesa({ poly: B_LAKE.poly, warp: 20, seed: 25, w: 40, foot: 120, top() { return 188; } });                     // the lake basin (water at 205)
   mesa({ poly: B_E, warp: 30, seed: 26, w: 30, foot: 160, prof: ledges(2, .6), top(x, z) { return 258 + (fbm(x * .006, z * .006, 3, 27) - .5) * 24; } });
-  mesa({ poly: B_R, warp: 30, seed: 24, w: 30, foot: 200, prof: ledges(3, .8), top(x, z) { return 300 + (fbm(x * .004, z * .004, 3, 14) - .5) * 40 + .2 * Math.max(0, x - OB[0] - 600); } });
-  mesa({ poly: B_U, warp: 40, seed: 23, w: 50, wf: (t, x) => lerp(320, 45, sstep(-40, 260, x - OB[0])), foot: 420, prof: ledges(3, .8), top(x, z) { const rx = x - OB[0], rz = z - OB[1]; return 390 + .2 * Math.max(0, -rz - 980) + 60 * sstep(100, 500, rx) + (fbm(x * .003, z * .003, 3, 13) - .5) * 30; } });
+  mesa({ poly: B_R, warp: 30, seed: 24, w: 26, foot: 200, top(x, z) { return 300 + (fbm(x * .004, z * .004, 3, 14) - .5) * 40 + .2 * Math.max(0, x - OB[0] - 600); } });
+  mesa({ poly: B_U, warp: 40, seed: 23, w: 50, wf: (t, x) => lerp(320, 40, sstep(-40, 260, x - OB[0])), foot: 420, prof: ledges(2, .45), top(x, z) { const rx = x - OB[0], rz = z - OB[1]; return 390 + .2 * Math.max(0, -rz - 980) + 60 * sstep(100, 500, rx) + (fbm(x * .003, z * .003, 3, 13) - .5) * 30; } });
   for (const f of FAR) mesa({ cx: f[0], cz: f[1], r: f[2], warp: f[5], seed: f[6], w: f[4], foot: Math.max(200, f[4] * 1.2), top(x, z, d) { return f[3] + (fbm(x * .002, z * .002, 3, f[6]) - .5) * f[3] * .25 + (f[4] > 100 ? -f[3] * .25 * (1 - sstep(0, f[2] * .6, d)) : 0); } });
 
   function mesaH(o, x, z) {
@@ -206,9 +208,11 @@
   // ================================================================ presets
   const PRE = {
     a: { pos: [0, 0], eye: 1.35, yaw: 0, pitch: 0, fov: 40, sunAz: .35, focus: [-6, -46], size: [1400, 598], ref: 'd959254a' },
-    b: { pos: [OB[0], OB[1]], eye: 1.8, yaw: 0, pitch: -3, fov: 34, sunAz: -2.55, focus: [OB[0] - 4, OB[1] - 40], size: [1400, 650], ref: '57faf138' },
-    c: { pos: [OC[0], OC[1]], eye: 3.0, yaw: 0, pitch: -19, fov: 50, sunAz: .9, focus: [OC[0], OC[1] - 14], size: [1310, 569], ref: 'be82a764', hero: [OC[0], OC[1] - 4.3], cloudY: 32 },
+    b: { pos: [OB[0], OB[1]], eye: 1.8, yaw: 0, pitch: -3, fov: 34, sunAz: -2.55, sunEl: .62, focus: [OB[0] - 4, OB[1] - 40], size: [1400, 650], ref: '57faf138' },
+    c: { pos: [OC[0], OC[1]], eye: 3.0, yaw: 0, pitch: -19, fov: 50, sunAz: .75, sunEl: .6, focus: [OC[0], OC[1] - 14], size: [1310, 569], ref: 'be82a764', hero: [OC[0], OC[1] - 4.3], cloudY: 32 },
     k: { pos: [9000, 9000], eye: 260, yaw: 0, pitch: 4, fov: 50, sunAz: 2.2, focus: null, size: [1400, 600], ref: null, test: 'clouds' },   // dev: cloud test bench
+    // dev: the Névoa seen from the meadow of area c (?mist=in puts the camera inside it, ?mist=open opens the lit corridor)
+    n: { pos: [OC[0] - 60, OC[1] + 60], eye: 3, yaw: -18, pitch: 4, fov: 50, sunAz: .9, focus: null, size: [1400, 600], ref: null, cloudY: 32, mist: [OC[0] - 420, OC[1] - 1050, 650] },
   };
   const P = PRE[PRESET] || PRE.a;
   L.LAB = { preset: PRESET, P, PRE };
@@ -394,7 +398,7 @@
       }
       for (let i = 0; i < 900; i++) { const x = -900 + r() * 1300, e = aEdge(x), z = e[2] + r() * 70; const h = labH(x, z); if (h < 110 || h > e[1] - 15 || L.slope(x, z) > .3) continue; addTree('pine', x, z, lerp(10, 16, r()), r); }
     }
-    if (PRESET === 'c') {
+    if (AREA === 'c') {
       const X = x => OC[0] + x, Z = z => OC[1] + z;
       // forest slope on the left (dense pines), its edge trees showing over the meadow's far rim
       for (let gx = -560; gx < -50; gx += 8) for (let gz = -560; gz < -120; gz += 8) { const x = X(gx + (r() - .5) * 7), z = Z(gz + (r() - .5) * 7); const h = labH(x, z); if (h < 22 || h > 100 || L.slope(x, z) > .6 || r() > .6 || fbm(x * .01, z * .01, 2, 40) < .4) continue; addTree(r() < .7 ? 'pine' : 'oak', x, z, lerp(10, 19, r()), r); }
@@ -519,6 +523,7 @@
   let T = 0;
   function sunFor(name) {
     const tp = L.todPreset(name, QS.get('sun') ? Number(QS.get('sun')) : P.sunAz);   // dev: ?sun=azimuth (rad)
+    if (P.sunEl && name === 'day') { const az = Math.atan2(tp.sunDir.z, tp.sunDir.x); tp.sunDir.set(Math.cos(az) * Math.cos(P.sunEl), Math.sin(P.sunEl), Math.sin(az) * Math.cos(P.sunEl)); }
     return tp;
   }
   async function bootCloudTest() {
@@ -556,7 +561,7 @@
       towerHouse(-15.5, -62, .9); house(-46, -96, .25, 9, 7, 5, 4.5);
       tower(42, -265, 2.6, 12, 6.5, { ogive: true, skirt: true, face: 2 }); house(56, -270, .4, 11, 7, 4.5, 4); house(28, -280, -.2, 7, 6, 4, 3.5); house(74, -290, .1, 7, 6, 4, 3.5);
     }
-    if (PRESET === 'c') {
+    if (AREA === 'c') {
       const X = x => OC[0] + x, Z = z => OC[1] + z;
       tower(X(18), Z(-292), 3.2, 22, 7.5, { face: 1.2 }); house(X(34), Z(-280), .3, 12, 8, 5, 4.5); house(X(52), Z(-298), -.4, 9, 7, 4.5, 4); house(X(-2), Z(-276), .1, 10, 7, 4.5, 4);
       house(X(66), Z(-270), .6, 8, 6, 4, 3.5); house(X(-16), Z(-306), -.2, 8, 7, 4.5, 4); house(X(44), Z(-256), .9, 7, 6, 4, 3.5); house(X(-34), Z(-282), .4, 8, 6, 4, 3.5);
@@ -573,14 +578,14 @@
     }
     const hm = new THREE.Mesh(houses.geo(), L.MAT.v5); hm.castShadow = true; hm.receiveShadow = true; L.scene.add(hm);
     if (PRESET === 'a') fence([[-9, -50], [-1, -47.5], [8, -45.5]], 2.4);
-    if (PRESET === 'c') fence(rel(C_FENCE, OC), 2.6);
+    if (AREA === 'c') fence(rel(C_FENCE, OC), 2.6);
     if (PRESET === 'b') { fence(rel([[-6.5, 2], [-5.5, -6], [-7, -14], [-11, -22]], OB), 2.6); fence(rel([[3.2, -6], [4.2, -12], [6.5, -20]], OB), 2.6); }
     if (fences.P.length) { const fm = new THREE.Mesh(fences.geo(), L.MAT.v5); fm.castShadow = true; fm.receiveShadow = true; L.scene.add(fm); }
     // trees
     prepTrees(); scatterTrees(); buildTrees([cx, cz]);
     // waterfalls
     if (PRESET === 'a') for (const [sx, D, w] of FALLS_A) { const x = (sx - 700) / AF * D; addFallAt(x, aEdge(x)[2], 0, 1, w, 86); }
-    if (PRESET === 'c') for (const [x, z, w] of FALLS_C) addFallAt(OC[0] + x, OC[1] + z, 0, 1, w, 40);
+    if (AREA === 'c') for (const [x, z, w] of FALLS_C) addFallAt(OC[0] + x, OC[1] + z, 0, 1, w, 40);
     if (PRESET === 'b') {   // the fjord lake: an inland water surface at 205 m (same material as rivers and the sea)
       const LX = 240, LZ = -560, lg = new THREE.PlaneGeometry(520, 800, 52, 80).rotateX(-Math.PI / 2); const lp = lg.attributes.position, dep = new Float32Array(lp.count);
       for (let i = 0; i < lp.count; i++) { const x = OB[0] + LX + lp.getX(i), z = OB[1] + LZ + lp.getZ(i); dep[i] = clamp(B_LAKE.y - labH(x, z), -5, 40); }
@@ -603,6 +608,12 @@
       return v;
     });
     frameClouds(cam.position);
+    if (P.mist) {
+      const [mx, mz, mr] = P.mist, mode = QS.get('mist') || '';
+      L.mistVisual.setDisc(mx, mz, mr, { top: 900 });
+      if (mode === 'open') L.mistVisual.open(.7, [[OC[0] - 60, OC[1] + 20], [OC[0] - 150, OC[1] - 420], [mx + 60, mz + 260], [mx, mz]]);
+      if (mode === 'in') { const ix = mx + 60, iz = mz + 380; cam.position.set(ix, labH(ix, iz) + 14, iz); cam.rotation.set(-4 * D2R, 12 * D2R, 0); cam.updateMatrixWorld(); }
+    }
     // grass + character
     L.grassInit();
     if (P.hero) await addHero(P.hero[0], P.hero[1], Math.PI - 10 * D2R, 4.6, 1.3);

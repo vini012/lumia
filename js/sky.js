@@ -176,7 +176,7 @@
       } else {
         sun *= smoothstep(-.25, .3, hp + ndl * .3);                                  // undersides stay in shade
         l = sun * .58 + sky * .3 + .12 + hp * .06;
-        if (style > 1.5) l = mix(style > 2.5 ? .66 : .55, l, style > 2.5 ? .45 : .6);   // the mist: soft, low contrast
+        if (style > 1.5) l = mix(style > 2.5 ? .8 : .55, l, style > 2.5 ? .4 : .6);   // the mist: soft, low contrast
       }
       vec3 col = cloudRamp(l);
       vec3 V = normalize(vW - cameraPosition);
