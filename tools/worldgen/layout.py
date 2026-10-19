@@ -124,6 +124,10 @@ def masks(G, H, R, D, rivs, lakes_out, lake_ids, pads, step=2, log=print):
     fs = 1 - sstep(0.55, 1.1, slope)
     fslope = 1 + 0.6 * sstep(0.12, 0.45, slope) * (1 - sstep(0.7, 1.0, slope))
     forest = base_f * (0.15 + 1.45 * clump) * fs * fslope * (1 - near_w * 0.9) * (1 + far_w * 0.25)
+    # extra groves (design): forest raised towards amt inside r, still clumpy, off cliffs and water
+    for (x, z, r, amt) in getattr(D, 'FOREST_GROVES', []):
+        w = 1 - sstep(r * 0.5, r, np.hypot(X - x, Z - z))
+        forest = np.maximum(forest, amt * w * (0.3 + 0.95 * clump) * fs * (1 - near_w * 0.6))
     forest = np.where(lake_ids > 0, 0, forest)
     for (x, z, r, keep) in getattr(D, 'FOREST_OPEN', []):
         d = np.hypot(X - x, Z - z)

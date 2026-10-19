@@ -127,7 +127,7 @@ def place_fixed(F, D, lakes, rivs, cloud_y, log=print):
         if opt.get('span'):
             c = [q for q in D.CANYONS if q['id'] == opt['span']][0]
             p = np.asarray(c['pts'], float)
-            # middle of the canyon polyline, or the segment nearest to opt['at']
+            # the canyon segment nearest to opt['at'] (default: the middle of the canyon)
             k = len(p) // 2
             x, z = float((p[k - 1][0] + p[k][0]) / 2), float((p[k - 1][1] + p[k][1]) / 2)
             if opt.get('at'):
@@ -135,35 +135,45 @@ def place_fixed(F, D, lakes, rivs, cloud_y, log=print):
                 k = 1 + int(np.argmin([np.hypot((p[q][0] + p[q + 1][0]) / 2 - x, (p[q][1] + p[q + 1][1]) / 2 - z)
                                        for q in range(len(p) - 1)]))
             dx, dz = p[k] - p[k - 1]
-            opt = dict(opt, ry=float(np.arctan2(dz, dx)))  # bridge runs across the canyon
-            # rim height: highest ground 150 m to either side
-            nx, nz = -dz / np.hypot(dx, dz), dx / np.hypot(dx, dz)
-            ends = []
-            for sgn in (-1, 1):
-                d = 20.0
-                while d < 400 and F.h(x + nx * sgn * d, z + nz * sgn * d) < 300:
-                    d += 4.0
-                # past the rounded lip: walk on until the ground is gentle
-                while d < 460 and (F.h(x + nx * sgn * (d + 4), z + nz * sgn * (d + 4)) -
-                                   F.h(x + nx * sgn * d, z + nz * sgn * d)) / 4.0 > 0.3:
-                    d += 4.0
-                ends.append((x + nx * sgn * (d + 6), z + nz * sgn * (d + 6)))
-            (ax, az), (bx, bz) = ends
-            ya, yb = F.h(ax, az), F.h(bx, bz)
-            x, z = (ax + bx) / 2, (az + bz) / 2
-            out.append(dict(id=pid, kind=kind, x=round(x, 1), z=round(z, 1), y=round(float(min(ya, yb)), 2),
-                            ry=round(opt['ry'], 4), r=0, flat=0, span=round(float(np.hypot(bx - ax, bz - az)), 1),
-                            x0=round(ax, 1), z0=round(az, 1), y0=round(ya, 2), x1=round(bx, 1), z1=round(bz, 1),
-                            y1=round(yb, 2)))
+            L = float(np.hypot(dx, dz))
+            ux, uz = dx / L, dz / L            # along the canyon (the slot's long axis)
+            nx, nz = -uz, ux                   # across the canyon (the bridge's span)
+            gap = float(opt.get('slot', 14.0))
+            half = 10.0                        # props5 rope_bridge: 20 m, ends at +-10 m
+            # the deck sits on the natural rock bridge left uncarved over the canyon (D.BRIDGES); choose the spot
+            # along the bridge where both rims (+-half) are level with each other
+            best = None
+            for sh in np.arange(-24.0, 24.1, 2.0):
+                cx, cz = x + nx * sh, z + nz * sh
+                ya, yb = F.h(cx - nx * half, cz - nz * half), F.h(cx + nx * half, cz + nz * half)
+                yc = F.h(cx, cz)
+                cost = abs(ya - yb) + 0.2 * abs(yc - (ya + yb) / 2) + 0.02 * abs(sh)
+                if best is None or cost < best[0]:
+                    best = (cost, cx, cz, ya, yb)
+            _, x, z, ya, yb = best
+            y = float((ya + yb) / 2)
+            ax, az, bx, bz = x - nx * half, z - nz * half, x + nx * half, z + nz * half
+            out.append(dict(id=pid, kind=kind, x=round(x, 1), z=round(z, 1), y=round(y, 2),
+                            ry=round(float(np.arctan2(nx, nz)), 4), r=0, flat=0, span=round(2 * half, 1),
+                            gap=gap, x0=round(ax, 1), z0=round(az, 1), y0=round(y, 2), x1=round(bx, 1),
+                            z1=round(bz, 1), y1=round(y, 2),
+                            # runtime slot cut through the rock bridge: centre, long axis (u), half length,
+                            # half width, bottom height; anchor pads keep both rims at the deck height
+                            slot=dict(x=round(x, 1), z=round(z, 1), ux=round(ux, 4), uz=round(uz, 4), hl=60.0,
+                                      hw=gap / 2, y=round(y - 160.0, 1)),
+                            pads=[[round(ax - nx * 2.5, 1), round(az - nz * 2.5, 1), 3.5, round(y, 2)],
+                                  [round(bx + nx * 2.5, 1), round(bz + nz * 2.5, 1), 3.5, round(y, 2)]]))
+            log('rope bridge: rims %.1f / %.1f m (diff %.1f), gap %.0f m, deck y %.1f' % (ya, yb, abs(ya - yb), gap, y))
             continue
         sx, sz, y = settle(F, D, pid, kind, x, z, r, opt, out, lakes, rivs, cloud_y)
         out.append(dict(id=pid, kind=kind, x=round(float(sx), 1), z=round(float(sz), 1), y=round(float(y), 2),
                         ry=round(float(opt.get('ry', 0.0)), 4), r=float(r), flat=float(r if r > 0 else 0)))
     # the Annecy viewpoint (generic id, fixed spot)
     a = D.ANNECY
-    sx, sz, y = settle(F, D, 'p_annecy', 'viewpoint', a['x'], a['z'], 5, dict(search=80), out, lakes, rivs, cloud_y)
+    sx, sz, y = settle(F, D, 'p_annecy', 'viewpoint', a['x'], a['z'], 5, dict(search=a.get('search', 80)), out, lakes, rivs, cloud_y)
     out.append(dict(id='p_annecy', kind='viewpoint', x=round(sx, 1), z=round(sz, 1), y=round(y, 2),
-                    ry=round(float(np.arctan2(a['look'][0] - sx, a['look'][1] - sz)), 4), r=5.0, flat=5.0))
+                    ry=round(float(np.arctan2(a['look'][0] - sx, a['look'][1] - sz)), 4), r=2.0, flat=0.0))   # no pad: the
+    # viewpoint stands on the open slope (a flat landing would hide the valley below from eye height)
     for p in out:
         p['region'] = F.region(p['x'], p['z'])
     log('fixed POIs', len(out))
@@ -221,9 +231,11 @@ def place_generic(F, D, fixed, lakes, rivs, cloud_y, log=print, walk=None):
                     if max(drops) < (60 if reg != 2 else 35) or spread > 4:
                         continue
                 elif kind == 'cave':
-                    # at the foot of a cliff: ground rises > 40 m within 50 m
-                    rises = [F.h(x + np.cos(a) * 50, z + np.sin(a) * 50) - hh for a in np.linspace(0, 6.28, 12)]
-                    if max(rises) < 40 or F.slope[F.ij(x, z)] > 0.5:
+                    # at the foot of a cliff: ground rises > 40 m within 50 m (looser after many tries)
+                    loose = attempt > 450
+                    rr = 75 if loose else 50
+                    rises = [F.h(x + np.cos(a) * rr, z + np.sin(a) * rr) - hh for a in np.linspace(0, 6.28, 16)]
+                    if max(rises) < (24 if loose else 40) or F.slope[F.ij(x, z)] > (0.75 if loose else 0.5):
                         continue
                 elif kind in ('pier',):
                     near = False
@@ -260,6 +272,8 @@ def place_generic(F, D, fixed, lakes, rivs, cloud_y, log=print, walk=None):
                     ry = float(np.arctan2(dx, dz)) + np.pi / 2
                 p = dict(id=pid, kind=kind, region=reg, x=round(float(x), 1), z=round(float(z), 1),
                          y=round(float(med), 2), ry=round(ry, 4), r=r, flat=(r if kind != 'cave' else 0.0))
+                if kind == 'bridge':
+                    p['span'] = round(float(rv['W'][k2]) * 1.25 + 4.0, 1)
                 out.append(p)
                 allp.append(p)
                 placed = True
@@ -271,6 +285,41 @@ def place_generic(F, D, fixed, lakes, rivs, cloud_y, log=print, walk=None):
     counts = np.bincount([p['region'] for p in out], minlength=16)
     log('generic POIs', len(out), counts.tolist())
     return out
+
+
+def nudge_out_of_rivers(F, pois, rivs, log=print):
+    """a POI whose pad would sit in a river bed is moved out to the bank (along the normal of the nearest reach)."""
+    skip = ('bridge', 'rope_bridge', 'chest_underwater', 'waterfall', 'mist', 'keep', 'gate', 'seat')
+    moved = []
+    for p in pois:
+        if p['kind'] in skip or p['id'] == 'spawn':
+            continue
+        for _ in range(3):
+            best = None
+            for rv in rivs:
+                P = rv['P']
+                d = np.hypot(P[:, 0] - p['x'], P[:, 1] - p['z'])
+                k = int(d.argmin())
+                need = rv['W'][k] / 2 + max(p['r'], 3.0) + 5.0
+                if d[k] < need and (best is None or need - d[k] > best[0]):
+                    best = (need - d[k], rv, k)
+            if best is None:
+                break
+            push, rv, k = best
+            P = rv['P']
+            a, b = P[max(k - 1, 0)], P[min(k + 1, len(P) - 1)]
+            tx, tz = b - a
+            L = float(np.hypot(tx, tz)) + 1e-9
+            nx, nz = -tz / L, tx / L
+            side = np.sign((p['x'] - P[k, 0]) * nx + (p['z'] - P[k, 1]) * nz) or 1.0
+            p['x'] = round(float(p['x'] + nx * side * (push + 1.0)), 1)
+            p['z'] = round(float(p['z'] + nz * side * (push + 1.0)), 1)
+            moved.append(p['id'])
+    for p in pois:
+        if p['id'] in moved and p['flat'] > 0:
+            p['y'] = round(F.pad_stats(p['x'], p['z'], max(p['r'], 4))[1], 2)
+    if moved:
+        log('POIs moved out of river beds:', sorted(set(moved)))
 
 
 def pad_weight(d, r):
@@ -367,16 +416,126 @@ def route_roads(F, D, pois, lakes, rivs, cloud_y, scratch, log=print):
     return roads
 
 
+def _seg_dist(px, pz, A, B):
+    """distances from points (n) to segments A->B (m): (n, m) distance and parameter t."""
+    dx, dz = (B - A)[:, 0], (B - A)[:, 1]
+    l2 = np.maximum(dx * dx + dz * dz, 1e-9)
+    ex = px[:, None] - A[None, :, 0]
+    ez = pz[:, None] - A[None, :, 1]
+    t = np.clip((ex * dx + ez * dz) / l2, 0, 1)
+    qx = ex - t * dx
+    qz = ez - t * dz
+    return np.sqrt(qx * qx + qz * qz), t
+
+
+def grade_crossings(roads, rivs, log=print):
+    """road/river crossings: rivers narrower than 6 m become shallow fords (road bed 0.35 m under the surface),
+    wider ones get a plank bridge (road graded up to a deck ~1 m over the water on both banks). Returns the list of
+    crossings (kind, x, z, y, ry, len, w) and marks the road samples that must not fill the river bed (rd['keep'])."""
+    out = []
+    for rd in roads:
+        P = rd['P']
+        y = np.asarray(rd['y'], float).copy()
+        keep = np.zeros(len(P), bool)
+        n = len(P)
+        bb = (P[:, 0].min() - 40, P[:, 1].min() - 40, P[:, 0].max() + 40, P[:, 1].max() + 40)
+        for rv in rivs:
+            RP = rv['P']
+            if RP[:, 0].max() < bb[0] or RP[:, 0].min() > bb[2] or RP[:, 1].max() < bb[1] or RP[:, 1].min() > bb[3]:
+                continue
+            fz = np.zeros(len(RP), bool)
+            for f in rv['falls']:
+                fz[f['ia']:f['ib'] + 1] = True
+            A, B = RP[:-1], RP[1:]
+            d = np.full(n, 1e9)
+            ks = np.zeros(n, int)
+            ts = np.zeros(n)
+            for c0 in range(0, n, 400):
+                dd, tt = _seg_dist(P[c0:c0 + 400, 0], P[c0:c0 + 400, 1], A, B)
+                k = dd.argmin(1)
+                d[c0:c0 + 400] = dd[np.arange(len(k)), k]
+                ks[c0:c0 + 400] = k
+                ts[c0:c0 + 400] = tt[np.arange(len(k)), k]
+            W = rv['W'][ks] * (1 - ts) + rv['W'][np.minimum(ks + 1, len(RP) - 1)] * ts
+            Sf = rv['s'][ks] * (1 - ts) + rv['s'][np.minimum(ks + 1, len(RP) - 1)] * ts
+            inside = d < W / 2 + 0.5
+            i = 0
+            while i < n:
+                if not inside[i]:
+                    i += 1
+                    continue
+                j = i
+                while j + 1 < n and inside[j + 1]:
+                    j += 1
+                c = i + int(np.argmin(d[i:j + 1]))
+                i = j + 1
+                if fz[ks[c]] or fz[min(ks[c] + 1, len(RP) - 1)]:
+                    log('  crossing on a fall skipped', rv['id'], P[c].round(0).tolist())
+                    continue
+                rs, rw = float(Sf[c]), float(W[c])
+                ford = rw < 6.0
+                yt = rs - 0.35 if ford else rs + 0.85 + rw * 0.03
+                # samples over the water (+ 2.5 m of bank) take the crossing height; 42 m ramps on each side
+                core = np.nonzero((d < W / 2 + 2.5) & (np.abs(np.arange(n) - c) < 12))[0]
+                a0, a1 = int(core.min()), int(core.max())
+                y[a0:a1 + 1] = yt
+                keep[a0:a1 + 1] = True
+                for (s0, sgn) in ((a0, -1), (a1, 1)):
+                    m = 7
+                    e = int(np.clip(s0 + sgn * m, 0, n - 1))
+                    if e == s0:
+                        continue
+                    ye = y[e]
+                    for q in range(1, abs(e - s0)):
+                        t = q / abs(e - s0)
+                        y[s0 + sgn * q] = yt + (ye - yt) * t * t * (3 - 2 * t)
+                pa, pb = P[max(c - 2, 0)], P[min(c + 2, n - 1)]
+                ry = float(np.arctan2(pb[0] - pa[0], pb[1] - pa[1]))
+                span = float(np.hypot(*(P[a1] - P[a0]))) + 2.0
+                if any(q['river'] == rv['id'] and np.hypot(q['x'] - P[c, 0], q['z'] - P[c, 1]) < 12 for q in out):
+                    continue   # two routes sharing this crossing: one deck/ford is enough
+                out.append(dict(kind='ford' if ford else 'bridge', river=rv['id'], x=round(float(P[c, 0]), 1),
+                                z=round(float(P[c, 1]), 1), y=round(yt, 2), surf=round(rs, 2), ry=round(ry, 4),
+                                len=round(max(span, rw + 3.0), 1), w=rd['w'], rw=round(rw, 1)))
+        rd['y'] = y
+        rd['keep'] = keep
+    nb = sum(1 for c in out if c['kind'] == 'bridge')
+    log('road/river crossings: %d (%d bridges, %d fords)' % (len(out), nb, len(out) - nb))
+    return out
+
+
 def apply_roads(G, H, roads):
     """cut-and-fill the macro grid gently along the roads (the runtime does the fine version)."""
     for rd in roads:
+        y0 = np.asarray(rd['y'], float)
+        if 'keep' in rd and rd['keep'].any():
+            # bridge decks and fords must not dam the river channel in the macro grid
+            y0 = np.where(rd['keep'], np.nan, y0)
         P = resample(rd['P'], 18.0)
-        yy = np.interp(np.linspace(0, 1, len(P)), np.linspace(0, 1, len(rd['y'])), rd['y'])
+        yy = np.interp(np.linspace(0, 1, len(P)), np.linspace(0, 1, len(y0)), np.nan_to_num(y0, nan=-1e4))
+        kk = np.interp(np.linspace(0, 1, len(P)), np.linspace(0, 1, len(y0)), np.isnan(y0).astype(float))
+        yy = np.where(kk > 0.01, np.nan, yy)
         m = 30
         wj, wi = G.window(P[:, 0].min() - m, P[:, 1].min() - m, P[:, 0].max() + m, P[:, 1].max() + m)
         d, along, _ = polyline_dist(G.X[wj, wi], G.Z[wj, wi], P)
         k = np.clip(np.round(along / 18.0).astype(int), 0, len(P) - 1)
         y = yy[k]
         w = 1 - sstep(rd['w'] / 2 + 2, rd['w'] / 2 + 14, d)
+        w = np.where(np.isnan(y), 0.0, w)
+        y = np.nan_to_num(y)
         h = H[wj, wi]
         H[wj, wi] = h + (y - h) * w * 0.85
+
+
+def final_heights(G, H, pois, log=print):
+    """last pass: POI heights from the final grid (after rivers, pads and roads). Pads keep their own height."""
+    skip = ('bridge', 'rope_bridge', 'chest_underwater')
+    n = 0
+    for p in pois:
+        if p['kind'] in skip or p.get('flat', 0) > 0:
+            continue
+        y = float(bilinear(H, np.array([p['x']]), np.array([p['z']]), -G.ws, G.cell)[0])
+        if abs(y - p['y']) > 0.05:
+            n += 1
+        p['y'] = round(y, 2)
+    log('POI heights refreshed from the final grid: %d changed' % n)

@@ -95,14 +95,25 @@ def paint(D, G, H, R, M, lakes, LID, rivs, roads, size=2048):
     puff = np.clip(deck * (0.65 + 0.7 * cn), 0, 1)
     ccol = np.array([238, 243, 250]) * (0.9 + 0.1 * cn[..., None]) - np.array([22, 14, 0]) * (1 - cn[..., None])
     col = col * (1 - puff[..., None]) + ccol * puff[..., None]
-    # the hidden plateau: a plain cumulus bank, slightly irregular, like any other cloud
+    # the hidden plateau: a plain cumulus bank like any other cloud - a lumpy cluster of puffs with noisy rims and
+    # the same soft shading as the cloud sea, never a disc
     mx, mz, mr = D.MIST['x'], D.MIST['z'], D.MIST['r']
     d = np.hypot(X - mx, Z - mz)
-    ang = np.arctan2(Z - mz, X - mx)
-    edge = mr + 330 + (fbm(np.cos(ang) * 2.2 + 5, np.sin(ang) * 2.2 + 5, 4, 713) - .5) * 520
-    bank = sstep(edge + 120, edge - 220, d + (cn - .5) * 160)
-    bcol = np.array([242, 245, 250]) * (0.92 + 0.1 * cn[..., None]) - np.array([30, 22, 6]) * \
-        sstep(0.5, 0.0, cn)[..., None] * 0.6
+    rng = np.random.RandomState(717)
+    bank = sstep(mr + 230, mr + 40, d + (fbm(X / 310. + 1, Z / 310. - 4, 4, 713) - .5) * 520)
+    for i in range(11):
+        a = rng.uniform(0, 2 * np.pi)
+        rr = rng.uniform(0.25, 1.05) * mr
+        pr = rng.uniform(0.28, 0.55) * mr
+        cx, cz = mx + np.cos(a) * rr, mz + np.sin(a) * rr
+        dd = np.hypot(X - cx, Z - cz) + (fbm(X / 190. + i, Z / 190. - i, 4, 720 + i) - .5) * pr * 0.9
+        bank = np.maximum(bank, sstep(pr + 90, pr - 140, dd))
+    bank = bank * (0.86 + 0.14 * cn)
+    sh = blur(bank, max(1, int(size / 400)))
+    gz, gx = np.gradient(sh)
+    lit = np.clip(1.0 + (gx + gz) * size * 0.012, 0.88, 1.06)
+    bcol = (np.array([238, 243, 250]) * (0.9 + 0.1 * cn[..., None]) - np.array([22, 14, 0]) * (1 - cn[..., None])) \
+        * lit[..., None]
     col = col * (1 - bank[..., None]) + bcol * bank[..., None]
     # parchment tint, paper grain, soft vignette
     parch = hexrgb('#efe3c8')

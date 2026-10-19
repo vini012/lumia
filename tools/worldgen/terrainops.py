@@ -133,6 +133,10 @@ def table_field(G, t, floor):
     for (bx, bz, br, dh) in t.get('bumps', []):
         d = np.hypot(X - bx, Z - bz)
         top = top + dh * (1 - sstep(0, br, d)) ** 1.15
+    if t.get('cap') is not None:
+        # smooth minimum: the top flattens out at the cap instead of climbing on
+        kc = 12.0
+        top = -kc * np.logaddexp(-top / kc, -t['cap'] / kc)
     for st in t.get('steps', []):
         sx, sz, sr, dh = st[:4]
         k2 = st[4] if len(st) > 4 else 7.0
@@ -311,7 +315,7 @@ def apply_ramps(G, H, ramps, log=None):
         if log:
             log('ramp %s %.0f -> %.0f grade %.2f' % (r['id'], lo, hi, (hi - lo) / acc[-1]))
         w = r['w']
-        kc = r.get('cut_k', 2.2)
+        kc = r.get('cut_k', 3.4)   # cut faces sheer (~74 deg, painted rock); fills stay gentle
         kf = r.get('fill_k', 1.1)
         m = 420
         wj, wi = G.window(p[:, 0].min() - m, p[:, 1].min() - m, p[:, 0].max() + m, p[:, 1].max() + m)
@@ -329,19 +333,24 @@ def apply_ramps(G, H, ramps, log=None):
 
 
 def lake_sdf(G, lk, X, Z):
+    """signed distance to the lake shore (negative inside). Shores are domain-warped twice (bays, points, coves)
+    plus a small fractal jag, so no lake reads as a polygon or an ellipse."""
     sd = zlib.crc32(lk['id'].encode()) % 1000
     if 'poly' in lk:
-        wx, wz = warp_coords(X, Z, 60, 1 / 500., sd)
-        return poly_sdf(wx, wz, lk['poly'])
+        wx, wz = warp_coords(X, Z, 150, 1 / 950., sd)
+        wx, wz = warp_coords(wx, wz, 95, 1 / 380., sd + 11)   # second, shorter warp: bays and points on long sides
+        s = poly_sdf(wx, wz, chaikin(lk['poly'], 2, closed=True))
+        return s + (fbm(X / 140. + 3, Z / 140. - 5, 3, sd + 5) - .5) * 70
     c = np.cos(lk.get('rot', 0))
     s = np.sin(lk.get('rot', 0))
-    wx, wz = warp_coords(X, Z, min(lk['rx'], lk['rz']) * 0.25, 1 / (lk['rx'] * 1.5), sd)
+    rmax, rmin = max(lk['rx'], lk['rz']), min(lk['rx'], lk['rz'])
+    wx, wz = warp_coords(X, Z, rmax * 0.2, 1 / (rmax * 1.1), sd)
     dx = wx - lk['x']
     dz = wz - lk['z']
     lx = dx * c + dz * s
     lz = -dx * s + dz * c
     q = np.hypot(lx / lk['rx'], lz / lk['rz'])
-    return (q - 1) * min(lk['rx'], lk['rz'])
+    return (q - 1) * rmin + (fbm(X / (rmin * 0.9) + 1, Z / (rmin * 0.9) - 2, 3, sd + 7) - .5) * rmin * 0.35
 
 
 def lake_bbox(lk):

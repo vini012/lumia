@@ -107,7 +107,7 @@ def road_json(rd):
     return dict(w=rd['w'], pts=[[r1(P[k, 0]), r1(P[k, 1]), r2(y[k])] for k in idx])
 
 
-def write_all(out_dir, D, G, H, R, LID, M, lakes, rivs, roads, pois, spawn, log=print):
+def write_all(out_dir, D, G, H, R, LID, M, lakes, rivs, roads, pois, spawn, log=print, extra=None):
     os.makedirs(out_dir, exist_ok=True)
     data, sections = pack(H, R, LID, M)
     with open(os.path.join(out_dir, 'world5.bin'), 'wb') as f:
@@ -139,6 +139,10 @@ def write_all(out_dir, D, G, H, R, LID, M, lakes, rivs, roads, pois, spawn, log=
         pois=pois,
         labels=labels,
     )
+    # crossings: road/river fords and plank bridges {kind, x, z, y (road/deck), surf, ry, len, w, rw};
+    # slots: narrow clefts cut at runtime {x, z, ux, uz (long axis), hl, hw, y (bottom)};
+    # pads: extra flat discs [x, z, r, y] (rope-bridge anchors)
+    meta.update(extra or {})
     js = json.dumps(meta, separators=(',', ':'), ensure_ascii=False)
     with open(os.path.join(out_dir, 'world5.json'), 'w', encoding='utf-8') as f:
         f.write(js)

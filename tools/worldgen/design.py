@@ -30,7 +30,7 @@ REGIONS = [
     dict(id='r13', nome='Montes do Vento', x=-4800, z=-6200),
     dict(id='r14', nome='Ermo Dourado', x=-600, z=-6000),
     dict(id='r15', nome='Planalto dos Ventos Altos', x=2400, z=-5800),
-    dict(id='r16', nome='Terra Velada', x=6000, z=-6000, hidden=True),
+    dict(id='r16', nome='Névoa', x=6000, z=-6000, hidden=True),
 ]
 
 # region ownership polygons (coarse; gen.py warps the borders). Index = region index.
@@ -97,6 +97,15 @@ def autosteps(poly, n, seed, avoid=(), dh=(18, 55), r=(180, 600), neg=0.35, k=(2
     return out
 
 
+def plane3(p0, h0, p1, h1, p2, h2):
+    """top plane through three (point, height) pairs."""
+    ax, az, bx, bz = p1[0] - p0[0], p1[1] - p0[1], p2[0] - p0[0], p2[1] - p0[1]
+    det = ax * bz - az * bx
+    gx = ((h1 - h0) * bz - az * (h2 - h0)) / det
+    gz = (ax * (h2 - h0) - (h1 - h0) * bx) / det
+    return dict(h=h0, grad=(gx, gz), gref=p0)
+
+
 def tilted(p0, h0, p1, h1):
     """gradient (gx, gz) and reference so that the top is h0 at p0 and h1 at p1."""
     dx = p1[0] - p0[0]
@@ -127,29 +136,36 @@ table('r1_west', [(-3400, 4350), (-2500, 4450), (-2300, 5800), (-2450, 6650), (-
       **tilted((-2450, 5500), 182, (-3950, 5500), 72))
 
 # ------------------------------------------------------------------ R1 spawn valley (mid terrace) + lower steps east
-R1P = [(-2950, 4100), (-1800, 3950), (-1000, 3900), (-450, 3980), (-170, 4280), (-330, 4700), (-400, 5000),
-       (-520, 5350), (-470, 5800), (-370, 6200), (-500, 6560), (-1000, 6870), (-1800, 6970), (-2500, 6780),
-       (-2950, 6200), (-3100, 5300)]
-table('r1_terrace', R1P, h=200, grad=(0.0, 0.003), gref=(-1200, 5000), amp1=18, amp2=7, warp=(140, 1 / 1100.),
+R1P = [(-2950, 4100), (-1800, 3950), (-1000, 3900), (-640, 3990), (-600, 4300), (-640, 4640), (-820, 4810),
+       (-1060, 4930), (-1080, 5450), (-820, 5640), (-560, 5760), (-470, 5900), (-370, 6200), (-500, 6560),
+       (-1000, 6870), (-1800, 6970), (-2500, 6780), (-2950, 6200), (-3100, 5300)]
+table('r1_terrace', R1P, h=200, grad=(0.0, 0.003), gref=(-1200, 5000), amp1=18, amp2=5, warp=(60, 1 / 1100.),
       jag=9, k=11, ledge=0.45, seed=1, coast=(260, 2000.),
-      calm=[(-1100, 3950, 1300), (-450, 4900, 900), (-450, 6350, 500)],
+      calm=[(-1100, 3950, 1300), (-700, 4700, 900), (-900, 5300, 900), (-450, 6350, 500)],
       soft=[(-3000, 5500, 1300, 0.15)],
-      bumps=[(-2050, 5850, 820, 84), (-2500, 5100, 420, 22), (-900, 6300, 420, 18), (-1500, 4500, 380, 10),
-             (-1420, 5420, 760, 118)],
-      steps=[(-760, 4840, 420, -30, 2.2)])
-table('r1_step1', [(-640, 4650), (-300, 4600), (-170, 4880), (-230, 5250), (-520, 5380), (-680, 5100)],
-      h=154, amp1=4, amp2=2, warp=(60, 1 / 550.), jag=8, k=10, seed=2)
-table('r1_step2', [(-380, 5080), (-60, 5000), (20, 5280), (-180, 5500), (-400, 5420)],
-      h=117, amp1=3, amp2=2, warp=(45, 1 / 420.), jag=8, k=10, seed=3)
+      bumps=[(-2050, 5850, 820, 84), (-2500, 5100, 420, 22), (-900, 6300, 420, 18), (-1700, 5350, 520, 40)])
+# the spawn shelf: a meadow terrace ~100 m above the rest of R1, jutting out over the sea gap. The spawn sits on its
+# sunny slope (bump), the village on the flat below it, the east edge drops ~300 m sheer into the cloud sea, the
+# north edge drops to the falls basin (the bottoms of the three falls stay hidden behind it), the west and south
+# sides are walkable slopes down to the rest of the terrace.
+table('r1_shelf', [(-1300, 4900), (-1060, 4865), (-940, 4895), (-878, 4985), (-845, 5085), (-840, 5170), (-860, 5330),
+                   (-930, 5480), (-1120, 5570), (-1360, 5500), (-1440, 5220)],
+      h=312, amp1=4, amp2=2, warp=(25, 1 / 600.), jag=4, k=14, ledge=0.5, ledges=2, seed=4,
+      soft=[(-1520, 5260, 480, 0.24), (-1130, 5700, 430, 0.24)],
+      bumps=[(-1065, 5440, 430, 125)])
 
 # ------------------------------------------------------------------ R6 the big plateau north of the spawn
 R6P = [(-3800, -550), (-1800, -800), (-300, -700), (650, -350), (900, 600), (700, 1500), (430, 2500), (250, 3300),
-       (0, 3850), (-150, 4300), (-480, 4220), (-750, 4060), (-1000, 3990), (-1300, 4000), (-1650, 4060),
+       (0, 3750), (-200, 3950), (-480, 3950), (-750, 3940), (-1000, 3990), (-1300, 4000), (-1650, 4060),
        (-1950, 4190), (-2300, 4270), (-2700, 4240), (-3100, 4150), (-3450, 3750), (-3750, 2600), (-3900, 1200)]
 table('r6_plateau', R6P, h=466, grad=(0.042, 0.0), gref=(-1300, 2000), amp1=20, amp2=7, warp=(150, 1 / 1300.),
-      jag=11, k=13, ledge=0.6, ledges=2, seed=6, calm=[(-1250, 4150, 1300), (300, 2800, 1100), (-2700, 4100, 500)],
+      jag=11, k=13, ledge=0.6, ledges=2, seed=6,
+      calm=[(-1250, 4150, 1300), (300, 2800, 1100), (-2700, 4100, 500), (-300, 4300, 900)],
       soft=[(-1500, -700, 1100, 0.15)],
-      bumps=[(-330, 4020, 750, 46), (-2400, 1100, 600, 14)],
+      # the falls stretch of the rim sits low (~410 m, 210 m over the basin) and the top climbs ~8 degrees to a
+      # broad ridge 1.2 km behind it, so from the spawn the meadow top of the plateau shows above the falls
+      bumps=[(-330, 4020, 750, 46), (-2400, 1100, 600, 14), (-1650, 4120, 330, 48), (-1000, 4700, 1600, -105),
+             (-1000, 3000, 950, 105), (-2100, 4150, 420, -30)],
       steps=autosteps(R6P, 7, 6, avoid=[(-1250, 3500, 900), (-1300, 1600, 350), (-2200, 2250, 300), (0, 3900, 500)]))
 
 # the prow: a giant tilted slab rising out of the SE corner of the plateau (seen from the spawn as in the concept
@@ -157,8 +173,8 @@ table('r6_plateau', R6P, h=466, grad=(0.042, 0.0), gref=(-1300, 2000), amp1=20, 
 table('r6_prow', [(-960, 4150), (-600, 4225), (-380, 4275), (-150, 4335), (70, 3880), (320, 3280), (510, 2620),
                   (420, 2330), (120, 2420), (-250, 2800), (-700, 3150), (-1000, 3500)],
       edge='cliff', k=14, ledge=0.5, ledges=2, amp1=8, amp2=3, warp=(80, 1 / 900.), jag=8, seed=7,
-      soft=[(-1000, 3700, 450, 0.3)],
-      **tilted((-960, 3600), 478, (440, 3600), 820))
+      soft=[(-1000, 3700, 450, 0.3)], cap=745, coast=(60, 1100.),
+      **plane3((-960, 4200), 430, (-150, 4335), 549, (-500, 3200), 648))
 
 # ------------------------------------------------------------------ R5 waterfall cliffs (high plateau + lower step)
 R5P = [(-7300, -600), (-6200, -1000), (-5000, -850), (-3900, -900), (-3300, -300), (-3200, 1300), (-3150, 2500),
@@ -176,19 +192,24 @@ table('r2_hills', R2P, h=232, amp1=34, amp2=10, warp=(150, 1 / 1200.), jag=10, k
       calm=[(850, 6350, 500), (2200, 4300, 1200)],
       soft=[(2300, 4050, 1400, 0.42), (4500, 4800, 800, 0.15)],
       bumps=[(2900, 5150, 520, 42), (1700, 5750, 520, 30), (3700, 6200, 450, 24)],
-      ridges=[([(1150, 4900), (1800, 4720), (2400, 4760), (3100, 4950)], 650, 190)])
+      ridges=[([(1150, 4900), (1800, 4720), (2400, 4760), (3100, 4950)], 650, 215)])
 VP = [(600, 2300), (1300, 2100), (2000, 2650), (2900, 2800), (3500, 2700), (3750, 3250), (3700, 4050),
       (2700, 4400), (1600, 4400), (900, 4150), (620, 3400)]
 table('vale_largo', VP, h=196, grad=(0.004, -0.03), gref=(2000, 3500), amp1=14, amp2=6, warp=(120, 1 / 1000.),
       jag=8, k=10, seed=22, soft=[(3900, 3100, 800, 0.13), (2100, 4400, 1100, 0.1)],
       steps=[(1500, 3000, 300, 16, 1.2), (2900, 3500, 260, -10, 1.0)])
+# the Annecy spur: a gentle grassy ridge running north from the R2 hills into the broad valley. The hillside road
+# climbs it; its tip is the Annecy viewpoint, ~1.1 km from the high town on the R7 south rim, the valley below
+table('annecy_spur', [(2020, 3140), (2380, 3110), (2650, 3500), (2750, 4250), (2350, 4500), (1700, 4450), (1650, 3800)],
+      edge='slope', tan=0.42, amp1=8, amp2=4, warp=(80, 1 / 700.), jag=4, seed=23,
+      **tilted((2150, 4350), 440, (2200, 3150), 420))
 
 # ------------------------------------------------------------------ R7 high town plateau (tilted) + upper table behind
 R7P = [(1250, 300), (2300, 150), (3250, 300), (3600, 800), (3700, 1700), (3760, 2300), (3560, 2720), (3150, 2640),
        (2700, 2330), (2150, 2150), (1450, 2000), (1150, 1500), (1100, 900)]
-table('r7_plateau', R7P, h=625, grad=(0.0, -0.035), gref=(2700, 1300), amp1=12, amp2=5, warp=(130, 1 / 1000.),
+table('r7_plateau', R7P, amp1=10, amp2=4, warp=(130, 1 / 1000.),
       jag=12, k=14, ledge=0.55, seed=71, coast=(200, 1600.), calm=[(1300, 2000, 700), (2500, 2250, 900)],
-      bumps=[(2700, 1300, 260, 5)])
+      bumps=[(2620, 2120, 300, 6)], **tilted((2700, 2250), 430, (2700, 300), 685))
 # the town's south face is a sheer cliff over the broad valley (the Annecy view looks across the valley at it);
 # a short concave meadow foot (forest, the valley road) instead of a long convex hill that would hide the town
 table('r7_foot', [(1650, 2150), (2550, 2250), (2650, 2500), (2300, 2700), (1900, 2650)],
@@ -196,9 +217,9 @@ table('r7_foot', [(1650, 2150), (2550, 2250), (2650, 2500), (2300, 2700), (1900,
       **tilted((2150, 2650), 205, (2150, 2200), 268))
 table('r7_slope', [(850, 1500), (1500, 1350), (1750, 2100), (1550, 2650), (1000, 2550), (780, 2000)],
       edge='slope', tan=0.3, amp1=6, amp2=2, warp=(70, 1 / 700.), jag=5, seed=73,
-      **tilted((1150, 2500), 262, (1520, 1650), 610))
+      **tilted((1150, 2500), 262, (1520, 1650), 520))
 table('r7_upper', [(900, -650), (1700, -650), (2300, -250), (2200, 350), (1650, 700), (950, 600), (700, 0)],
-      h=742, coast=(0, 0), amp1=9, amp2=3, warp=(110, 1 / 900.), jag=10, k=13, ledge=0.5, seed=72)
+      h=722, coast=(0, 0), amp1=9, amp2=3, warp=(110, 1 / 900.), jag=10, k=13, ledge=0.5, seed=72)
 
 # ------------------------------------------------------------------ Lago Grande basin (clear valley at the foot of R7)
 table('lago_basin', [(3500, -500), (4800, -650), (5200, 600), (5150, 2200), (5050, 3600), (4400, 3950),
@@ -270,7 +291,7 @@ table('r15_high', R15P, h=682, amp1=18, amp2=7, warp=(150, 1 / 1200.), jag=12, k
       steps=autosteps(R15P, 4, 151, avoid=[(2500, -5900, 400), (3200, -6700, 300)], dh=(12, 30), k=(1, 4)))
 
 # ------------------------------------------------------------------ R16 the highest plateau, ringed by cliffs
-table('r16_high', ('circle', 6000, -6000, 1430), 728, coast=(300, 2000.), calm=[(4700, -5950, 400)], amp1=10, amp2=3, warp=(280, 1 / 1400.), jag=14, k=14,
+table('r16_high', ('circle', 6000, -6000, 1430), 762, coast=(300, 2000.), calm=[(4700, -5950, 400)], amp1=10, amp2=3, warp=(280, 1 / 1400.), jag=14, k=14,
       ledge=0.65, ledges=2, seed=161, bumps=[(6000, -6000, 380, 14)])
 
 # ------------------------------------------------------------------ R9 islets over the cloud sea
@@ -325,6 +346,9 @@ BRIDGES = [
     (-1250, -3200, -1350, -2700, 44),   # c3 crossing towards R14
     (-330, -2250, -100, -2350, 38),     # c5 crossing towards R11
     (-560, -3150, -380, -2850, 40),     # c3 east crossing
+    # the rope bridge: a natural rock bridge over c2, broken in the middle by a 14 m slot (cut at runtime) that the
+    # rope bridge spans
+    (-2262, -3374, -1938, -3476, 44),
 ]
 
 # ------------------------------------------------------------------ ramps (cut-and-fill corridors): pts with heights
@@ -356,10 +380,11 @@ RAMPS = [
 
 # ------------------------------------------------------------------ lakes: centre, radii (ellipse) or polygon, level
 LAKES = [
-    dict(id='lk_falls', x=-700, z=4440, rx=330, rz=90, rot=-0.05, level=None, depth=5),
-    dict(id='lk_grande', poly=[(3800, -300), (4500, -400), (4800, 300), (4750, 1500), (4650, 2600), (4500, 3400),
-                               (4100, 3550), (3700, 3380), (3360, 3150), (3420, 2930), (3800, 2850), (3900, 1900),
-                               (3750, 700)], level=125.0, depth=14),
+    dict(id='lk_falls', x=-1010, z=4470, rx=300, rz=125, rot=-0.08, level=None, depth=5),
+    dict(id='lk_grande', poly=[(3800, -300), (4500, -400), (4800, 300), (4930, 820), (4760, 1180), (4800, 1500),
+                               (4560, 1880), (4720, 2250), (4650, 2600), (4500, 3400),
+                               (4100, 3550), (3700, 3380), (3360, 3150), (3420, 2930), (3800, 2850), (3880, 2400),
+                               (3640, 2080), (3880, 1760), (3900, 1350), (3660, 980), (3750, 700), (3640, 250)], level=125.0, depth=14),
     dict(id='lk_d', x=4620, z=4330, rx=360, rz=260, rot=0.4, level=None, depth=7),
     dict(id='lk_c', x=5420, z=5020, rx=330, rz=240, rot=-0.3, level=None, depth=7),
     dict(id='lk_b', x=6180, z=5720, rx=360, rz=260, rot=0.6, level=None, depth=7),
@@ -376,15 +401,15 @@ LAKES = [
 # ------------------------------------------------------------------ rivers (source -> mouth); 'w' = width in metres
 RIVERS = [
     # three streams of the big plateau falling behind the village
-    dict(id='rv_fa', pts=[(-1500, 2900), (-1250, 3450), (-1080, 3850), (-980, 4120), (-930, 4420)], w=(6, 13),
+    dict(id='rv_fa', pts=[(-1900, 2900), (-1640, 3400), (-1430, 3800), (-1270, 4080), (-1180, 4420)], w=(6, 13),
          lake='lk_falls'),
-    dict(id='rv_fb', pts=[(-560, 3250), (-640, 3600), (-680, 3900), (-690, 4120), (-690, 4430)], w=(8, 17),
+    dict(id='rv_fb', pts=[(-1250, 2950), (-1120, 3450), (-1040, 3850), (-1010, 4150), (-1000, 4440)], w=(8, 17),
          lake='lk_falls'),
-    dict(id='rv_fc', pts=[(-200, 3250), (-330, 3600), (-420, 3950), (-460, 4220), (-500, 4410)], w=(6, 13),
+    dict(id='rv_fc', pts=[(-500, 3250), (-600, 3600), (-680, 3950), (-720, 4250), (-760, 4460)], w=(6, 13),
          lake='lk_falls'),
-    # the village river: from the pool under the falls, past the village, off the east cliff into the clouds
-    dict(id='rv_vila', src='lk_falls', pts=[(-640, 4500), (-620, 4650), (-560, 4800), (-470, 4950), (-330, 5080), (-150, 5220),
-                            (60, 5330), (250, 5380)], w=(9, 12)),
+    # the basin river: from the pool under the falls east, off the basin's sea cliff into the clouds
+    dict(id='rv_vila', src='lk_falls', pts=[(-760, 4520), (-700, 4560), (-640, 4590), (-560, 4630), (-420, 4680),
+                                            (-250, 4720)], w=(9, 12)),
     # R5 gorge river to the sea through the coast
     dict(id='rv_gorge', pts=[(-4950, -150), (-5050, 700), (-4860, 1550), (-5100, 2400), (-5250, 3150), (-5480, 3900),
                              (-5700, 4700), (-6000, 5500), (-6350, 6300), (-6750, 7200)], w=(10, 22)),
@@ -397,7 +422,7 @@ RIVERS = [
     dict(id='rv_r7', pts=[(2450, 450), (2850, 880), (3150, 1230), (3450, 1480), (3700, 1640), (3980, 1720)], w=(5, 10),
          lake='lk_grande'),
     # R7 south-face fall: from the town's edge into the broad valley, then across it to Lago Grande
-    dict(id='rv_r7s', pts=[(3150, 1750), (2950, 2000), (2780, 2170), (2720, 2450), (2850, 2760), (3150, 2960),
+    dict(id='rv_r7s', pts=[(3150, 1750), (3110, 2000), (3040, 2250), (2990, 2480), (3000, 2750), (3200, 2950),
                            (3420, 3040)], w=(4, 9), lake='lk_grande'),
     # R8 streams into Lago Grande
     dict(id='rv_r8a', pts=[(6300, 600), (5700, 900), (5200, 1100), (4700, 1150)], w=(5, 9), lake='lk_grande'),
@@ -436,13 +461,18 @@ CLEAR = [
 MIST = dict(x=6000.0, z=-6000.0, r=1250.0)
 
 # thin cloud (holes) to open views of the ocean: (x, z, radius, coverage multiplier)
-CLOUD_THIN = [(350, 5600, 1500, 0.62), (-300, 3400, 600, 0.6)]
+CLOUD_THIN = [(350, 5600, 1500, 0.62), (-300, 3400, 600, 0.6), (-560, 5080, 520, 0.08), (-200, 4750, 420, 0.3)]
 
 # open ground kept free of forest (x, z, radius, keep factor): the spawn view corridor to the village and the falls
-FOREST_OPEN = [(-1110, 5100, 170, 0.0), (-1050, 4980, 170, 0.05), (-950, 4880, 170, 0.12), (-800, 4700, 160, 0.3),
-               (-1250, 5000, 150, 0.35), (-1000, 5230, 160, 0.3),
-               # east corridor: the terrace edge over the cloud sea stays visible from the spawn
-               (-760, 5100, 220, 0.2), (-480, 5060, 240, 0.12), (-240, 5020, 200, 0.2)]
+FOREST_OPEN = [(-960, 5245, 150, 0.0), (-985, 5110, 160, 0.0), (-960, 4990, 170, 0.08), (-1080, 4960, 150, 0.25),
+               # east corridor: the shelf edge over the cloud sea stays visible from the spawn
+               (-890, 5130, 150, 0.05), (-880, 5000, 140, 0.1),
+               # the Annecy viewpoint keeps its view down into the valley
+               (2245, 3152, 70, 0.0), (2330, 3020, 90, 0.15),
+               # the high town and its rim stay open (no tree band hiding the roofs from the valley)
+               (2620, 2160, 300, 0.05), (2760, 2300, 160, 0.1)]
+# extra groves (x, z, radius, density): the broad valley under the high town is forested like the Annecy painting
+FOREST_GROVES = [(2450, 2650, 950, 0.85), (1500, 2700, 600, 0.6), (2900, 3200, 500, 0.6)]
 
 # ------------------------------------------------------------------ flora / ground per region (masks + scatter)
 # forest: base density, clump: 1 = groves/clumps, 0 = evenly scattered lone trees; meadow: flower/field share
@@ -471,20 +501,22 @@ FLORA = [
 POIS = [
     # R1
     # at the lip of the meadow step, so the village below is not hidden by the brow of the hill
-    ('spawn', 'spawn', -1097, 5092, 5, dict(ry=2.6, search=0)),  # ry: facing (sin ry, cos ry), towards the village
-    ('cottage', 'cottage', -1940, 5330, 10, {}),
-    # the village sits on the lower terrace just below the spawn lip: the round-tower house ~150 m away, slightly
-    # left of the three falls, the other houses spread to the right (the concept-art framing)
-    ('vila_ventura', 'village', -955, 4895, 26, dict(search=25)),
-    ('tower_house', 'house', -1042, 4969, 11, dict(search=6)),
-    ('bakery', 'house', -1010, 4835, 10, dict(search=25)),
-    ('well_vila', 'well', -1000, 4935, 4, dict(search=12)),
-    ('village_house_a', 'house', -880, 4850, 9, dict(search=30)),
-    ('village_house_b', 'house', -930, 4995, 9, dict(search=30)),
+    # the spawn: on the sunny slope of the shelf, facing NNE (ry: facing (sin ry, cos ry)) - the village below,
+    # the plateau cliff with three falls behind it, the shelf edge over the cloud sea in the right third
+    ('spawn', 'spawn', -960, 5245, 5, dict(ry=2.845, search=0)),
+    ('cottage', 'cottage', -1185, 5395, 10, dict(search=40)),
+    # the village on the flat of the shelf 100-170 m ahead, 40-50 m below the eye: the round-tower house just left
+    # of centre, the other houses spread left and right towards the edge (the concept-art framing)
+    ('vila_ventura', 'village', -985, 5112, 22, dict(search=12)),
+    ('tower_house', 'house', -1018, 5128, 11, dict(search=6)),
+    ('bakery', 'house', -985, 5050, 10, dict(search=15)),
+    ('well_vila', 'well', -958, 5098, 4, dict(search=8)),
+    ('village_house_a', 'house', -925, 5080, 9, dict(search=15)),
+    ('village_house_b', 'house', -1068, 5098, 9, dict(search=15)),
     ('hermit_tower_vale', 'tower', -2650, 6250, 9, {}),
-    ('totem_sorriso', 'totem', -1106, 5077, 2, dict(search=0)),
+    ('totem_sorriso', 'totem', -985, 5232, 2, dict(search=0)),
     ('totem_jardim', 'totem', -1150, 6150, 3, {}),
-    ('tt_r1', 'travel_totem', -1380, 5330, 5, {}),
+    ('tt_r1', 'travel_totem', -1120, 5330, 5, dict(search=30)),
     # R2
     ('windmill_broken', 'windmill', 2900, 5150, 10, {}),
     ('windmills', 'windmill_group', 1700, 5750, 40, {}),
@@ -512,10 +544,11 @@ POIS = [
     ('totems_path', 'totem_row', -1250, 3200, 10, {}),
     ('tt_r6', 'travel_totem', -2450, 3300, 5, {}),
     # R7
-    ('high_plaza', 'plaza', 2700, 1300, 22, {}),
-    ('royal_forge', 'forge', 2350, 1000, 12, {}),
-    ('high_school', 'house', 2980, 1580, 12, {}),
-    ('high_tower', 'tower', 3200, 900, 9, {}),
+    # the town sits on the south rim of the tilted plateau, facing the broad valley and the Annecy viewpoint
+    ('high_plaza', 'plaza', 2620, 2140, 26, {}),
+    ('royal_forge', 'forge', 2400, 2050, 12, {}),
+    ('high_school', 'house', 2790, 2240, 12, {}),
+    ('high_tower', 'tower', 2850, 2030, 9, {}),
     ('tt_r7', 'travel_totem', 2000, 1900, 5, {}),
     # R8
     ('hunter_cabin', 'cabin', 6300, 1200, 9, {}),
@@ -532,7 +565,7 @@ POIS = [
     ('tt_r9', 'travel_totem', -3420, -2200, 5, dict(search=200)),
     # R10
     ('hermit_tower_canyon', 'tower', -2400, -2150, 9, dict(search=160)),
-    ('rope_bridge', 'rope_bridge', -2100, -3425, 0, dict(span='c2', at=(-2100, -3425))),
+    ('rope_bridge', 'rope_bridge', -2100, -3425, 0, dict(span='c2', at=(-2100, -3425), slot=14.0)),
     ('tt_r10', 'travel_totem', -1050, -1150, 5, dict(search=160)),
     # R11
     ('lunar_garden', 'garden', 2400, -2600, 24, {}),
@@ -584,8 +617,9 @@ GENERIC = [
     ['standing_stones', 'viewpoint', 'shrine', 'camp', 'ruin', 'flowerfield'],
     ['ruin', 'ruin', 'shrine', 'standing_stones', 'well', 'ruin'],
 ]
-# the Annecy view: a fixed viewpoint on the hillside path of R2 looking north over the broad valley to R7
-ANNECY = dict(x=2330, z=4620, look=(2650, 1500))
+# the Annecy view: a fixed viewpoint on the hillside road of R2 (the spur's shoulder) looking NNE over the broad valley
+# to the high town of R7
+ANNECY = dict(x=2258, z=3114, look=(2620, 2140), search=0)   # on the open slope below the spur's tip: valley in view
 
 # ------------------------------------------------------------------ roads (A* routed between consecutive stops)
 # stops are POI ids or (x, z) tuples; w = width in metres
@@ -606,7 +640,7 @@ ROUTES = [
     dict(w=3.0, stops=['tt_r5', (-6450, 1900), (-6300, 3150), (-4300, 3500), (-4100, 4900), 'tt_r3']),
     dict(w=3.2, stops=['totem_choro', (200, 1700), (1300, 2900), 'tt_r7', 'high_plaza', 'royal_forge']),
     dict(w=3.0, stops=['high_plaza', 'high_school']), dict(w=3.0, stops=['high_plaza', 'high_tower']),
-    dict(w=3.2, stops=['tt_r2', 'p_annecy', (1800, 3400), 'tt_r7']),
+    dict(w=3.2, stops=['tt_r2', (2180, 3330), (1800, 3400), 'tt_r7']),
     dict(w=3.0, stops=['high_plaza', (2700, 700), (2800, -1500), 'tt_r11', 'lunar_garden', 'lunar_glade']),
     dict(w=3.0, stops=['lunar_garden', 'lunar_grove']), dict(w=3.0, stops=['tt_r11', 'deer_meadow']),
     dict(w=3.0, stops=['deer_meadow', (3600, -2000), (5000, -2400), 'tt_r12', 'hot_spring']),

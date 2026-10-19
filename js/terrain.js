@@ -31,6 +31,7 @@
   // updated in place on parse so early references stay valid
   L.SPAWN = [-1097, 5092]; L.SPAWN5 = { x: -1097, z: 5092, y: 227, ry: 2.6 };
   const POIMAP = new Map();
+  const NOREY = { bridge: 1, rope_bridge: 1, chest_underwater: 1 };
   L.poi = id => POIMAP.get(id) || null;
 
   // ---------------------------------------------------------------- data loading
@@ -72,6 +73,10 @@
     buildFeatures(meta);
     buildGate();
     buildMinMax();
+    // POI heights from the final ground (after rivers, roads, pads): what the game stands on. Decks and the
+    // underwater chest keep their own height.
+    for (const p of L.POIS) if (!NOREY[p.kind]) p.y = Math.round(rawH(p.x, p.z) * 100) / 100;
+    { const s5 = POIMAP.get('spawn'); if (s5) L.SPAWN5.y = s5.y; }
     W.ready = true; L.worldReady = true;
     W.parseMs = now() - t0;
     shims();
@@ -83,9 +88,10 @@
   // segments are stored pre-digested for a fast point-segment distance: stride 10 =
   // [ax, az, dx, dz, 1/len², ya, yb-ya, wa, wb-wa, len]   (roads: y = road surface, w = width; rivers: y = water surface)
   // pads: [x, z, r, y, (r+fade)², fade]
+  // slots: narrow clefts cut through the ground (rope-bridge gap): [x, z, ux, uz, half length, half width, bottom y, 0]
   const IC = 64, IN = Math.ceil(2 * WS / IC);     // index cell size and count per side
   const SS = 10;
-  let RS = null, RVS = null, PD = null, nRS = 0, nRV = 0, nPD = 0;
+  let RS = null, RVS = null, PD = null, SLT = null, nRS = 0, nRV = 0, nPD = 0, nSL = 0;
   let IDX0 = null, IDX = null;                     // CSR: IDX0[cell]..IDX0[cell+1] items; item = type<<24 | index
   function pushSeg(arr, ax, az, bx, bz, ya, yb, wa, wb) {
     const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
@@ -108,8 +114,10 @@
       }
     }
     for (const p of meta.pois) if (p.flat > 0) { const fade = Math.max(8, p.flat * .6); pd.push(p.x, p.z, p.flat, p.y, (p.flat + fade) * (p.flat + fade), fade); }
-    RS = new Float64Array(rs); RVS = new Float64Array(rv); PD = new Float64Array(pd); W.rvInfo = new Float32Array(rvInfo);
-    nRS = rs.length / SS; nRV = rv.length / SS; nPD = pd.length / 6;
+    for (const q of meta.pads || []) { const fade = Math.max(3, q[2] * .8); pd.push(q[0], q[1], q[2], q[3], (q[2] + fade) * (q[2] + fade), fade); }
+    const sl = []; for (const q of meta.slots || []) sl.push(q.x, q.z, q.ux, q.uz, q.hl, q.hw, q.y, 0);
+    RS = new Float64Array(rs); RVS = new Float64Array(rv); PD = new Float64Array(pd); SLT = new Float64Array(sl); W.rvInfo = new Float32Array(rvInfo);
+    nRS = rs.length / SS; nRV = rv.length / SS; nPD = pd.length / 6; nSL = sl.length / 8;
     // bucket into cells
     const cnt = new Int32Array(IN * IN + 1); const lists = [];
     const add = (x0, z0, x1, z1, item) => {
@@ -121,21 +129,33 @@
     for (let k = 0; k < nRS; k++) addSeg(RS, k, RS[k * SS + 7] / 2 + 11, 1);
     for (let k = 0; k < nRV; k++) { const o = k * SS; addSeg(RVS, k, Math.max(RVS[o + 7], RVS[o + 7] + RVS[o + 8]) / 2 + 15, 2); }
     for (let k = 0; k < nPD; k++) { const o = k * 6, m = PD[o + 2] + PD[o + 5] + 1; add(PD[o] - m, PD[o + 1] - m, PD[o] + m, PD[o + 1] + m, (3 << 24) | k); }
+    for (let k = 0; k < nSL; k++) { const o = k * 8, m = Math.hypot(SLT[o + 4], SLT[o + 5]) + 2; add(SLT[o] - m, SLT[o + 1] - m, SLT[o] + m, SLT[o + 1] + m, (4 << 24) | k); }
     IDX0 = new Int32Array(IN * IN + 1); let acc = 0; for (let c = 0; c < IN * IN; c++) { IDX0[c] = acc; acc += cnt[c]; } IDX0[IN * IN] = acc;
     IDX = new Int32Array(acc); const fill = IDX0.slice(0, IN * IN);
     for (let k = 0; k < lists.length; k += 2) IDX[fill[lists[k]]++] = lists[k + 1];
-    W.nRoadSeg = nRS; W.nRiverSeg = nRV; W.nPads = nPD; W.idxItems = acc;
+    W.nRoadSeg = nRS; W.nRiverSeg = nRV; W.nPads = nPD; W.nSlots = nSL; W.idxItems = acc;
+    L.CROSSINGS = (meta.crossings || []).slice(); L.SLOTS = (meta.slots || []).slice();
   }
 
   // ---------------------------------------------------------------- macro height (bicubic, clamped at cliffs)
   // GATE: per-node weight of the small procedural detail (1 on gentle ground, 0 on slopes/cliffs), bilinear
-  let GATE = null, _gate = 0;
+  // NYM: the macro grid's normal.y (0..255); terrain paint uses it so cliffs read as rock at every LOD
+  let GATE = null, NYM = null, _gate = 0;
   function buildGate() {
-    GATE = new Float32Array(N * N);
+    GATE = new Float32Array(N * N); NYM = new Uint8Array(N * N).fill(255);
     for (let j = 1; j < N - 1; j++) for (let i = 1; i < N - 1; i++) {
       const o = j * N + i, gx = HM[o + 1] - HM[o - 1], gz = HM[o + N] - HM[o - N];
       const s = Math.sqrt(gx * gx + gz * gz) / (2 * CELL); GATE[o] = 1 - sstep(.12, .45, s);
+      // steepest of the centred and the two one-sided differences, so a one-cell wall is not halved
+      const sx = Math.max(Math.abs(HM[o + 1] - HM[o]), Math.abs(HM[o] - HM[o - 1])), sz = Math.max(Math.abs(HM[o + N] - HM[o]), Math.abs(HM[o] - HM[o - N]));
+      const s2 = Math.max(s, Math.sqrt(sx * sx + sz * sz) / CELL);
+      NYM[o] = Math.round(255 / Math.sqrt(1 + s2 * s2));
     }
+  }
+  function nyMacro(x, z) {
+    let u = (x + WS) / CELL, v = (z + WS) / CELL; u = clamp(u, 0, N - 1.001); v = clamp(v, 0, N - 1.001);
+    const i = u | 0, j = v | 0, fu = u - i, fv = v - j, o = j * N + i;
+    return ((NYM[o] * (1 - fu) + NYM[o + 1] * fu) * (1 - fv) + (NYM[o + N] * (1 - fu) + NYM[o + N + 1] * fu) * fv) / 255;
   }
   function macro(x, z) {
     let u = (x + WS) / CELL, v = (z + WS) / CELL;
@@ -181,7 +201,7 @@
     if (x > -WS && x < WS && z > -WS && z < WS) {
       const c = ((((z + WS) / IC) | 0) * IN + (((x + WS) / IC) | 0));
       const e = IDX0[c + 1];
-      let by = 0, rd2 = 1e18, rk = -1, rt = 0, np = 0;
+      let by = 0, rd2 = 1e18, rk = -1, rt = 0, np = 0, slo = -1;
       for (let k = IDX0[c]; k < e; k++) {
         const it = IDX[k], ty = it >>> 24, q = it & 0xffffff;
         if (ty === 1) {        // road: nearest wins
@@ -194,10 +214,9 @@
           let t = (ex * dx + ez * dz) * RVS[o + 4]; t = t < 0 ? 0 : t > 1 ? 1 : t;
           const px = ex - dx * t, pz = ez - dz * t, d2 = px * px + pz * pz;
           if (d2 < rd2) { rd2 = d2; rk = o; rt = t; }
-        } else if (np < 4) {   // pad
-          const o = q * 6, dx = x - PD[o], dz = z - PD[o + 1];
-          if (dx * dx + dz * dz < PD[o + 4]) PH[np++] = o;
-        }
+        } else if (ty === 3) {   // pad
+          if (np < 4) { const o = q * 6, dx = x - PD[o], dz = z - PD[o + 1]; if (dx * dx + dz * dz < PD[o + 4]) PH[np++] = o; }
+        } else slo = q * 8;       // slot
       }
       if (bd2 < 1e17) {
         const hw = bw * .5, lim = hw + 10;
@@ -215,11 +234,19 @@
         rd = Math.sqrt(rd2); rs = RVS[rk + 5] + RVS[rk + 6] * rt; rw = RVS[rk + 7] + RVS[rk + 8] * rt;
         const hw = rw * .5;
         if (rd < hw) { const q = rd / hw; const bed = rs - (.45 + rw * .055) * (1 - q * q) - .25; if (h > bed) h = bed; }
-        else if (rd < hw + 14) {
-          const bank = rs - .25 + (rd - hw) * .55; if (h > bank) h = bank;            // banks slope up out of the water
-          if (rd < hw + 3.5 && h < rs + .12) h = rs + .12 - (hw + 3.5 - rd) * .1;      // low levee so the water never spills
-        }
+        else if (rd < hw + 14) { const bank = rs - .25 + (rd - hw) * .55; if (h > bank) h = bank; }   // banks slope up out of the water
+        // low levee so the water never spills: a smooth rise over 6 m, none across roads (fords and bridges)
+        if (rd >= hw && rd < hw + 6 && h < rs + .12) h += (rs + .12 - h) * (1 - sstep(hw, hw + 6, rd)) * (1 - path);
+        // ford: where a road runs below the water surface its bed stays at the road level (0.35 m deep)
+        if (path > 0 && rd < hw + 2 && by < rs && h < by) h += (by - h) * path;
       }
+      if (slo >= 0) {          // slot: sheer-walled cleft, ~1 m wall transition (one cell of the finest mesh)
+        const dx = x - SLT[slo], dz = z - SLT[slo + 1], u = Math.abs(dx * SLT[slo + 2] + dz * SLT[slo + 3]), v = Math.abs(dz * SLT[slo + 2] - dx * SLT[slo + 3]);
+        const hl = SLT[slo + 4], hw = SLT[slo + 5];
+        if (u < hl && v < hw) { const w = (1 - sstep(hw - 1.1, hw, v)) * (1 - sstep(hl - 4, hl, u)); if (SLT[slo + 6] < h) h += (SLT[slo + 6] - h) * w; }
+      }
+    } else {                   // beyond the baked raster: open ocean
+      const ex = Math.max(Math.abs(x), Math.abs(z)) - WS; if (h > -4 - ex * .3) h = -4 - ex * .3;
     }
     if (info !== NOINFO && info) { info.path = path; info.rd = rd; info.rw = rw; info.rs = rs; info.pad = pad; info.gate = fl; info.pd = bd2 < 1e17 ? Math.sqrt(bd2) - bw * .5 : 1e9; }
     return h;
@@ -268,6 +295,8 @@
   }
   function cn(A, x, z) { const i = clamp(Math.round((x + WS) / CELL2), 0, N2 - 1), j = clamp(Math.round((z + WS) / CELL2), 0, N2 - 1); return A[j * N2 + i]; }
   L.region = (x, z) => HM ? cn(RG, x, z) : 0;
+  // inside the cloud sea: a cloud-covered spot whose ground lies below the deck (fall-in / fog checks)
+  L.cloudSeaAt = (x, z) => HM ? (c2(CL, x, z) > .35 && rawH(x, z) < L.CLOUD_Y) : false;
   L.cloudCover = (x, z) => HM ? c2(CL, x, z) : 1;
   L.forestAt = (x, z) => HM ? c2(FO, x, z) : 0;
   L.meadowAt = (x, z) => HM ? c2(ME, x, z) : 0;
@@ -310,7 +339,8 @@
     const n2 = vnoise(x * .021 + 4.4, z * .021 - 1.9);
     const forest0 = c2(FO, x, z), meadow = c2(ME, x, z), wet0 = c2(WE, x, z);
     // layers
-    const rock = clamp(sstep(.80, .58, ny) + sstep(860, 990, h) * sstep(.95, .75, ny) * .6, 0, 1);
+    // rock only on sheer faces (> ~65 deg), with a noisy edge; ramps and steep meadows stay grass
+    const rock = clamp(sstep(.48, .36, ny + (n2 - .5) * .1) + sstep(860, 990, h) * sstep(.95, .75, ny) * .6, 0, 1);
     const lk = lakeAt(x, z);
     let sand = sstep(4.2, 1.2, h + (n2 - .5) * 1.5) * (h > -6 ? 1 : 0) * sstep(.7, .9, ny);
     if (lk && !lk.hot) sand = Math.max(sand, sstep(1.4, .3, Math.abs(h - lk.level - .4)) * .55 * sstep(.75, .92, ny));
@@ -547,7 +577,7 @@
   const FALLBACK_LVL = 2;                                       // 4096 m nodes kept as cover while finer ones stream
   // split when distance < size * K * (relief factor); relief factor runs FLAT (flat ground) .. CLIFF (walls).
   // Per quality tier; setting L.LOD_K / L.LOD_FLAT / L.LOD_CLIFF explicitly overrides the tier.
-  L.LOD_TIERS = { alto: [.42, .7, 1.25], medio: [.3, .6, 1.1], baixo: [.26, .55, 1.0] };
+  L.LOD_TIERS = { alto: [.42, .7, 1.25], medio: [.26, .6, 1.1], baixo: [.22, .55, 1.0] };   // medio: ~330-400k terrain tris in view range (TECH: 450k on screen in all)
   L.LOD_K = null; L.LOD_FLAT = null; L.LOD_CLIFF = null;
   const _lod = [1, 1, 1];
   function lodParams() {
@@ -555,9 +585,10 @@
     _lod[0] = L.LOD_K != null ? L.LOD_K : t[0]; _lod[1] = L.LOD_FLAT != null ? L.LOD_FLAT : t[1]; _lod[2] = L.LOD_CLIFF != null ? L.LOD_CLIFF : t[2];
     return _lod;
   }
-  const FAR_LVL = 3;                                            // nodes of 2048 m and up use NSEG/2 (cheaper far field)
+  const FAR_LVL = 3;                                            // nodes of 2048 m and up: NSEG/2 unless they hold real relief
   L.LOD_FLATSEG = .1;                                           // below this relief/size a node (above the finest level) uses NSEG/2
-  const nsOf = (l, rel) => (l <= FAR_LVL || (l < MAXLVL && rel < L.LOD_FLATSEG)) ? NSEG >> 1 : NSEG;
+  L.FAR_RELIEF = 250;                                           // far nodes with more height range than this keep full NSEG (crisp cliffs far away)
+  const nsOf = (l, rel, range) => l <= FAR_LVL ? (range > L.FAR_RELIEF ? NSEG : NSEG >> 1) : (l < MAXLVL && rel < L.LOD_FLATSEG) ? NSEG >> 1 : NSEG;
   const nodes = new Map(); let TMAT = null, WMAT = null, FMAT = null;
   const group = new THREE.Group(); group.name = 'terrain'; L.terrainGroup = group;
   const waterGroup = new THREE.Group(); waterGroup.name = 'water';
@@ -566,97 +597,158 @@
   const _rng = [0, 0];
   L.terrainStats = { built: 0, buildMs: 0, last: 0, visible: 0, tris: 0, water: 0 };
 
-  function buildNode(l, i, j) {
-    const t0 = now();
-    const size = ROOT / (1 << l), x0 = R0 + i * size, z0 = R0 + j * size;
-    rangeOf(x0, z0, size, _rng);
-    const NS = nsOf(l, (_rng[1] - _rng[0] - 6) / size), cs = size / NS, Wd = NS + 1, E = NS + 3;
-    const fine = l > MACRO_LVL;
-    const Hx = new Float32Array(E * E);
-    // finest level: the inner grid comes from the cached physics tiles (so L.ground matches this mesh exactly)
-    const TT = l === MAXLVL ? size / TS : 0, ti0 = Math.round(x0 / TS), tj0 = Math.round(z0 / TS);
-    const tiles = TT ? [] : null;
-    if (TT) for (let tj = 0; tj < TT; tj++) for (let ti = 0; ti < TT; ti++) tiles.push(getTile(ti0 + ti, tj0 + tj));
-    for (let b = 0; b < E; b++) for (let a = 0; a < E; a++) {
-      const ga = a - 1, gb = b - 1, x = x0 + ga * cs, z = z0 + gb * cs;
-      if (TT && ga >= 0 && gb >= 0 && ga <= NS && gb <= NS) {
-        const ti = Math.min(TT - 1, (ga / TN) | 0), tj = Math.min(TT - 1, (gb / TN) | 0);
-        Hx[b * E + a] = tiles[tj * TT + ti][(gb - tj * TN) * TW + (ga - ti * TN)];
-      } else Hx[b * E + a] = fine ? rawH(x, z) : macro(x, z);
-    }
-    // vertices: grid + 4 skirt strips
-    const nv = Wd * Wd + 4 * Wd; const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3), aT = new Float32Array(nv * 4), aU = new Float32Array(nv * 2);
-    let minH = 1e9, maxH = -1e9;
-    for (let b = 0; b < Wd; b++) for (let a = 0; a < Wd; a++) {
-      const v = b * Wd + a, h = Hx[(b + 1) * E + a + 1], x = x0 + a * cs, z = z0 + b * cs;
-      pos[v * 3] = x; pos[v * 3 + 1] = h; pos[v * 3 + 2] = z; if (h < minH) minH = h; if (h > maxH) maxH = h;
-      const hl = Hx[(b + 1) * E + a], hr = Hx[(b + 1) * E + a + 2], hd = Hx[b * E + a + 1], hu = Hx[(b + 2) * E + a + 1];
-      let nx = (hl - hr) / (2 * cs), nz = (hd - hu) / (2 * cs); const nl = Math.sqrt(nx * nx + 1 + nz * nz); nx /= nl; nz /= nl; const ny = 1 / nl;
-      nor[v * 3] = nx; nor[v * 3 + 1] = ny; nor[v * 3 + 2] = nz;
-      if (fine) hgt(x, z, INF); else { INF.path = 0; INF.rd = 1e9; INF.rw = 0; INF.rs = -Infinity; }
-      // paint with the steeper of the mesh normal and a finer 2 m probe on fine levels (cliffs read as rock early)
-      const P = paint(x, z, h, ny, INF, PS);
-      col[v * 3] = P.c[0]; col[v * 3 + 1] = P.c[1]; col[v * 3 + 2] = P.c[2];
-      aT[v * 4] = P.rock; aT[v * 4 + 1] = P.path; aT[v * 4 + 2] = P.sand; aT[v * 4 + 3] = P.snow; aU[v * 2] = P.forest; aU[v * 2 + 1] = P.wet;
-    }
-    const idx = [];
-    for (let b = 0; b < NS; b++) for (let a = 0; a < NS; a++) { const p = b * Wd + a, q = p + 1, r = p + Wd, s = r + 1; idx.push(p, r, q, q, r, s); }
-    // skirts (depth follows the local relief so LOD cracks at cliffs stay covered)
+  // A node is built by a resumable job, one grid row at a time, so a frame never waits for a whole node:
+  //   stage 0: heights (+ the road/river info paint needs, computed once per vertex) for the (NS+3)^2 grid,
+  //   stage 1: vertices (packed attributes) row by row, stage 2: skirts, shared index, water, mesh.
+  // Vertex layout (27 B): position f32x3 (kept on the CPU for raycasts), normal i8x3, color u16x3, aT u8x4, aU u8x2
+  // (all normalized); every array but position is dropped from the CPU once uploaded.
+  const IDXC = new Map();
+  function sharedIndex(NS) {
+    let a = IDXC.get(NS); if (a) return a;
+    const Wd = NS + 1, idx = [];
+    for (let b = 0; b < NS; b++) for (let q = 0; q < NS; q++) { const p = b * Wd + q, r = p + Wd; idx.push(p, r, p + 1, p + 1, r, r + 1); }
     let sv = Wd * Wd;
     const edges = [[], [], [], []];
-    for (let a = 0; a < Wd; a++) { edges[0].push(a); edges[1].push(a * Wd + NS); edges[2].push(NS * Wd + (NS - a)); edges[3].push((NS - a) * Wd); }
-    for (const e of edges) {
-      const s0 = sv;
-      for (let k = 0; k < e.length; k++) {
-        const v = e[k]; const h = pos[v * 3 + 1];
-        let rel = 0; for (let q = -2; q <= 2; q++) { const w = e[clamp(k + q, 0, e.length - 1)]; rel = Math.max(rel, Math.abs(pos[w * 3 + 1] - h)); }
-        const drop = 3 + cs * 2 + rel * 1.2;
-        pos[sv * 3] = pos[v * 3]; pos[sv * 3 + 1] = h - drop; pos[sv * 3 + 2] = pos[v * 3 + 2];
-        for (let c = 0; c < 3; c++) { nor[sv * 3 + c] = nor[v * 3 + c]; col[sv * 3 + c] = col[v * 3 + c]; }
-        for (let c = 0; c < 4; c++) aT[sv * 4 + c] = aT[v * 4 + c]; aU[sv * 2] = aU[v * 2]; aU[sv * 2 + 1] = aU[v * 2 + 1]; sv++;
+    for (let q = 0; q < Wd; q++) { edges[0].push(q); edges[1].push(q * Wd + NS); edges[2].push(NS * Wd + (NS - q)); edges[3].push((NS - q) * Wd); }
+    for (const e of edges) { const s0 = sv; for (let k = 0; k < e.length - 1; k++) { const c = s0 + k; idx.push(e[k], e[k + 1], c, e[k + 1], c + 1, c); } sv += e.length; }
+    a = new THREE.BufferAttribute(new Uint16Array(idx), 1); a.ntri = idx.length / 3; IDXC.set(NS, a); return a;
+  }
+  const freeArr = function () { this.array = null; };
+  function newJob(w) {
+    const l = w.l, size = ROOT / (1 << l), x0 = R0 + w.i * size, z0 = R0 + w.j * size;
+    rangeOf(x0, z0, size, _rng);
+    const range = _rng[1] - _rng[0] - 6, NS = nsOf(l, range / size, range), Wd = NS + 1, E = NS + 3, nv = Wd * Wd + 4 * Wd;
+    return { w, k: w.k, l, i: w.i, j: w.j, size, x0, z0, NS, cs: size / NS, Wd, E, fine: l > MACRO_LVL, st: 0, row: 0, t: 0,
+      Hx: new Float32Array(E * E), ip: l > MACRO_LVL ? new Float32Array(Wd * Wd * 3) : null,
+      pos: new Float32Array(nv * 3), nor: new Int8Array(nv * 3), col: new Uint16Array(nv * 3), aT: new Uint8Array(nv * 4), aU: new Uint8Array(nv * 2), minH: 1e9, maxH: -1e9 };
+  }
+  // run the job until the deadline (checked after every row); returns the finished node or null
+  function stepJob(J, deadline) {
+    const t0 = now();
+    const { x0, z0, cs, NS, Wd, E, Hx, ip } = J;
+    if (J.st === 0) {
+      while (J.row < E) {
+        const b = J.row++, gb = b - 1, z = z0 + gb * cs, inZ = gb >= 0 && gb <= NS;
+        for (let a = 0; a < E; a++) {
+          const ga = a - 1, x = x0 + ga * cs;
+          if (!J.fine) Hx[b * E + a] = macro(x, z);
+          else if (inZ && ga >= 0 && ga <= NS) { Hx[b * E + a] = hgt(x, z, INF); const o = (gb * Wd + ga) * 3; ip[o] = INF.path; ip[o + 1] = INF.rd; ip[o + 2] = INF.rw; }
+          else Hx[b * E + a] = rawH(x, z);
+        }
+        if (now() > deadline) { J.t += now() - t0; return null; }
       }
-      for (let k = 0; k < e.length - 1; k++) { const a = e[k], b2 = e[k + 1], c = s0 + k, d = s0 + k + 1; idx.push(a, b2, c, b2, d, c); }
+      // finest level: the same grid is the physics grid; hand it to the tile cache (L.ground == this mesh)
+      if (J.l === MAXLVL) {
+        const TT = J.size / TS, ti0 = Math.round(x0 / TS), tj0 = Math.round(z0 / TS);
+        for (let tj = 0; tj < TT; tj++) for (let ti = 0; ti < TT; ti++) {
+          const key = tkey(ti0 + ti, tj0 + tj); if (tiles.has(key)) continue;
+          const t = new Float32Array(TW * TW);
+          for (let b = 0; b < TW; b++) for (let a = 0; a < TW; a++) t[b * TW + a] = Hx[(tj * TN + b + 1) * E + ti * TN + a + 1];
+          t.used = tileFrame; tiles.set(key, t); L.tilesBuilt++;
+        }
+      }
+      J.st = 1; J.row = 0;
+    }
+    if (J.st === 1) {
+      const { pos, nor, col, aT, aU } = J; const fineN = J.l >= MAXLVL - 1;
+      while (J.row < Wd) {
+        const b = J.row++, z = z0 + b * cs;
+        for (let a = 0; a < Wd; a++) {
+          const v = b * Wd + a, h = Hx[(b + 1) * E + a + 1], x = x0 + a * cs;
+          pos[v * 3] = x; pos[v * 3 + 1] = h; pos[v * 3 + 2] = z; if (h < J.minH) J.minH = h; if (h > J.maxH) J.maxH = h;
+          const hl = Hx[(b + 1) * E + a], hr = Hx[(b + 1) * E + a + 2], hd = Hx[b * E + a + 1], hu = Hx[(b + 2) * E + a + 1];
+          let nx = (hl - hr) / (2 * cs), nz = (hd - hu) / (2 * cs); const nl = Math.sqrt(nx * nx + 1 + nz * nz); nx /= nl; nz /= nl; const ny = 1 / nl;
+          nor[v * 3] = Math.round(nx * 127); nor[v * 3 + 1] = Math.round(ny * 127); nor[v * 3 + 2] = Math.round(nz * 127);
+          if (J.fine) { const o = v * 3; INF.path = ip[o]; INF.rd = ip[o + 1]; INF.rw = ip[o + 2]; } else { INF.path = 0; INF.rd = 1e9; INF.rw = 0; }
+          // slope for the paint: the mesh normal on the finest levels, else the macro grid's (same rock at every LOD)
+          const nyM = nyMacro(x, z), nyE = fineN ? Math.min(ny, nyM + .12) : Math.min(ny, nyM);
+          const P = paint(x, z, h, nyE, INF, PS);
+          col[v * 3] = clamp(P.c[0], 0, 1) * 65535; col[v * 3 + 1] = clamp(P.c[1], 0, 1) * 65535; col[v * 3 + 2] = clamp(P.c[2], 0, 1) * 65535;
+          aT[v * 4] = P.rock * 255; aT[v * 4 + 1] = P.path * 255; aT[v * 4 + 2] = P.sand * 255; aT[v * 4 + 3] = P.snow * 255; aU[v * 2] = P.forest * 255; aU[v * 2 + 1] = P.wet * 255;
+        }
+        if (now() > deadline) { J.t += now() - t0; return null; }
+      }
+      J.st = 2;
+      if (now() > deadline) { J.t += now() - t0; return null; }
+    }
+    if (J.st === 3) return stepWater(J, deadline, t0);
+    // stage 2: skirts (depth follows the local relief so LOD cracks at cliffs stay covered), geometry, water
+    const { pos, nor, col, aT, aU } = J;
+    let sv = Wd * Wd;
+    const edge = (e, k) => e === 0 ? k : e === 1 ? k * Wd + NS : e === 2 ? NS * Wd + (NS - k) : (NS - k) * Wd;
+    for (let e = 0; e < 4; e++) for (let k = 0; k < Wd; k++) {
+      const v = edge(e, k), h = pos[v * 3 + 1];
+      let rel = 0; for (let q = -2; q <= 2; q++) { const w = edge(e, clamp(k + q, 0, NS)); rel = Math.max(rel, Math.abs(pos[w * 3 + 1] - h)); }
+      const drop = 3 + cs * 2 + rel * 1.2;
+      pos[sv * 3] = pos[v * 3]; pos[sv * 3 + 1] = h - drop; pos[sv * 3 + 2] = pos[v * 3 + 2];
+      for (let c = 0; c < 3; c++) { nor[sv * 3 + c] = nor[v * 3 + c]; col[sv * 3 + c] = col[v * 3 + c]; }
+      for (let c = 0; c < 4; c++) aT[sv * 4 + c] = aT[v * 4 + c]; aU[sv * 2] = aU[v * 2]; aU[sv * 2 + 1] = aU[v * 2 + 1]; sv++;
     }
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    g.setAttribute('aT', new THREE.BufferAttribute(aT, 4)); g.setAttribute('aU', new THREE.BufferAttribute(aU, 2));
-    g.setIndex(new THREE.BufferAttribute(nv > 65535 ? new Uint32Array(idx) : new Uint16Array(idx), 1));
-    g.boundingBox = new THREE.Box3(new THREE.Vector3(x0, minH - 40, z0), new THREE.Vector3(x0 + size, maxH, z0 + size)); g.boundingSphere = g.boundingBox.getBoundingSphere(new THREE.Sphere());
-    const m = new THREE.Mesh(g, TMAT); m.receiveShadow = true; m.castShadow = l >= MAXLVL; m.matrixAutoUpdate = false; m.userData.lvl = l; m.name = 'tn' + l;
-    const node = { mesh: m, water: null, l, i, j, x0, z0, size, minH, maxH, k: nkey(l, i, j), tris: idx.length / 3 };
-    node.water = buildWater(node, Hx, E, cs, NS);
-    const dt = now() - t0; const S = L.terrainStats; S.built++; S.buildMs += dt; S.last = dt;
-    return node;
+    const att = (arr, n, norm) => { const A = new THREE.BufferAttribute(arr, n, norm); return A; };
+    g.setAttribute('position', att(pos, 3, false));
+    for (const [name, arr, n] of [['normal', nor, 3], ['color', col, 3], ['aT', aT, 4], ['aU', aU, 2]]) { const A = att(arr, n, true); A.onUploadCallback = freeArr; g.setAttribute(name, A); }
+    const IX = sharedIndex(NS); g.setIndex(IX);
+    const { x0: X0, z0: Z0, size, minH, maxH } = J;
+    g.boundingBox = new THREE.Box3(new THREE.Vector3(X0, minH - 40, Z0), new THREE.Vector3(X0 + size, maxH, Z0 + size)); g.boundingSphere = g.boundingBox.getBoundingSphere(new THREE.Sphere());
+    const m = new THREE.Mesh(g, TMAT); m.receiveShadow = true; m.castShadow = J.l >= MAXLVL; m.matrixAutoUpdate = false; m.userData.lvl = J.l; m.name = 'tn' + J.l;
+    const node = { mesh: m, water: null, l: J.l, i: J.i, j: J.j, x0: X0, z0: Z0, size, minH, maxH, k: J.k, tris: IX.ntri, used: frameNo,
+      bytes: pos.length / 3 * (12 + 3 + 6 + 4 + 2) + pos.length * 4 };
+    J.node = node; J.st = 3; waterInit(J);
+    if (now() > deadline) { J.t += now() - t0; return null; }
+    return stepWater(J, deadline, t0);
   }
+  function finishJob(J, t0) {
+    const node = J.node, dt = J.t + now() - t0; const S = L.terrainStats; S.built++; S.buildMs += dt; S.last = dt;
+    J.Hx = J.ip = null; return node;
+  }
+  function disposeNode(n) {
+    const g = n.mesh.geometry; g.setIndex(null); g.dispose();   // the index is shared between nodes
+    if (n.water) n.water.geometry.dispose();
+    nodeBytes -= n.bytes;
+  }
+  let frameNo = 0, nodeBytes = 0;
 
-  // per-node water: ocean (y = 0) and lakes (their own level), one geometry with aDepth
-  function buildWater(node, Hx, E, cs, NS) {
-    const { x0, z0, size, minH } = node;
+  // per-node water: ocean (y = 0) and lakes (their own level), one geometry with aDepth; built in row slices (stage 3)
+  function waterInit(J) {
+    const node = J.node, { x0, z0, size, minH } = node;
     const bodies = [];
-    if (minH < .4) bodies.push({ y: 0, lake: null });
-    for (const lk of LAKES) { const b = lk.bbox; if (b[2] < x0 - 30 || b[0] > x0 + size + 30 || b[3] < z0 - 30 || b[1] > z0 + size + 30) continue; if (minH > lk.level) continue; bodies.push({ y: lk.level, lake: lk }); }
-    if (!bodies.length) return null;
-    const WN = node.l >= MAXLVL - 1 ? NS : NS / 2, step = NS / WN, ww = WN + 1, wcs = size / WN;
-    const pos = [], dep = [], idx = [];
-    for (const B of bodies) {
-      const base = pos.length / 3; const lid = B.lake ? LAKES.indexOf(B.lake) + 1 : 0;
-      for (let b = 0; b < ww; b++) for (let a = 0; a < ww; a++) {
-        const x = x0 + a * wcs, z = z0 + b * wcs; const h = Hx[(b * step + 1) * E + a * step + 1];
-        pos.push(x, B.y, z); dep.push(B.y - h);
+    if (minH < .4) bodies.push({ y: 0, lid: 0 });
+    for (const lk of LAKES) { const b = lk.bbox; if (b[2] < x0 - 30 || b[0] > x0 + size + 30 || b[3] < z0 - 30 || b[1] > z0 + size + 30) continue; if (minH > lk.level) continue; bodies.push({ y: lk.level, lid: LAKES.indexOf(lk) + 1 }); }
+    const WN = node.l >= MAXLVL - 1 ? J.NS : J.NS / 2;
+    J.W = bodies.length ? { bodies, bi: 0, row: -1, base: 0, WN, step: J.NS / WN, ww: WN + 1, wcs: size / WN, pos: [], dep: [], idx: [] } : null;
+  }
+  function stepWater(J, deadline, t0) {
+    const Wt = J.W, node = J.node, { x0, z0, size } = node, { Hx, E } = J;
+    while (Wt && Wt.bi < Wt.bodies.length) {
+      const B = Wt.bodies[Wt.bi], { WN, step, ww, wcs, pos, dep, idx } = Wt, lid = B.lid;
+      if (Wt.row < 0) {   // vertices of this body
+        Wt.base = pos.length / 3;
+        for (let b = 0; b < ww; b++) for (let a = 0; a < ww; a++) { pos.push(x0 + a * wcs, B.y, z0 + b * wcs); dep.push(B.y - Hx[(b * step + 1) * E + a * step + 1]); }
+        Wt.row = 0;
       }
-      for (let b = 0; b < WN; b++) for (let a = 0; a < WN; a++) {
-        const p = base + b * ww + a, q = p + 1, r = p + ww, s = r + 1;
-        if (dep[p - 0] < -1.5 && dep[q] < -1.5 && dep[r] < -1.5 && dep[s] < -1.5) continue;
-        if (lid) { const cx = x0 + (a + .5) * wcs, cz = z0 + (b + .5) * wcs; const id = cn(LK, cx, cz); if (id !== lid) { const ok = cn(LK, cx - wcs * .5, cz) === lid || cn(LK, cx + wcs * .5, cz) === lid || cn(LK, cx, cz - wcs * .5) === lid || cn(LK, cx, cz + wcs * .5) === lid; if (!ok) continue; } }
-        idx.push(p, r, q, q, r, s);
+      while (Wt.row < WN) {
+        const b = Wt.row++, base = Wt.base;
+        for (let a = 0; a < WN; a++) {
+          const p = base + b * ww + a, q = p + 1, r = p + ww, s = r + 1;
+          if (dep[p] < -1.5 && dep[q] < -1.5 && dep[r] < -1.5 && dep[s] < -1.5) continue;
+          if (lid) { const cx = x0 + (a + .5) * wcs, cz = z0 + (b + .5) * wcs; const id = cn(LK, cx, cz); if (id !== lid) { const ok = cn(LK, cx - wcs * .5, cz) === lid || cn(LK, cx + wcs * .5, cz) === lid || cn(LK, cx, cz - wcs * .5) === lid || cn(LK, cx, cz + wcs * .5) === lid; if (!ok) continue; } }
+          idx.push(p, r, q, q, r, s);
+        }
+        if (now() > deadline) { J.t += now() - t0; return null; }
       }
+      Wt.bi++; Wt.row = -1;
     }
-    if (!idx.length) return null;
-    const wg = new THREE.BufferGeometry(); wg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); wg.setAttribute('aDepth', new THREE.Float32BufferAttribute(dep, 1)); wg.setIndex(idx);
-    let y0 = 1e9, y1 = -1e9; for (const B of bodies) { y0 = Math.min(y0, B.y); y1 = Math.max(y1, B.y); }
-    wg.boundingBox = new THREE.Box3(new THREE.Vector3(x0, y0 - 1, z0), new THREE.Vector3(x0 + size, y1 + 1, z0 + size)); wg.boundingSphere = wg.boundingBox.getBoundingSphere(new THREE.Sphere());
-    const wm = new THREE.Mesh(wg, WMAT); wm.renderOrder = 2; wm.matrixAutoUpdate = false; wm.name = 'water';
-    return wm;
+    if (Wt && Wt.idx.length) {
+      const { pos, dep, idx, bodies } = Wt;
+      const wg = new THREE.BufferGeometry(); wg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); wg.setAttribute('aDepth', new THREE.Float32BufferAttribute(dep, 1)); wg.setIndex(idx);
+      let y0 = 1e9, y1 = -1e9; for (const B of bodies) { y0 = Math.min(y0, B.y); y1 = Math.max(y1, B.y); }
+      wg.boundingBox = new THREE.Box3(new THREE.Vector3(x0, y0 - 1, z0), new THREE.Vector3(x0 + size, y1 + 1, z0 + size)); wg.boundingSphere = wg.boundingBox.getBoundingSphere(new THREE.Sphere());
+      const wm = new THREE.Mesh(wg, WMAT); wm.renderOrder = 2; wm.matrixAutoUpdate = false; wm.name = 'water';
+      node.water = wm; node.bytes += pos.length / 3 * 16 + idx.length * 4;
+    }
+    J.W = null;
+    return finishJob(J, t0);
   }
 
   // river ribbons (global, chunked ~600 m) at their own surface heights
@@ -790,23 +882,35 @@
     L2.sort((a, b) => { const fa = a.l <= FALLBACK_LVL ? -1e9 : 0, fb = b.l <= FALLBACK_LVL ? -1e9 : 0; return (fa + a.d / (ROOT >> a.l)) - (fb + b.d / (ROOT >> b.l)); });
     return L2;
   }
-  let pending = [];
-  let est = 3;   // running estimate of one node build (ms)
+  let pending = [], job = null, lastKey = '';
+  const lodKey = () => [L.LOD_K, L.LOD_FLAT, L.LOD_CLIFF, L.quality, L.TERRAIN_FAR, L.LOD_FLATSEG, L.FAR_RELIEF].join('|');
+  // force a fresh LOD selection (and with rebuild = true, drop every built node: paint/quality changes)
+  L.terrainInvalidate = function (rebuild) {
+    lastCam = [1e9, 1e9, 1e9];
+    if (rebuild) { for (const [k, n] of nodes) { if (visible.has(k)) { group.remove(n.mesh); if (n.water) waterGroup.remove(n.water); } disposeNode(n); } nodes.clear(); visible = new Set(); job = null; }
+  };
+  // budgetMs is a hard limit: work stops at the first row that ends past it (rows take ~0.05-0.2 ms)
   L.terrainUpdate = function (cam, budgetMs) {
     if (!TMAT) return false;
-    const cx = cam.x, cy = cam.y, cz = cam.z;
-    if (Math.hypot(cx - lastCam[0], cz - lastCam[2]) > 8 || Math.abs(cy - lastCam[1]) > 10 || !want.length) {
-      want = computeWant(cx, cy, cz); wantSet = new Set(want.map(w => w.k)); lastCam = [cx, cy, cz]; pending = buildList();
+    frameNo++; const t00 = now();
+    const cx = cam.x, cy = cam.y, cz = cam.z, key = lodKey();
+    if (key !== lastKey || Math.hypot(cx - lastCam[0], cz - lastCam[2]) > 8 || Math.abs(cy - lastCam[1]) > 10 || !want.length) {
+      want = computeWant(cx, cy, cz); wantSet = new Set(want.map(w => w.k)); lastCam = [cx, cy, cz]; lastKey = key; pending = buildList();
+      if (job && !wantSet.has(job.k)) job = null;
     }
-    const t0 = now(); let done = 0;
-    while (pending.length) {
-      const el = now() - t0; if (done > 0 && el + est > budgetMs) break;
-      const w = pending.shift(); if (nodes.has(w.k)) continue;
-      const tb = now(); nodes.set(w.k, buildNode(w.l, w.i, w.j)); est = est * .8 + (now() - tb) * .2; done++;
+    const tA = now(), deadline = tA + (budgetMs == null ? 4 : budgetMs);
+    while (now() < deadline) {
+      if (!job) {
+        let w = null; while (pending.length && !w) { const c = pending.shift(); if (!nodes.has(c.k)) w = c; }
+        if (!w) break;
+        job = newJob(w);
+      }
+      const n = stepJob(job, deadline);
+      if (n) { nodes.set(n.k, n); nodeBytes += n.bytes; job = null; }
     }
-    select();
-    evict(cx, cz);
-    return pending.length === 0;
+    const tB = now(); select(); const tC = now(); evict(cx, cz);
+    const P = L.terrainStats.ph || (L.terrainStats.ph = [0, 0, 0, 0]); P[0] = tA - t00; P[1] = tB - tA; P[2] = tC - tB; P[3] = now() - tC;   // last frame: want, build, select, evict (ms)
+    return pending.length === 0 && !job;
   };
   // visible set: wanted leaves that exist; where a subtree is incomplete, its nearest built ancestor covers it
   const byKey = new Map();
@@ -826,17 +930,31 @@
     for (const w of want) if (w.l === 1) draw(w);
     let tris = 0, wat = 0;
     for (const k of visible) if (!show.has(k)) { const n = nodes.get(k); if (n) { group.remove(n.mesh); if (n.water) waterGroup.remove(n.water); } }
-    for (const k of show) { const n = nodes.get(k); if (!visible.has(k)) { group.add(n.mesh); if (n.water) waterGroup.add(n.water); } tris += n.tris; if (n.water) wat++; n.used = tileFrame; }
-    visible = show; const S = L.terrainStats; S.visible = show.size; S.tris = tris; S.water = wat; S.nodes = nodes.size; S.pending = pending.length;
+    for (const k of show) { const n = nodes.get(k); if (!visible.has(k)) { group.add(n.mesh); if (n.water) waterGroup.add(n.water); } tris += n.tris; if (n.water) wat++; n.used = frameNo; }
+    visible = show; const S = L.terrainStats; S.visible = show.size; S.tris = tris; S.water = wat; S.nodes = nodes.size; S.pending = pending.length + (job ? 1 : 0); S.bytes = nodeBytes;
     // rivers: distance cull
     for (const m of riverMeshes) { const s = m.geometry.boundingSphere; m.visible = Math.hypot(s.center.x - lastCam[0], s.center.z - lastCam[2]) < L.TERRAIN_FAR * .6 + s.radius; }
   }
-  L.NODE_CAP = 700;
+  // memory cap per quality tier (node count and bytes, GPU + CPU): evict the farthest nodes first, then the least
+  // recently shown; nodes on screen or wanted by the current LOD selection are never evicted
+  L.NODE_CAPS = { alto: 320, medio: 200, baixo: 120 };
+  L.NODE_BYTES = { alto: 72e6, medio: 48e6, baixo: 28e6 };
+  L.NODE_CAP = null;   // explicit override of the tier's node count
   function evict(cx, cz) {
-    if (nodes.size <= L.NODE_CAP) return;
-    const list = []; for (const [k, n] of nodes) { if (visible.has(k) || wantSet.has(k)) continue; list.push([Math.hypot(n.x0 + n.size / 2 - cx, n.z0 + n.size / 2 - cz) / n.size, k, n]); }
-    list.sort((a, b) => b[0] - a[0]);
-    for (let q = 0; q < list.length && nodes.size > L.NODE_CAP * .85; q++) { const n = list[q][2]; n.mesh.geometry.dispose(); if (n.water) n.water.geometry.dispose(); nodes.delete(list[q][1]); }
+    const tier = L.quality in L.NODE_CAPS ? L.quality : 'medio';
+    const cap = L.NODE_CAP || L.NODE_CAPS[tier], bcap = L.NODE_BYTES[tier];
+    if (nodes.size <= cap && nodeBytes <= bcap) return;
+    const list = [];
+    for (const [k, n] of nodes) {
+      if (visible.has(k) || wantSet.has(k)) continue;
+      const dx = Math.max(n.x0 - cx, 0, cx - (n.x0 + n.size)), dz = Math.max(n.z0 - cz, 0, cz - (n.z0 + n.size));
+      list.push({ k, n, d: Math.floor(Math.hypot(dx, dz) / 256), u: n.used });
+    }
+    list.sort((a, b) => (b.d - a.d) || (a.u - b.u));
+    for (const e of list) {
+      if (nodes.size <= cap * .9 && nodeBytes <= bcap * .9) break;
+      disposeNode(e.n); nodes.delete(e.k);
+    }
   }
   L.terrainMeshes = () => { const out = []; for (const k of visible) { const n = nodes.get(k); if (n) out.push(n.mesh); } return out; };
   L.terrainNodes = nodes;

@@ -16,9 +16,11 @@
 
   // ------------------------------------------------------------ quality: only distances and caps change (never which items exist)
   const QT = {
-    alto: { near: 230, hi: 75, imp: 1900, cap: 1.25, under: 1.15 },
-    medio: { near: 185, hi: 58, imp: 1450, cap: 1, under: 1 },
-    baixo: { near: 135, hi: 40, imp: 950, cap: .7, under: .75 }
+    // hi: switch to the _lo model (hidden by a short dither band); imp: impostors out to here, full density out to
+    // impFull, every 4th tree (bigger cards) beyond
+    alto: { near: 230, hi: 90, imp: 3600, impFull: 1900, cap: 1.25, under: 1.15 },
+    medio: { near: 185, hi: 72, imp: 3000, impFull: 1450, cap: 1, under: 1 },
+    baixo: { near: 135, hi: 50, imp: 2000, impFull: 950, cap: .7, under: .75 }
   };
   let Q = QT.medio;
 
@@ -115,9 +117,9 @@
   const _tw = {};
   const TG = 8, TCELL = TS / TG;   // tree cells
   // tree candidates of tile (i,j): cb(species, variant, x, y, z, s, ry, colour, id). Shared by near items and impostors.
-  function treeScan(i, j, cb) {
-    const oob = OOB();
-    for (let b = 0; b < TG; b++) for (let a = 0; a < TG; a++) {
+  function treeScan(i, j, cb, stride) {
+    const oob = OOB(); stride = stride || 1;
+    for (let b = 0; b < TG; b += stride) for (let a = 0; a < TG; a += stride) {
       const u = i * TG + a, v = j * TG + b; const r0 = hash3(u, v, 1);
       if (r0 > .9) continue;
       const x = (u + .15 + hash3(u, v, 2) * .7) * TCELL, z = (v + .15 + hash3(u, v, 3) * .7) * TCELL;
@@ -148,6 +150,21 @@
     }
   }
   L.treeScan = treeScan;
+  // could cell (u, v) hold a tree? (the cheap part of treeScan: hash, forest density, region) -> its position or null
+  const _tc = [0, 0];
+  function treeCand(u, v) {
+    const r0 = hash3(u, v, 1); if (r0 > .9) return null;
+    const x = (u + .15 + hash3(u, v, 2) * .7) * TCELL, z = (v + .15 + hash3(u, v, 3) * .7) * TCELL;
+    const f = L.forestAt(x, z); const S = SPEC[L.region(x, z)] || SPEC[0];
+    if (r0 >= sstep(.12, .62, f) * .82 * S.dens + S.lone * (1 - sstep(.08, .35, f))) return null;
+    _tc[0] = x; _tc[1] = z; return _tc;
+  }
+  // rocks keep clear of trunks: rock radius + trunk radius + 0.5 m against every tree candidate around (same 8 m grid)
+  function nearTree(x, z, rr) {
+    const u0 = Math.floor(x / TCELL), v0 = Math.floor(z / TCELL), lim = rr + .55 + .5;
+    for (let dv = -1; dv <= 1; dv++) for (let du = -1; du <= 1; du++) { const c = treeCand(u0 + du, v0 + dv); if (c && Math.hypot(c[0] - x, c[1] - z) < lim) return true; }
+    return false;
+  }
 
   const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _e = new THREE.Euler(), _y = new THREE.Vector3(0, 1, 0);
   const WHITE = [1, 1, 1];
@@ -159,10 +176,14 @@
     if (extra) Object.assign(it, extra);
     return it;
   }
-  function genTile(i, j) {
-    const items = []; const x0 = i * TS, z0 = j * TS, oob = OOB();
+  // a tile is generated in 4 steps (trees, undergrowth, rocks, finish) so the streaming can stop between them
+  function tileJob(i, j) { return { i, j, items: [], layer: 0 }; }
+  function tileStep(J) {
+    const i = J.i, j = J.j, items = J.items, x0 = i * TS, z0 = j * TS, oob = OOB();
     const push = it => { if (it) items.push(it); };
-    treeScan(i, j, (sp, vr, x, y, z, s, ry, col, id) => push(makeItem(sp, vr, x, y, z, s, ry, col, id)));
+    const layer = J.layer++;
+    if (layer === 0) { treeScan(i, j, (sp, vr, x, y, z, s, ry, col, id) => push(makeItem(sp, vr, x, y, z, s, ry, col, id))); return null; }
+    if (layer === 1) {
     // ---- undergrowth, wild crops, water plants (5.33 m cells)
     const G = 12, st = TS / G;
     for (let b = 0; b < G; b++) for (let a = 0; a < G; a++) {
@@ -197,6 +218,9 @@
       }
       if (kind) push(makeItem(kind, vr, x, y, z, s, hash3(u, v, 17) * TAU, col, 't_' + u + '_' + v + '_1'));
     }
+    return null;
+    }
+    if (layer === 2) {
     // ---- rocks, standing stones, ore, crystals, clay (8 m cells)
     const G2 = 8, st2 = TS / G2;
     for (let b = 0; b < G2; b++) for (let a = 0; a < G2; a++) {
@@ -217,7 +241,10 @@
       else if ((q -= pCl) < 0) { kind = 'clay'; s = .9 + hash3(u, v, 25) * .5; }
       else if ((q -= pSt) < 0) { kind = 'standing_stone'; vr = Math.floor(hash3(u, v, 24) * 4); s = .8 + hash3(u, v, 25) * .5; }
       else if ((q -= pBo) < 0) { kind = 'boulder'; vr = Math.floor(hash3(u, v, 24) * 4); s = .5 + hash3(u, v, 25) * (1.1 + cliff * 1.4); col = S === SPEC[11] ? _cc.set(0xd89a74) : null; extra = { sy: .85 }; }
+      if (kind && nearTree(x, z, (RKR[kind] || 1) * s)) kind = null;
       if (kind) push(makeItem(kind, vr, x, h - s * .15, z, s, hash3(u, v, 26) * TAU, col, 't_' + u + '_' + v + '_2', extra));
+    }
+    return null;
     }
     const cx = x0 + TS / 2, cz = z0 + TS / 2; let ymn = 1e9, ymx = -1e9;
     for (const it of items) { if (it.y < ymn) ymn = it.y; if (it.y > ymx) ymx = it.y; }
@@ -227,6 +254,8 @@
     for (const it of items) { if (it.kindRes && L.applyCut) L.applyCut(it); it._g = it.gone; }
     return t;
   }
+  const RKR = { boulder: .95, standing_stone: .7, ore: .95, crystal: .5, clay: .9 };
+  function genTile(i, j) { const J = tileJob(i, j); let t = null; while (!t) t = tileStep(J); return t; }
   function getTile(i, j) { const k = tkey(i, j); let t = tiles.get(k); if (!t) { t = genTile(i, j); tiles.set(k, t); } return t; }
   L.stile = (x, z) => tiles.get(tkey(Math.floor(x / TS), Math.floor(z / TS)));
   L.scatterTile = getTile;
@@ -280,8 +309,9 @@
   function nature5Tree(name) {   // AW-nature tree: trunk <name> + child <name>_leaves (+ <name>_glow), LOD <name>_lo
     const o = nodeOf('trees5', name); if (!o) return null;
     const hi = flat(o, treeKey, n => n.startsWith(name + '_lo')); const ol = nodeOf('trees5', name + '_lo'); const lo = ol ? flat(ol, treeKey) : null;
+    // the asset's own <name>_leaves mesh is the canopy, at both levels: no generated cards on top of it (they doubled
+    // the canopy and made the hi/lo switch pop); cards only for a model without a leaves part
     const v = { parts: Object.assign({}, hi), lo: lo ? Object.assign({}, lo) : null };
-    if (hi.leaves && L.canopyCards) v.parts.canopy = L.canopyCards(hi.leaves, { seed: name.length * 13, n: 48, size: [1.1, 1.8], quads: /^(pine|bent)/.test(name) ? [2] : [0, 1], inset: .3 });
     return v;
   }
   function stdTreeVar(sp, vi) {
@@ -298,7 +328,8 @@
   }
   function bushVar(vi, berries) {
     const name = berries ? 'bush_berry' : ['bush_a', 'bush_b'][vi];
-    const o = nodeOf('trees5', name); if (o) { const p = flat(o, treeKey); return { parts: p, alt: berries ? { leaves: p.leaves, bark: p.bark } : null }; }
+    const bushKey = n => /glow/.test(n) ? 'glow' : /fruit|berr/.test(n) ? 'fruit' : /trunk|stem|bark|twig/.test(n) ? 'bark' : 'leaves';
+    const o = nodeOf('trees5', name); if (o) { const p = flat(o, bushKey); return { parts: p, alt: berries ? { leaves: p.leaves, bark: p.bark } : null }; }
     const r = L.mulberry32(berries ? 3 : 3 + vi * 5); const blobs = [[0, .55, 0, .75, .55, .75]]; const n = 2 + Math.floor(r() * 3);
     for (let q = 0; q < n; q++) { const a = r() * TAU, d = .35 + r() * .35; blobs.push([Math.cos(a) * d, .45 + r() * .3, Math.sin(a) * d, .45 + r() * .3, .38 + r() * .2, .45 + r() * .3]); }
     const plain = L.blobCards(blobs, { n: 60, size: [.62, .95], quads: [0, 1], seed: 5 + vi, inset: .3 });
@@ -454,14 +485,22 @@
     for (let j = tj - R; j <= tj + R; j++) for (let i = ti - R; i <= ti + R; i++) { const d = Math.hypot((i + .5) * TS - cx, (j + .5) * TS - cz); if (d < Q.near + TS) near.push({ i, j, d, k: tkey(i, j) }); }
     near.sort((a, b) => a.d - b.d);
   }
+  let tjob = null;
   function genNear(budgetMs) {
-    const t0 = now(); let missing = false;
+    const t0 = now(), end = t0 + budgetMs;
+    if (tjob && !near.some(n => n.k === tjob.k)) tjob = null;
     for (const n of near) {
       if (tiles.has(n.k)) continue;
-      if (now() - t0 + estTile > budgetMs) { missing = true; break; }   // never start a unit that would overrun the budget
-      const tb = now(); getTile(n.i, n.j); const dt = now() - tb; estTile = estTile * .8 + dt * .2; ST.tileMs = estTile; dirty = true;
+      if (now() >= end) return false;
+      if (!tjob || tjob.k !== n.k) { tjob = tileJob(n.i, n.j); tjob.k = n.k; tjob.t = 0; }
+      // one layer per step (~0.1-0.4 ms); the time is checked after each
+      while (now() < end) {
+        const tb = now(); const t = tileStep(tjob); tjob.t += now() - tb;
+        if (t) { tiles.set(n.k, t); estTile = estTile * .8 + tjob.t * .2; ST.tileMs = estTile; tjob = null; dirty = true; break; }
+      }
+      if (tjob) return false;
     }
-    return !missing;
+    return true;
   }
   function fill(camera) {
     const cx = camera.position.x, cz = camera.position.z;
@@ -588,14 +627,17 @@
   let superList = [], superKey = '', job = null;
   const _cut = { id: '', kindRes: 'tree', gone: false };
   function superWant(cx, cz) {
-    const si = Math.floor(cx / SUPER), sj = Math.floor(cz / SUPER); const key = si + ',' + sj + ',' + Q.imp;
+    const si = Math.floor(cx / SUPER), sj = Math.floor(cz / SUPER); const key = si + ',' + sj + ',' + Q.imp + ',' + Q.impFull;
     if (key === superKey) return; superKey = key; superList = [];
     const R = Math.ceil(Q.imp / SUPER) + 1, lim = OOB() + SUPER;   // world bounds from L.WS / L.OOB
     for (let j = sj - R; j <= sj + R; j++) for (let i = si - R; i <= si + R; i++) {
       if (Math.abs((i + .5) * SUPER) > lim || Math.abs((j + .5) * SUPER) > lim) continue;
-      const d = Math.hypot(clamp(cx, i * SUPER, (i + 1) * SUPER) - cx, clamp(cz, j * SUPER, (j + 1) * SUPER) - cz); if (d < Q.imp) superList.push({ i, j, d, k: i * 10000 + j });
+      const d = Math.hypot(clamp(cx, i * SUPER, (i + 1) * SUPER) - cx, clamp(cz, j * SUPER, (j + 1) * SUPER) - cz);
+      if (d < Q.imp) superList.push({ i, j, d, k: i * 10000 + j, thin: d > Q.impFull ? 2 : 1 });
     }
     superList.sort((a, b) => a.d - b.d);
+    // far super-tiles hold every 4th tree with bigger cards (forests still read as forests on far plateaus)
+    for (const w of superList) { const s = supers.get(w.k); if (s && s.thin !== w.thin) s.dirty = true; }
     const want = new Set(superList.map(s => s.k));
     for (const [k, s] of supers) if (!want.has(k)) { if (s.mesh) { impGroup.remove(s.mesh); s.mesh.geometry.dispose(); } supers.delete(k); }
     if (job && !want.has(job.k)) job = null;
@@ -608,29 +650,30 @@
     for (; ;) {
       if (!job) {
         const s = superList.find(s => !supers.has(s.k) || supers.get(s.k).dirty); if (!s) return false;
-        job = { k: s.k, i: s.i, j: s.j, q: 0, pos: [], aC: [], aSz: [], col: [], aG: [], idx: [] };
+        job = { k: s.k, i: s.i, j: s.j, thin: s.thin, q: 0, pos: [], aC: [], aSz: [], col: [], aG: [], idx: [] };
       }
       if (now() - t0 + estSuper > budgetMs) return true;
       const tb = now(); const J = job; const a = J.q % NT, b = (J.q / NT) | 0;
+      const big = J.thin > 1 ? 1.55 : 1;
       treeScan(J.i * NT + a, J.j * NT + b, (sp, vr, x, y, z, s, ry, c, id) => {
         if (L.applyCut) { _cut.id = id; _cut.gone = false; L.applyCut(_cut); if (_cut.gone) return; }   // felled trees stay gone far away too
-        const cell = IMPCELL[sp + vr]; if (cell == null) return; const I = IMP[cell]; const base = J.pos.length / 3; const w = I.w * s, h = I.h * s;
+        const cell = IMPCELL[sp + vr]; if (cell == null) return; const I = IMP[cell]; const base = J.pos.length / 3; s *= big; const w = I.w * s, h = I.h * s;
         for (let q = 0; q < 4; q++) { J.pos.push(q === 0 || q === 3 ? -.5 : .5, q < 2 ? 0 : 1, 0); J.aC.push(x, y, z); J.aSz.push(w, h, I.y0 * s, cell); J.col.push(c.r, c.g, c.b); J.aG.push(I.glow); }
         J.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
-      });
+      }, J.thin);
       J.q++; estSuper = estSuper * .85 + (now() - tb) * .15;
       if (J.q >= NT * NT) { finishSuper(J); job = null; }
     }
   }
   function finishSuper(J) {
     const old = supers.get(J.k); if (old && old.mesh) { impGroup.remove(old.mesh); old.mesh.geometry.dispose(); }
-    if (!J.idx.length) { supers.set(J.k, { mesh: null, dirty: false, n: 0 }); return; }
+    if (!J.idx.length) { supers.set(J.k, { mesh: null, dirty: false, n: 0, thin: J.thin }); return; }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(J.pos, 3)); g.setAttribute('aC', new THREE.Float32BufferAttribute(J.aC, 3)); g.setAttribute('aSz', new THREE.Float32BufferAttribute(J.aSz, 4));
     g.setAttribute('color', new THREE.Float32BufferAttribute(J.col, 3)); g.setAttribute('aG', new THREE.Float32BufferAttribute(J.aG, 1)); g.setIndex(J.idx);
     let y0 = 1e9, y1 = -1e9; for (let q = 1; q < J.aC.length; q += 12) { const y = J.aC[q]; if (y < y0) y0 = y; if (y > y1) y1 = y; }
     const x0 = J.i * SUPER, z0 = J.j * SUPER;
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(x0 + SUPER / 2, (y0 + y1) / 2 + 8, z0 + SUPER / 2), Math.hypot(SUPER * .71, (y1 - y0) / 2 + 20) + 10);
-    const m = new THREE.Mesh(g, IMPMAT); m.matrixAutoUpdate = false; m.name = 'imp'; impGroup.add(m); supers.set(J.k, { mesh: m, dirty: false, n: J.idx.length / 6 });
+    const m = new THREE.Mesh(g, IMPMAT); m.matrixAutoUpdate = false; m.name = 'imp'; impGroup.add(m); supers.set(J.k, { mesh: m, dirty: false, n: J.idx.length / 6, thin: J.thin });
     ST.supers = supers.size; ST.impQuads = 0; for (const s of supers.values()) ST.impQuads += s.n || 0;
   }
   function updateImpostors(camera, budgetMs) {

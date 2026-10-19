@@ -70,12 +70,13 @@
 
   // ---------------------------------------------------------------- sky / light setup for either engine
   const TODN = QS.get('t') || 'day';
-  function sunVec(name) { const el = { day: .78, golden: .09, dawn: .04, night: -.5 }[name] ?? .78, az = num('sunaz', -.9); return new THREE.Vector3(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el)); }
+  // default sun: south-south-east like the game's daytime sun (front-lights the north-facing spawn view)
+  function sunVec(name) { const el = { day: .78, golden: .09, dawn: .04, night: -.5 }[name] ?? .78, az = num('sunaz', 1.25); return new THREE.Vector3(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el)); }
   function setupLook() {
     if (L.skyInit && L.setTimeOfDay) {                     // v5 LOOK engine
       if (L.makeMaterials) try { L.makeMaterials(); } catch (e) { console.warn('makeMaterials', e.message); }
       L.skyInit();
-      L.setTimeOfDay(L.todPreset ? L.todPreset(TODN, num('sunaz', -.9)) : { sunDir: sunVec(TODN) });
+      L.setTimeOfDay(L.todPreset ? L.todPreset(TODN, num('sunaz', 1.25)) : { sunDir: sunVec(TODN) });
       if (L.cloudSea) { L.cloudSea.setY(L.CLOUD_Y); L.cloudSea.setDensityMap(L.cloudMaskTexture(), -L.WS, -L.WS, 2 * L.WS); }
       if (L.mistVisual && L.mistVisual.setDisc) try { L.mistVisual.setDisc(L.MIST.x, L.MIST.z, L.MIST.r); } catch (e) { console.warn('mist', e.message); }
       DEV.engine = 'v5';

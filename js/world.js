@@ -127,13 +127,52 @@
     opts = opts || {}; const y = (opts.y != null ? opts.y : gy(x, z)) + (opts.dy || 0);
     const g = place(name, x, y, z, ry, s, { parent: CUR, shadow: opts.shadow });
     if (g && opts.col !== false) (opts.col === 'box' ? colBox : colCyl)(g, opts.k || .7);
+    if (g && CUR.userData.lod) lodBox(g);
     return g;
   }
   function stand(obj, x, z, ry, s, opts) {      // a procedural stand-in
     opts = opts || {}; obj.position.set(x, (opts.y != null ? opts.y : gy(x, z)) + (opts.dy || 0), z); obj.rotation.y = ry || 0; if (s) obj.scale.setScalar(s);
-    CUR.add(obj); obj.updateMatrixWorld(true); if (opts.col !== false) (opts.col === 'cyl' ? colCyl : colBox)(obj, opts.k || .9); return obj;
+    CUR.add(obj); obj.updateMatrixWorld(true); if (opts.col !== false) (opts.col === 'cyl' ? colCyl : colBox)(obj, opts.k || .9);
+    if (CUR.userData.lod) lodBox(obj);
+    return obj;
+  }
+  // far silhouette of a landmark: every placed building becomes a box + hip roof (~20 triangles), all merged into one
+  // mesh shown between LOD_NEAR and the landmark's view distance (the detailed props cost ~6k triangles each)
+  const LOD_NEAR = 700, _lb = new THREE.Box3();
+  function lodBox(o) {
+    const ry = o.rotation.y; o.rotation.y = 0; o.updateMatrixWorld(true); _lb.setFromObject(o); o.rotation.y = ry; o.updateMatrixWorld(true);
+    const w = _lb.max.x - _lb.min.x, d = _lb.max.z - _lb.min.z, h = _lb.max.y - _lb.min.y;
+    if (h > 2.5 && w > 1.5 && d > 1.5) CUR.userData.lod.push({ x: (_lb.min.x + _lb.max.x) / 2, z: (_lb.min.z + _lb.max.z) / 2, y: _lb.min.y, w, d, h, ry, ox: o.position.x, oz: o.position.z });
+  }
+  function lodMesh(boxes) {
+    const parts = [];
+    for (const b of boxes) {
+      const tall = b.h > Math.max(b.w, b.d) * 1.6, wallH = b.h * (tall ? .78 : .5), roofH = b.h - wallH;
+      const wall = tint(tall ? new THREE.CylinderGeometry(Math.min(b.w, b.d) * .46, Math.min(b.w, b.d) * .5, wallH, 8) : new THREE.BoxGeometry(b.w * .92, wallH, b.d * .92), WALL).toNonIndexed();
+      wall.translate(0, wallH / 2, 0);
+      const roof = tint(new THREE.ConeGeometry(tall ? Math.min(b.w, b.d) * .62 : Math.hypot(b.w, b.d) * .6, roofH, tall ? 8 : 4), 0xb8432e).toNonIndexed();
+      if (!tall) { roof.rotateY(Math.PI / 4); roof.scale(1, 1, b.d / b.w); }
+      roof.translate(0, wallH + roofH / 2, 0);
+      for (const g of [wall, roof]) {
+        // the box centre sits where the object's own (unrotated) bbox put it, around the object's origin
+        g.translate(b.x - b.ox, 0, b.z - b.oz); g.rotateY(b.ry); g.translate(b.ox, b.y, b.oz);
+        if (g.attributes.uv) g.deleteAttribute('uv');
+        parts.push(g);
+      }
+    }
+    const geo = THREE.BufferGeometryUtils.mergeBufferGeometries(parts, false); geo.computeBoundingSphere();
+    const m = new THREE.Mesh(geo, L.MAT.v4 || L.MAT.plain); m.name = 'lod'; m.matrixAutoUpdate = false; m.receiveShadow = true; return m;
   }
   const faceTo = (x, z, tx, tz) => Math.atan2(tx - x, tz - z);
+  // walkable deck along local z (-half..half) of a span facing ry: sloped box colliders following yOf(z) + side rails
+  function deck(x, z, y, ry, half, hw, yOf, n) {
+    const sn = Math.sin(ry), cs = Math.cos(ry), seg = 2 * half / n;
+    for (let k = 0; k < n; k++) {
+      const a = -half + k * seg, b = a + seg, c = (a + b) / 2, ya = y + yOf(clamp(a, -half, half)), yb = y + yOf(clamp(b, -half, half));
+      L.addCol({ x: x + sn * c, z: z + cs * c, rot: ry, hx: hw, hz: seg / 2, y0: Math.min(ya, yb) - .4, y1: ya, y2: yb, nocam: true });
+      for (const sd of [-1, 1]) L.addCol({ x: x + sn * c + cs * sd * (hw + .1), z: z + cs * c - sn * sd * (hw + .1), rot: ry, hx: .08, hz: seg / 2, y0: Math.min(ya, yb) + .05, y1: Math.max(ya, yb) + 1.05, nocam: true, nowalk: true });
+    }
+  }
   function first(...names) { for (const n of names) if (has(n)) return n; return null; }
   function building(p, v5name, w, d, h) {      // a v5 building if loaded, else a box house
     const ry = p.ry || faceTo(p.x, p.z, L.SPAWN5.x, L.SPAWN5.z);
@@ -156,7 +195,17 @@
     windmills: p => ringOf(3, 26, (dx, dz) => { const x = p.x + dx, z = p.z + dz; if (has('windmill')) put('windmill', x, z, -.6, 1); else stand(STAND.windmill(), x, z, -.6, 1, { col: 'cyl' }); }),
     stream_mills: p => building(p, 'house_c', 7, 6, 5),
     royal_forge: p => { if (has('royal_forge')) put('royal_forge', p.x, p.z, p.ry || 0, 1, { col: 'box' }); else stand(STAND.house(11, 8, 6), p.x, p.z, 0); if (has('anvil_ancient')) put('anvil_ancient', p.x + 7, p.z + 5, .3, 1); },
-    high_plaza: p => { if (has('fountain')) put('fountain', p.x, p.z, 0, 1); else if (has('shrine')) put('shrine', p.x, p.z, 0, 1.4); ringOf(6, 18, (dx, dz, a) => { if (has('town_tower')) return; if (has('ruin_columns')) put('ruin_columns', p.x + dx, p.z + dz, -a, 1, { dy: -.2 }); }); },
+    high_plaza: p => {
+      if (has('fountain')) put('fountain', p.x, p.z, 0, 1); else if (has('shrine')) put('shrine', p.x, p.z, 0, 1.4);
+      // the town around the plaza: two rings of houses facing it, so the high town reads as a town from the valley
+      const hs = ['house_a', 'house_b', 'house_c', 'bakery'].filter(has);
+      const keep = [[L.poi('royal_forge'), 30], [L.poi('high_tower'), 22], [L.poi('high_school'), 24]];   // their own dressing
+      for (const [n, R, a0] of [[7, 46, .2], [9, 78, .5]]) ringOf(n, R, (dx, dz, a, i) => {
+        const x = p.x + dx + (RR() - .5) * 8, z = p.z + dz + (RR() - .5) * 8; if (keep.some(([q, r]) => q && Math.hypot(x - q.x, z - q.z) < r)) return;
+        const ry = faceTo(x, z, p.x, p.z);
+        if (hs.length) put(hs[(i + n) % hs.length], x, z, ry, .95 + RR() * .15, { col: 'box', k: .85, dy: -.3 }); else stand(STAND.house(7, 6, 5), x, z, ry);
+      });
+    },
     lighthouse: p => { if (has('lighthouse_ruin')) put('lighthouse_ruin', p.x, p.z, 0, 1); else if (has('ruin_tower')) put('ruin_tower', p.x, p.z, 0, 2.2, { dy: -.3 }); else stand(STAND.tower(3.5, 20), p.x, p.z, 0, 1, { col: 'cyl' }); },
     hermit_tower_vale: p => { if (has('hermit_tower')) put('hermit_tower', p.x, p.z, 0, 1); else stand(STAND.tower(3, 13), p.x, p.z, 0, 1, { col: 'cyl' }); },
     hermit_tower_canyon: p => { if (has('hermit_tower')) put('hermit_tower', p.x, p.z, 1.2, 1); else stand(STAND.tower(3, 13), p.x, p.z, 0, 1, { col: 'cyl' }); },
@@ -166,14 +215,7 @@
     mushroom_ring: p => { if (has('mushroom_giant')) ringOf(9, 8, (dx, dz) => put('mushroom_giant', p.x + dx, p.z + dz, RR() * TAU, .8 + RR() * .8, { k: .25 })); L.LIGHTS.push({ x: p.x, y: gy(p.x, p.z) + 2, z: p.z, c: 0x7dffc8, i: 1.4, d: 22, night: 1 }); },
     lunar_garden: p => { ruinBits(p, 8, 20, 1.1); if (has('shrine')) put('shrine', p.x, p.z, 0, 1.3); L.LIGHTS.push({ x: p.x, y: gy(p.x, p.z) + 3, z: p.z, c: 0xa8c8ff, i: 1.6, d: 30, night: 1 }); },
     hot_spring: p => { if (has('rock_big')) ringOf(7, 9, (dx, dz) => put('rock_big', p.x + dx, p.z + dz, RR() * TAU, .7 + RR() * .5, { dy: -.6 })); L.SPECIAL.push({ kind: 'steam', x: p.x, z: p.z, y: gy(p.x, p.z) }); },
-    castle: p => {   // placeholder silhouette of a ruined stronghold on the hidden plateau (castle5 replaces it in wave 2)
-      const tw = has('ruin_tower') ? 'ruin_tower' : null, wl = has('ruin_wall') ? 'ruin_wall' : null; const ca = Math.cos(p.ry || 0), sa = Math.sin(p.ry || 0);
-      const at = (lx, lz) => [p.x + lx * ca + lz * sa, p.z - lx * sa + lz * ca];
-      for (const [lx, lz, s] of [[-45, -40, 3.4], [45, -40, 3.6], [-45, 40, 3.2], [45, 40, 3.8], [0, 0, 5]]) { const [x, z] = at(lx, lz); if (tw) put(tw, x, z, RR() * TAU, s, { dy: -.5 }); else stand(STAND.tower(5, 30 * s / 3.5), x, z, 0, 1, { col: 'cyl' }); }
-      if (wl) for (let i = -2; i <= 2; i++) for (const [lx, lz, r] of [[i * 18, -40, 0], [i * 18, 40, 0], [-45, i * 16, Math.PI / 2], [45, i * 16, Math.PI / 2]]) { if (lx === -45 && Math.abs(lz) < 10) continue; const [x, z] = at(lx, lz); put(wl, x, z, (p.ry || 0) + r, 2.4, { dy: -.3 }); }
-    },
-    castle_gate: p => { const ca = Math.cos(p.ry || 0), sa = Math.sin(p.ry || 0); for (const s of [-1, 1]) { const x = p.x + s * 6 * sa, z = p.z + s * 6 * ca; if (has('ruin_columns')) put('ruin_columns', x, z, p.ry || 0, 2.2, { dy: -.2 }); else stand(STAND.tower(1.5, 10), x, z, 0, 1, { col: 'cyl' }); } },
-    throne: p => { if (has('ruin_stairs')) put('ruin_stairs', p.x, p.z, p.ry || 0, 1.4, { col: false }); },
+    // the hidden-plateau POIs (fixed ids) get no placeholder dressing: wave 2 dresses them
     mist_sign: p => { if (has('sign_post')) put('sign_post', p.x, p.z, faceTo(p.x, p.z, 3800, -5600), 1); else stand(STAND.post(true), p.x, p.z, faceTo(p.x, p.z, 3800, -5600), 1, { col: 'cyl', k: .3 }); },
     totems_ring: p => ringOf(8, 12, (dx, dz, a) => { const x = p.x + dx, z = p.z + dz; if (has('totem_small')) put('totem_small', x, z, -a - Math.PI / 2, 1); else stand(STAND.totem(3.2), x, z, -a - Math.PI / 2, 1, { col: 'cyl', k: .6 }); }),
     totems_path: p => { for (let i = -2; i <= 2; i++) { const x = p.x + i * 7, z = p.z + (i % 2) * 3; if (has('totem_small')) put('totem_small', x, z, 0, 1); else stand(STAND.totem(2.6), x, z, 0, 1, { col: 'cyl', k: .6 }); } },
@@ -200,7 +242,20 @@
     cave: p => { if (has('arch')) put('arch', p.x, p.z, p.ry || RR() * TAU, 1.4, { dy: -1.5, col: false }); else if (has('rock_big')) ringOf(4, 5, (dx, dz) => put('rock_big', p.x + dx, p.z + dz, RR() * TAU, 1.2)); },
     pier: p => { if (has('dock')) put('dock', p.x, p.z, p.ry || 0, 1, { col: false }); else stand(STAND.planks(10, 2.4), p.x, p.z, p.ry || 0, 1, { col: false }); },
     post: p => { stand(STAND.house(7, 6, 4), p.x, p.z, p.ry || 0); stand(STAND.post(true), p.x + 6, p.z + 4, 0, 1, { col: 'cyl', k: .3 }); },
-    rope_bridge: p => { if (has('rope_bridge')) put('rope_bridge', p.x, p.z, p.ry || 0, 1, { col: false }); },
+    // props5 rope_bridge: 20 m span along local z, ends at +-10 m at the origin's height, 1.1 m sag at mid
+    rope_bridge: p => {
+      const half = (p.span || 20) / 2, ry = p.ry || 0;
+      if (has('rope_bridge')) put('rope_bridge', p.x, p.z, ry, [1, 1, half / 10], { col: false, y: p.y });
+      else stand(STAND.planks(half * 2, 1), p.x, p.z, ry, 1, { col: false, y: p.y - .1 });
+      deck(p.x, p.z, p.y, ry, half + .6, .5, zl => -1.1 * (1 - (zl / half) * (zl / half)), 10);
+    },
+    // plank footbridge over a river (props5 bridge_plank: 10 m along local z, +0.32 m arch, 0.8 m half width)
+    bridge: p => {
+      const len = Math.max(6, p.len || p.span || 10), half = len / 2, ry = p.ry || 0;
+      if (has('bridge_plank')) put('bridge_plank', p.x, p.z, ry, [1, 1, len / 10], { col: false, y: p.y });
+      else stand(STAND.planks(len, 2), p.x, p.z, ry, 1, { col: false, y: p.y });
+      deck(p.x, p.z, p.y, ry, half + .4, .85, zl => .32 * (1 - (zl / half) * (zl / half)), 6);
+    },
     garden: p => ruinBits(p, 5, 14, 1), nest: p => logs(p, 7, 4),
   };
   // static batching: one mesh per material for a POI's dressing (props from Blender files hold many small meshes)
@@ -232,7 +287,9 @@
     }
   }
   // view distance per kind (m): landmarks stay visible from far
-  const FAR = { village: 1600, house: 1400, tower: 2600, windmill: 2400, windmill_group: 2400, lighthouse: 3000, keep: 3500, gate: 1200, plaza: 2000, forge: 1500, watermill: 1200, cottage: 1000 };
+  const FAR = { village: 1600, house: 1400, tower: 2600, windmill: 2400, windmill_group: 2400, lighthouse: 3000, plaza: 2000, forge: 1500, watermill: 1200, cottage: 1000, bridge: 900, rope_bridge: 1500 };
+  // landmarks seen across the valleys (the high town from the Annecy viewpoint is 3.1-3.8 km away)
+  const FAR_ID = { high_plaza: 4800, royal_forge: 4800, high_school: 4800, high_tower: 5200, tower_house: 2600 };
   let DRESSED = false;
   L.worldInit = async function () {
     if (DRESSED) return; DRESSED = true;
@@ -247,9 +304,26 @@
     for (const p of L.POIS || []) {
       const fn = DRESS_ID[p.id] || DRESS[p.kind]; if (!fn) continue;
       RR = L.mulberry32(((p.x * 73856093) ^ (p.z * 19349663)) | 0);
-      CUR = new THREE.Group(); CUR.name = 'poi_' + p.id; CUR.userData.poi = p; CUR.userData.far = FAR[p.kind] || 900;
+      CUR = new THREE.Group(); CUR.name = 'poi_' + p.id; CUR.userData.poi = p; CUR.userData.far = FAR_ID[p.id] || FAR[p.kind] || 900;
+      if (CUR.userData.far > LOD_NEAR + 200) CUR.userData.lod = [];
       try { fn(p); } catch (e) { console.warn('dress', p.id, e.message); }
-      if (CUR.children.length) { L.scene.add(CUR); try { batchGroup(CUR); } catch (e) { console.warn('batch', p.id, e.message); } L.POIGROUPS.push(CUR); }
+      if (CUR.children.length) {
+        L.scene.add(CUR); try { batchGroup(CUR); } catch (e) { console.warn('batch', p.id, e.message); } L.POIGROUPS.push(CUR);
+        if (CUR.userData.lod && CUR.userData.lod.length) try {
+          const lo = new THREE.Group(); lo.name = 'poilo_' + p.id; lo.add(lodMesh(CUR.userData.lod)); lo.userData.poi = p; lo.userData.near = LOD_NEAR; lo.userData.far = CUR.userData.far;
+          CUR.userData.far = LOD_NEAR; L.scene.add(lo); L.POIGROUPS.push(lo);
+        } catch (e) { console.warn('lod', p.id, e.message); }
+        CUR.userData.lod = null;
+      }
+    }
+    // plank bridges where roads cross rivers wider than 6 m (fords need no dressing)
+    let nb = 0;
+    for (const c of L.CROSSINGS || []) {
+      if (c.kind !== 'bridge') continue;
+      const p = Object.assign({ id: 'xb_' + nb++ }, c);
+      CUR = new THREE.Group(); CUR.name = 'bridge_' + p.id; CUR.userData.poi = p; CUR.userData.far = FAR.bridge;
+      try { DRESS.bridge(p); } catch (e) { console.warn('dress bridge', e.message); }
+      if (CUR.children.length) { L.scene.add(CUR); try { batchGroup(CUR); } catch (e) { } L.POIGROUPS.push(CUR); }
     }
     CUR = null; L.worldReady = true;
   };
@@ -260,7 +334,7 @@
     const cp = L.camera && L.camera.position; if (!cp) return;
     spinT += dt;
     for (const g of L.POIGROUPS) {
-      const p = g.userData.poi; const d = Math.hypot(p.x - cp.x, p.z - cp.z); g.visible = d < g.userData.far;
+      const p = g.userData.poi; const d = Math.hypot(p.x - cp.x, p.z - cp.z); g.visible = d < g.userData.far && !(d < g.userData.near);
       if (g.visible && d < 600) for (const o of g.children) if (o.userData.spin) o.userData.spin.rotation.z = spinT * .4;
     }
   };
