@@ -42,6 +42,15 @@ for (const [name, ddl] of Object.entries(variants)) {
   await db.query(`insert into lumiar_mundo (w,c,id,d,at) values ('m','builds4','b1','{"x":9}', $1) on conflict (w,c,id) do update set d=excluded.d, at=excluded.at`, [new Date(1).toISOString()]);
   r = (await db.query(`select d from lumiar_mundo where c='builds4' and id='b1'`)).rows[0].d; ok(r.x === 9, 'v4 untouched behaviour');
   const now = (await db.query(`select public.lumiar_now() n`)).rows[0].n; ok(now instanceof Date || typeof now === 'string', 'lumiar_now');
+  // sat = server receive time: set on insert and on every accepted update, untouched when the update is refused
+  const satOf = async id => (await db.query(`select sat from lumiar_mundo where c='b5' and id=$1`, [id])).rows[0].sat;
+  await up('late', '{"ts":1000}', new Date(1000).toISOString()); const s1 = await satOf('late');
+  ok(s1 instanceof Date && Math.abs(s1 - Date.now()) < 60e3, 'sat set on insert (an old record time delivered now)');
+  await db.exec(`update lumiar_mundo set sat = sat - interval '1 hour' where c='b5' and id='late'`); const s2 = await satOf('late');
+  await up('late', '{"ts":500}', new Date(500).toISOString()); ok(+(await satOf('late')) === +s2, 'refused (older) update leaves sat alone');
+  await up('late', '{"ts":2000}', new Date(2000).toISOString()); ok(+(await satOf('late')) > +s2, 'accepted update moves sat');
+  const since = (await db.query(`select id from lumiar_mundo where w='m' and sat > now() - interval '5 minutes' and c = any($1)`, [['b5']])).rows.map(r => r.id); ok(since.includes('late'), 'catch-up query by sat finds it');
+  ok((await db.query(`select 1 from pg_indexes where indexname='lumiar_mundo_w_sat'`)).rows.length === 1, 'sat index');
   await db.close();
 }
 console.log(fails ? fails + ' FAILED' : 'SQL migration: all checks passed');

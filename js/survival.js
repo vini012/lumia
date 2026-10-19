@@ -2,10 +2,12 @@
    food (L.FOOD) and cooking recipes (L.COOK), sleep in a bed (everyone online asleep -> the shared clock skips to
    dawn), soft respawn when falling into the cloud sea or leaving the world. No death, no damage: the worst that
    happens is walking a bit slower until you eat.
-   State lives in L.save.player.st (persisted); without L.save it stays in memory. */
+   State lives in L.save.player.st (persisted, whole numbers; written with the slow "soft" save, see save.js);
+   without L.save it stays in memory. Every input number is checked: a NaN from the game never reaches the state. */
 'use strict';
 (function (L) {
   const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  const num = (v, d) => { v = +v; return Number.isFinite(v) ? v : d; }; // a finite number or the default
   const C = () => L.clock || { now: () => Date.now(), nightness: () => 0, hours: () => 12, isNight: () => false, skipToDawn: () => 0 };
 
   // ================================================================ tunables (GDD §6.1)
@@ -20,6 +22,7 @@
     fireR: 5, roofMax: 6, roofMin: 1.2, wallR: 6,   // walls are .3 m thick: probe every .25 m
     cloudMargin: 6, worldEdge: 7750,
     hintEvery: { fome: 240, fraco: 180, frio: 180, cansaco: 60, calor: 240 },
+    nap: 40, napEvery: 480,           // a bed by day: +40 energy, at most once every 8 min (a third of a day)
   };
 
   // ================================================================ food & cooking (data for game.js crafting)
@@ -41,10 +44,11 @@
     cha_ervas: { n: 'Chá de ervas', ic: '🍵', fome: 15, mana: 15, buff: ['resistente', 300] },
     sopa_quente: { n: 'Sopa Quente', ic: '🥣', fome: 50, warm: 360 },
   };
+  // n: full name (recipes, tips); chip: the short label on the HUD chip
   L.BUFFS = {
-    quente: { n: 'Calor', ic: '🔥', desc: 'sem frio' },
-    resistente: { n: 'Proteção do frio', ic: '🧣', desc: 'o frio chega devagar' },
-    energia: { n: 'Energia extra', ic: '⚡', desc: 'correr cansa menos' },
+    quente: { n: 'Calor', chip: 'Calor', ic: '🔥', desc: 'sem frio' },
+    resistente: { n: 'Proteção do frio', chip: 'Agasalho', ic: '🧣', desc: 'o frio chega devagar' },
+    energia: { n: 'Energia extra', chip: 'Fôlego', ic: '⚡', desc: 'correr cansa menos' },
   };
   // same shape as game.js RECIPES: {id, w: station, n, ic, cost, give, lit, desc} (+ rq: a recipe item that must be
   // known first, e.g. from a note: the player has it in inv or flags)
@@ -154,7 +158,10 @@
 
   // ================================================================ state
   const V = { fome: 80, en: 100, mana: 100, frio: 0, wet: 0, buffs: {} }; // live values (precise); p.st gets rounded copies
-  let bound = null, saveT = 0, envT = 0, restT = 0, exhausted = false, lastSaved = '';
+  const GOOD = { fome: 80, en: 100, mana: 100, frio: 0, wet: 0 };          // last finite values (a NaN never sticks)
+  const VK = ['fome', 'en', 'mana', 'frio', 'wet'];
+  function sane() { for (const k of VK) { if (Number.isFinite(V[k])) GOOD[k] = V[k]; else V[k] = GOOD[k]; } for (const id in V.buffs) if (!Number.isFinite(V.buffs[id])) delete V.buffs[id]; }
+  let bound = null, saveT = 0, envT = 0, restT = 0, exhausted = false, lastSaved = '', napAt = -Infinity;
   const ENV = { roof: false, inside: false, walls: 0, fire: null, sx: NaN, sz: NaN };
   const SL = { on: false, t: 0, bed: null, skipped: false, wakeAt: 0, waiting: [], skipAsked: 0 };
   const RS = { on: false, t: 0, pos: null, why: '', moved: false };
@@ -164,18 +171,26 @@
   function player() { return L.save && L.save.player ? L.save.player : null; }
   function bind() {
     const p = player(); bound = p;
-    if (p) { if (!p.st || typeof p.st !== 'object') p.st = {}; const s = p.st; for (const k of ['fome', 'en', 'mana', 'frio', 'wet']) if (typeof s[k] === 'number') V[k] = s[k]; V.buffs = Object.assign({}, s.buffs || {}); writeSt(); }
+    if (p) {
+      if (!p.st || typeof p.st !== 'object') p.st = {}; const s = p.st;
+      for (const k of VK) if (Number.isFinite(s[k])) V[k] = s[k];
+      V.buffs = {}; if (s.buffs && typeof s.buffs === 'object') for (const id in s.buffs) if (Number.isFinite(s.buffs[id])) V.buffs[id] = s.buffs[id];
+      sane(); writeSt();
+    }
   }
+  // the saved copy: whole numbers for the 0..100 values, hundredths for cold/wet (0..1), so it only changes (and is
+  // only written) when something visibly changed
   function writeSt() {
-    const p = player(); if (!p) return false; const r = v => Math.round(v * 100) / 100;
-    const st = { fome: r(V.fome), en: r(V.en), mana: r(V.mana), frio: r(V.frio), wet: r(V.wet), buffs: Object.assign({}, V.buffs) };
-    const j = JSON.stringify(st); if (j === lastSaved) return false; lastSaved = j; p.st = Object.assign(p.st || {}, st); return true;
+    const p = player(); if (!p) return false; sane();
+    const st = { fome: Math.round(V.fome), en: Math.round(V.en), mana: Math.round(V.mana), frio: Math.round(V.frio * 100) / 100, wet: Math.round(V.wet * 100) / 100, buffs: Object.assign({}, V.buffs) };
+    const j = JSON.stringify(st); if (j === lastSaved) return false; lastSaved = j;
+    if (p.st && typeof p.st === 'object') Object.assign(p.st, st); else p.st = st; return true;
   }
-  function dirty() { if (writeSt() && L.save && L.save.dirty) L.save.dirty(); }
+  function dirty(hard) { if (writeSt() && L.save && L.save.dirty) L.save.dirty(hard ? undefined : 'soft'); }  // per-frame drift: soft (30 s); rare events: normal
   if (L.save && L.save.on) { L.save.on('ready', bind); L.save.on('player', bind); }
   const now = () => C().now();
   const buffLeft = id => { const u = V.buffs[id]; return u ? Math.max(0, (u - now()) / 1000) : 0; };
-  function addBuff(id, sec) { V.buffs[id] = Math.max(V.buffs[id] || 0, now()) + sec * 1000; emit('buff', { id, sec }); dirty(); }
+  function addBuff(id, sec) { sec = num(sec, 0); if (sec <= 0) return; V.buffs[id] = Math.max(V.buffs[id] || 0, now()) + sec * 1000; emit('buff', { id, sec }); dirty(true); }
   const enMax = () => V.fome >= 50 ? K.enMax : K.enMax * (.5 + V.fome / 100);
   const canSprint = () => V.fome >= K.hungry && !exhausted && V.en > 1;
   function hint(kind, text, force) {
@@ -191,15 +206,15 @@
 
   // ================================================================ tick
   function tick(dt, ctx) {
-    ctx = ctx || {}; dt = clamp(+dt || 0, 0, .5);
+    ctx = ctx || {}; dt = clamp(num(dt, 0), 0, .5);
     if (player() !== bound) bind();
-    const x = +ctx.x || 0, y = +ctx.y || 0, z = +ctx.z || 0, t = now(); RT += dt;
+    const x = num(ctx.x, 0), y = num(ctx.y, 0), z = num(ctx.z, 0), t = now(); RT += dt;
     envT -= dt; if (envT <= 0 || Math.abs(x - ENV.sx) + Math.abs(z - ENV.sz) > 3) { envT = .5; sampleEnv(x, y, z); }
     const sheltered = ctx.sheltered != null ? !!ctx.sheltered : ENV.roof;
     const fire = ctx.nearFire != null ? !!ctx.nearFire : !!ENV.fire;
-    const night = ctx.night != null ? clamp(+ctx.night, 0, 1) : C().nightness();
-    const alt = ctx.altitude != null ? +ctx.altitude : y;
-    const rain = clamp(+ctx.raining || 0, 0, 1);
+    const night = clamp(num(ctx.night != null ? ctx.night : C().nightness(), 0), 0, 1);
+    const alt = num(ctx.altitude != null ? ctx.altitude : y, y);
+    const rain = clamp(num(ctx.raining, 0), 0, 1);
     const swimming = !!ctx.swimming, moving = !!ctx.moving, gliding = !!ctx.gliding;
     const sprinting = !!ctx.sprinting && moving && canSprint();
     for (const id in V.buffs) if (V.buffs[id] <= t) { delete V.buffs[id]; emit('buff', { id, sec: 0 }); }
@@ -256,11 +271,15 @@
 
     // falling into the cloud sea / leaving the world -> soft respawn
     if (!RS.on && !SL.on) {
-      const gy = L.ground ? L.ground(x, z) : -Infinity;
+      const gy = num(L.ground ? L.ground(x, z) : -Infinity, -Infinity);
       const grounded = ctx.grounded != null ? !!ctx.grounded : (y - gy < .35);
       const CY = L.CLOUD_Y != null ? L.CLOUD_Y : 90;
-      if (!grounded && !swimming && !ctx.mounted) { if (!FALL.air) { FALL.air = true; FALL.t0 = RT; FALL.y0 = y; } FALL.y0 = Math.max(FALL.y0, y); } else FALL.air = false;
-      if (FALL.air && FALL.y0 > CY - 2 && y < CY - K.cloudMargin && gy < y - 12) respawn('nuvens');
+      // falling into the cloud sea: where WORLD says the cloud sea is (L.cloudSeaAt), anyone below its surface goes
+      // back; without that map, a fall from above the clouds to below them (gliding down to a beach under the cloud
+      // layer is fine: the glide does not count as falling)
+      const seaHere = typeof L.cloudSeaAt === 'function' ? !!L.cloudSeaAt(x, z) : null;
+      if (!grounded && !swimming && !ctx.mounted && !(gliding && seaHere == null)) { if (!FALL.air) { FALL.air = true; FALL.t0 = RT; FALL.y0 = y; } FALL.y0 = Math.max(FALL.y0, y); } else FALL.air = false;
+      if (seaHere != null ? (seaHere && !grounded && !swimming && !ctx.mounted && y < CY - K.cloudMargin && gy < y - 12) : (FALL.air && FALL.y0 > CY - 2 && y < CY - K.cloudMargin && gy < y - 12)) respawn('nuvens');
       else if (y < -40) respawn('nuvens');
       else if (Math.abs(x) > K.worldEdge || Math.abs(z) > K.worldEdge) respawn('limite');
       // remember safe ground (for respawn) and keep the saved position on solid ground
@@ -272,8 +291,9 @@
     }
     if (RS.on) tickRespawn(dt);
     if (SL.on) tickSleep(dt);
+    sane();
 
-    // persist (rounded) every 2 s
+    // persist (rounded) every 2 s when it changed (the save module writes these slowly: 30 s, or on page hide)
     saveT -= dt; if (saveT <= 0) { saveT = 2; dirty(); }
   }
 
@@ -307,7 +327,10 @@
   function sleep(bed) {
     bed = bed || {}; const p = player();
     if (bed.x != null) { const h = [+(+bed.x).toFixed(2), +(+bed.y || 0).toFixed(2), +(+bed.z).toFixed(2)]; if (p) p.home = h; homeLocal = h; dirty(); if (L.save && L.save.dirty) L.save.dirty(); }
-    if (!canSleepNow()) { V.en = enMax(); dirty(); emit('nap', {}); hint('soneca', 'Você descansou um pouco. Só dá para dormir de noite.', true); return { ok: true, nap: true }; }
+    if (!canSleepNow()) { // by day a bed is a short rest: some energy, not too often
+      if (RT - napAt < K.napEvery) { hint('soneca', 'Você já descansou há pouco. Só dá para dormir de noite.', true); return { ok: true, nap: true, rested: false }; }
+      napAt = RT; V.en = Math.min(enMax(), V.en + K.nap); dirty(true); emit('nap', {}); hint('soneca', 'Você descansou um pouco. Só dá para dormir de noite.', true); return { ok: true, nap: true, rested: true };
+    }
     SL.on = true; SL.t = 0; SL.skipped = false; SL.wakeAt = 0; SL.bed = bed; SL.waiting = []; SL.skipAsked = 0;
     presence({ sl: 1 });
     emit('sleep', { phase: 'start', bed });
@@ -315,7 +338,7 @@
   }
   function wake(why) {
     if (!SL.on) return false; const skipped = SL.skipped; SL.on = false; presence({ sl: 0 });
-    if (skipped) { V.fome = Math.max(0, V.fome - 8); V.en = enMax(); V.mana = Math.min(K.manaMax, V.mana + 40); V.frio = 0; V.wet = 0; dirty(); }
+    if (skipped) { V.fome = Math.max(0, V.fome - 8); V.en = enMax(); V.mana = Math.min(K.manaMax, V.mana + 40); V.frio = 0; V.wet = 0; dirty(true); }
     const bed = SL.bed || {}; emit('woke', { skipped, why: why || '' }); emit('sleep', { phase: 'end', skipped });
     if (skipped) story('woke', { x: bed.x, z: bed.z });
     return true;
@@ -385,9 +408,9 @@
     jumpMul: () => V.fome <= 0 ? .85 : 1,
     swimMul: () => exhausted ? .75 : 1,
     hasMana: n => V.mana >= n,
-    useMana(n) { n = +n || 0; if (V.mana < n) return false; V.mana -= n; dirty(); return true; },
-    addMana(n) { V.mana = clamp(V.mana + n, 0, K.manaMax); dirty(); },
-    warm(sec) { V.buffs.quente = Math.max(V.buffs.quente || 0, now()) + (sec || 60) * 1000; V.frio = 0; emit('buff', { id: 'quente', sec }); dirty(); },
+    useMana(n) { n = Math.max(0, num(n, 0)); if (V.mana < n) return false; V.mana -= n; dirty(); return true; },
+    addMana(n) { V.mana = clamp(V.mana + num(n, 0), 0, K.manaMax); dirty(); },
+    warm(sec) { sec = num(sec, 60) || 60; V.buffs.quente = Math.max(V.buffs.quente || 0, now()) + sec * 1000; V.frio = 0; emit('buff', { id: 'quente', sec }); dirty(true); },
     buff: buffLeft, addBuff,
     buffs() { const out = []; for (const id in V.buffs) { const s = buffLeft(id); if (s > 0) out.push(Object.assign({ id, left: s }, L.BUFFS[id] || { n: id, ic: '✨' })); } return out; },
     canSleep: canSleepNow,
@@ -402,7 +425,7 @@
         exhausted, sheltered: ENV.roof, inside: ENV.inside, nearFire: !!ENV.fire, warm: buffLeft('quente') > 0, sleeping: SL.on, respawning: RS.on, buffs: surv.buffs() };
     },
     // tests / dev
-    _V: V, _SL: SL, _RS: RS, _SAFE: SAFE, _ENV: ENV, set(v) { Object.assign(V, v); dirty(); }, reset() { Object.assign(V, { fome: 80, en: 100, mana: 100, frio: 0, wet: 0, buffs: {} }); SL.on = false; RS.on = false; SAFE.length = 0; FALL.air = false; exhausted = false; for (const k in HINT) delete HINT[k]; },
+    _V: V, _SL: SL, _RS: RS, _SAFE: SAFE, _ENV: ENV, set(v) { Object.assign(V, v); sane(); dirty(true); }, reset() { Object.assign(V, { fome: 80, en: 100, mana: 100, frio: 0, wet: 0, buffs: {} }); SL.on = false; RS.on = false; SAFE.length = 0; FALL.air = false; exhausted = false; napAt = -Infinity; for (const k in HINT) delete HINT[k]; },
   };
   L.surv = surv;
 })(typeof window !== 'undefined' ? (window.L = window.L || {}) : (globalThis.L = globalThis.L || {}));

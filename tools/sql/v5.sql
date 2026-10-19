@@ -4,7 +4,10 @@
 --   2. raises the row size check on d to 32000 bytes;
 --   3. adds a newer-wins guard for the v5 collections: an update carrying an older record time (d->>'ts', or the at
 --      column for deletions) than the stored row is ignored, so an old offline snapshot never overwrites newer data;
---   4. adds public.lumiar_now() (server clock for the game, read-only) and an index used for catch-up reads.
+--   4. adds the column sat (server receive time, set by the same trigger on every insert/update) and an index on
+--      (w, sat): after a gap (phone asleep, socket down) the game asks "what did the server receive since", which
+--      also finds rows written offline long ago and delivered late (their `at` is the old record time);
+--   5. adds public.lumiar_now() (server clock for the game, read-only).
 -- v4 rows and collections (builds4, cut4, ...) are not touched and keep their old behaviour.
 -- The table is assumed to be: w text, c text, id text, d jsonb (null = removed), at (timestamp or ISO text),
 -- primary key (w, c, id), in the supabase_realtime publication, with the anon policies v4 already uses.
@@ -57,7 +60,9 @@ begin
   alter table public.lumiar_mundo add constraint lumiar_mundo_d_size check (d is null or octet_length(d::text) <= 32000);
 end $$;
 
--- 3 -------------------------------------------------------------------------------------------------------------
+-- 3 + 4 ---------------------------------------------------------------------------------------------------------
+alter table public.lumiar_mundo add column if not exists sat timestamptz not null default now();
+
 create or replace function public.lumiar_row_ms(d jsonb, at_text text) returns double precision
 language sql stable as $$
   select coalesce(
@@ -69,18 +74,19 @@ $$;
 create or replace function public.lumiar_newer_wins() returns trigger
 language plpgsql as $$
 begin
-  if new.c in ('p5','m5','b5','h5','t5','f5','k5','w5','d5')
+  if tg_op = 'UPDATE' and new.c in ('p5','m5','b5','h5','t5','f5','k5','w5','d5')
      and public.lumiar_row_ms(new.d, new.at::text) < public.lumiar_row_ms(old.d, old.at::text) then
     return null; -- keep the stored, newer row (the upsert succeeds without changing it)
   end if;
+  new.sat := now(); -- server receive time (catch-up reads)
   return new;
 end $$;
 
 drop trigger if exists lumiar_newer_wins on public.lumiar_mundo;
-create trigger lumiar_newer_wins before update on public.lumiar_mundo
+create trigger lumiar_newer_wins before insert or update on public.lumiar_mundo
   for each row execute function public.lumiar_newer_wins();
 
--- 4 -------------------------------------------------------------------------------------------------------------
+-- 5 -------------------------------------------------------------------------------------------------------------
 create or replace function public.lumiar_now() returns timestamptz
 language sql stable as $$ select now() $$;
 
@@ -94,11 +100,11 @@ begin
   end if;
 end $$;
 
-create index if not exists lumiar_mundo_w_at on public.lumiar_mundo (w, at);
+create index if not exists lumiar_mundo_w_sat on public.lumiar_mundo (w, sat);
 
 commit;
 
--- Check after running (should list the v5 names, the 32000 check, the trigger and the function):
+-- Check after running (should list the v5 names, the 32000 check, the trigger, the sat column and the function):
 --   select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.lumiar_mundo'::regclass;
 --   select tgname from pg_trigger where tgrelid = 'public.lumiar_mundo'::regclass and not tgisinternal;
 --   select public.lumiar_now();

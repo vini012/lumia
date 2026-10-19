@@ -9,6 +9,8 @@ const tests = []; const test = (name, fn) => tests.push({ name, fn });
 let fails = 0, passes = 0, cur = '';
 function ok(cond, msg) { if (cond) { passes++; return; } fails++; console.log('  FAIL [' + cur + '] ' + msg); }
 function eq(a, b, msg) { const A = JSON.stringify(a), B = JSON.stringify(b); ok(A === B, (msg || '') + ' expected ' + B + ' got ' + A); }
+const sorted = v => Array.isArray(v) ? v.map(sorted) : v && typeof v === 'object' ? Object.keys(v).sort().reduce((o, k) => (o[k] = sorted(v[k]), o), {}) : v;
+function same(a, b, msg) { const A = JSON.stringify(sorted(a)), B = JSON.stringify(sorted(b)); ok(A === B, (msg || '') + ' expected ' + B + ' got ' + A); } // key order does not matter
 function near(a, b, tol, msg) { ok(Math.abs(a - b) <= tol, (msg || '') + ` expected ${b}±${tol} got ${a}`); }
 const H = 3600e3, MIN = 60e3;
 
@@ -172,7 +174,7 @@ test('page hide: everything is written down and sent with keepalive', async () =
 });
 test('progress survives a new phone (cleared browser): same world + name', async () => {
   const srv = new FakeServer(); const A = device('A', { server: srv }); await boot(A, 'Vini');
-  const p = A.L.save.player; p.inv = { madeira: 12, sem_trigo: 3 }; p.sp = { faisca: 10, brotar: 20 }; p.notes = { n01: 111, n02: 222 }; p.home = [1, 2, 3]; A.L.save.setPos(100, 20, -50, 1.2);
+  const p = A.L.save.player; p.inv = { madeira: 12, sem_trigo: 3 }; p.sp = { faisca: 10, brotar: 20 }; p.notes = { n01: 111, n02: 222 }; p.home = [1, 2, 3]; A.L.save.setPos(100, 20, -50, 1.2); A.L.save.dirty();
   await advance(6000); kill(A);
   const N = device('newphone', { server: srv }); const p2 = await boot(N, 'vini'); // lower case: same slug
   eq(p2.inv, { madeira: 12, sem_trigo: 3 }); eq(p2.sp, { faisca: 10, brotar: 20 }); eq(p2.notes, { n01: 111, n02: 222 }); eq(p2.pos, [100, 20, -50, 1.2]); eq(p2.home, [1, 2, 3]);
@@ -187,7 +189,7 @@ test('two devices of the same player: remote progress adopted, nothing lost', as
   eq(A.L.save.player.inv.madeira, 9, 'A adopts newer inventory'); eq(A.L.save.player.notes, { n01: 1, n02: 2 }); ok(ev >= 1, 'player event');
   await advance(3000); ok(dups.length === 1, 'duplicate device detected via presence');
 });
-test('fresh device offline at boot, then online: existing save wins, its story progress merged', async () => {
+test('fresh device offline at boot, then online: existing save wins, what was done offline is merged in', async () => {
   const srv = new FakeServer(); const A = device('A', { server: srv }); await boot(A, 'Vini');
   A.L.save.player.inv = { madeira: 30 }; A.L.save.player.notes = { n05: 1 }; A.L.save.dirty(); await advance(5000); kill(A);
   const C = device('C', { server: srv, offline: true }); C.client = null;
@@ -195,8 +197,8 @@ test('fresh device offline at boot, then online: existing save wins, its story p
   eq(C.L.save.status, 'offline'); eq(p.inv, {}, 'fresh while offline');
   p.inv.frutinhas = 2; p.notes.n01 = 7; C.L.save.dirty(); await advance(6000);
   C.setOffline(false); await advance(15000);
-  eq(C.L.save.player.inv, { madeira: 30 }, 'server inventory wins'); eq(C.L.save.player.notes, { n05: 1, n01: 7 }, 'notes merged');
-  eq(srv.rows.get('teste|p5|vini').d.notes, { n05: 1, n01: 7 }, 'merged progress written back');
+  same(C.L.save.player.inv, { madeira: 30, frutinhas: 2 }, 'server inventory kept + the berries picked offline'); same(C.L.save.player.notes, { n05: 1, n01: 7 }, 'notes merged');
+  same(srv.rows.get('teste|p5|vini').d.notes, { n05: 1, n01: 7 }, 'merged progress written back'); same(srv.rows.get('teste|p5|vini').d.inv, { madeira: 30, frutinhas: 2 });
 });
 test('migration not applied: server refuses v5 rows, data kept, delivered after the fix', async () => {
   const srv = new FakeServer({ allowed: new Set(['builds4', 'cut4']) }); const A = device('A', { server: srv }); await boot(A, 'Vini');
@@ -221,9 +223,9 @@ test('skipToDawn moves every client clock; server clock skew', async () => {
 });
 test('explored map: per player, merged between devices', async () => {
   const srv = new FakeServer(); const A = device('A', { server: srv }); await boot(A, 'Vini');
-  A.L.save.explored.reveal(0, 0, 300); await advance(16000); ok(srv.rows.has('teste|m5|vini'), 'm5 written');
+  A.L.save.explored.reveal(0, 0, 300); await advance(30000); ok(!srv.rows.has('teste|m5|vini'), 'm5 waits for its own 60 s window'); await advance(31000); ok(srv.rows.has('teste|m5|vini'), 'm5 written');
   const B = device('B', { server: srv }); await boot(B, 'Vini'); ok(B.L.save.explored.seen(0, 0), 'B loads mask');
-  B.L.save.explored.reveal(3000, 3000, 200); await advance(16000);
+  B.L.save.explored.reveal(3000, 3000, 200); await advance(61000);
   ok(A.L.save.explored.seen(3000, 3000) && A.L.save.explored.seen(0, 0), 'A merged B reveal (OR)');
   const C = device('C', { server: srv }); await boot(C, 'Bia'); ok(!C.L.save.explored.seen(0, 0), 'other player has own map');
 });
@@ -239,6 +241,138 @@ test('local backend: no server, other tab sees writes, reload keeps data', async
   eq(A.L.save.backend, 'local'); eq(A.L.save.status, 'local');
   A.L.save.set('b5', 'l1', { x: 4 }); A.L.save.player.inv.pedra = 3; A.L.save.dirty(); await advance(6000);
   const A2 = device('A2', { storage: store }); await boot(A2, 'Vini'); eq(A2.L.save.get('b5', 'l1').x, 4); eq(A2.L.save.player.inv.pedra, 3);
+});
+
+// ================================================================ review regressions (persistence)
+const OLD = () => ({ inv: { madeira: 120, ouro: 9 }, sp: { faisca: 1 }, notes: { n01: 1, n02: 1 }, flags: { a: 1 }, home: [90, 200, 40], pos: [100, 200, 50, 0], st: { fome: 70, en: 100, mana: 100 } });
+const seedP5 = (srv, d, age) => srv.upsert([{ w: 'teste', c: 'p5', id: 'vini', d: Object.assign({ v: 5, name: 'Vini', ts: T.now - (age || 2 * H), dev: 'dOld' }, d), at: new Date(T.now - (age || 2 * H)).toISOString() }]);
+async function initWait(dev, name, ms, o) { const p = dev.L.save.init(Object.assign({ world: 'teste', name, timeout: ms }, o)); await advance(ms + 500); await p; }
+const ownInKeepalive = dev => dev.ctx.fetchLog.some(f => JSON.parse(f.opt.body).some(r => r.c === 'p5' || r.c === 'm5'));
+function sameProgress(d, o, msg) { same(d.inv, o.inv, msg + ' inv'); same(d.sp, o.sp, msg + ' sp'); same(d.notes, o.notes, msg + ' notes'); same(d.flags, o.flags, msg + ' flags'); eq(d.home, o.home, msg + ' home'); }
+test('blocker: offline boot, signal back, page hidden before the load retry -> server player row untouched', async () => {
+  const srv = new FakeServer(); seedP5(srv, OLD()); const A = device('A', { server: srv }); A.setOffline(true);
+  await initWait(A, 'Vini', 3000, { defaults: { inv: { frutinhas: 4 } } }); ok(!A.L.save.loaded, 'not loaded yet');
+  srv.latency = 5000; A.L.save.player.inv.pedra = 2; A.L.save.dirty(); A.setOffline(false); await advance(300); ok(!A.L.save.loaded, 'load retry still in flight');
+  A.hide(); await advance(1500);
+  sameProgress(srv.rows.get('teste|p5|vini').d, OLD(), 'server after hide:'); ok(!ownInKeepalive(A), 'keepalive carried no own record');
+  srv.latency = 30; A.show(); await advance(30000); ok(A.L.save.loaded, 'loaded after showing again');
+  const p = A.L.save.player; eq([p.inv.madeira, p.inv.ouro, p.inv.pedra], [120, 9, 2], 'server progress + what was picked up meanwhile'); ok(p.sp.faisca && p.notes.n02 && p.flags.a, 'spells, notes, flags kept');
+  const sv = srv.rows.get('teste|p5|vini').d; eq([sv.inv.madeira, sv.inv.pedra], [120, 2], 'server merged'); eq(sv.home, OLD().home);
+});
+test('blocker: slow first load (15 s) and the page is hidden before it finished', async () => {
+  const srv = new FakeServer(); seedP5(srv, OLD(), 24 * H); srv.latency = 15000; const A = device('A', { server: srv });
+  await initWait(A, 'Vini', 8000, { defaults: { inv: { frutinhas: 4 } } }); ok(!A.L.save.loaded, 'boot went on without the server');
+  A.L.save.player.st.fome = 79.9; A.L.save.dirty(); await advance(500); A.hide(); await advance(1000);
+  sameProgress(srv.rows.get('teste|p5|vini').d, OLD(), 'server after hide:'); ok(!ownInKeepalive(A), 'keepalive carried no own record');
+  A.show(); srv.latency = 30; await advance(60000);
+  ok(A.L.save.loaded, 'loaded'); eq(A.L.save.player.inv.madeira, 120); eq(srv.rows.get('teste|p5|vini').d.inv.madeira, 120);
+});
+test('blocker: an old phone with a stale mirror is hidden before its load -> newer progress from the other phone survives', async () => {
+  const srv = new FakeServer(); const storeA = new Map();
+  let A = device('A', { server: srv, storage: storeA }); await boot(A, 'Vini');
+  A.L.save.player.inv = { madeira: 5 }; A.L.save.dirty(); await advance(6000); { const c = A.L.save.close(); await advance(2000); await c; } kill(A);
+  T.now += 20 * H; const B = device('B', { server: srv }); await boot(B, 'Vini');
+  B.L.save.player.inv.madeira = 200; B.L.save.player.inv.ouro = 12; B.L.save.player.home = [9, 9, 9]; B.L.save.dirty(); await advance(6000); { const c = B.L.save.close(); await advance(2000); await c; } kill(B);
+  T.now += 20 * H; srv.latency = 15000; A = device('A3', { server: srv, storage: storeA }); await initWait(A, 'Vini', 8000);
+  A.L.save.dirty(); await advance(300); A.hide(); await advance(1000);
+  const mid = srv.rows.get('teste|p5|vini').d; eq([mid.inv.madeira, mid.inv.ouro, mid.home], [200, 12, [9, 9, 9]], 'server kept day 2');
+  A.show(); srv.latency = 30; await advance(120000);
+  eq([A.L.save.player.inv.madeira, A.L.save.player.inv.ouro], [200, 12], 'old phone adopted day 2'); eq(srv.rows.get('teste|p5|vini').d.inv.madeira, 200);
+});
+test('first load slower than the boot timeout that then fails is retried', async () => {
+  const srv = new FakeServer(); srv.latency = 12000; const A = device('A', { server: srv }); A.netDown = true;
+  await initWait(A, 'Vini', 3000); ok(!A.L.save.loaded); await advance(15000);
+  A.netDown = false; srv.latency = 30; A.L.save.player.inv.madeira = 5; A.L.save.dirty(); await advance(2 * MIN);
+  ok(A.L.save.loaded, 'loaded after the retry'); eq(A.L.save.status, 'online'); eq(A.L.save.pending, 0); ok(!A.L.save.saving, 'not stuck in "saving"');
+  eq((srv.rows.get('teste|p5|vini') || { d: {} }).d.inv, { madeira: 5 }, 'player row on the server');
+});
+test('a request that never answers times out; later saves keep flowing', async () => {
+  const srv = new FakeServer(); const A = device('A', { server: srv }); await boot(A, 'Vini');
+  srv.latency = 1e9; A.L.save.set('b5', 'x1', { t: 'wall' }); await advance(1000); srv.latency = 30;
+  for (let i = 0; i < 5; i++) { A.L.save.set('b5', 'y' + i, { t: 'wall' }); await advance(2000); }
+  A.L.save.player.inv.pedra = 3; A.L.save.dirty(); await advance(2 * MIN);
+  ok([0, 1, 2, 3, 4].every(i => srv.rows.has('teste|b5|y' + i)) && srv.rows.has('teste|b5|x1'), 'all delivered (the hung one again)');
+  eq(A.L.save.pending, 0); ok(!A.L.save.saving); eq(A.L.save.status, 'online'); eq(srv.rows.get('teste|p5|vini').d.inv.pedra, 3);
+});
+test('catch-up uses the server receive time: a build made offline and delivered late is seen', async () => {
+  const srv = new FakeServer(); const A = device('A', { server: srv }), B = device('B', { server: srv }); await boot(A, 'Vini'); await boot(B, 'Bia');
+  B.setOffline(true); B.L.save.set('b5', 'house1', { t: 'wall', x: 3 }); await advance(30 * MIN);   // Bia builds with no signal
+  A.setOffline(true); await advance(30 * MIN);                                                       // Vini's socket is down
+  B.setOffline(false); await advance(2 * MIN); ok(srv.rows.has('teste|b5|house1'), 'delivered late');
+  ok(Date.parse(srv.rows.get('teste|b5|house1').sat) - Date.parse(srv.rows.get('teste|b5|house1').at) > 50 * MIN, 'sat is the receive time');
+  await advance(28 * MIN); A.setOffline(false); await advance(3 * MIN);
+  ok(A.L.save.get('b5', 'house1'), 'A sees house1 after catch-up'); eq(A.L.save.status, 'online');
+});
+test('catch-up without the sat column (old migration) falls back to at', async () => {
+  const srv = new FakeServer({ noSat: true }); const A = device('A', { server: srv }), B = device('B', { server: srv }); await boot(A, 'Vini'); await boot(B, 'Bia');
+  A.hide(); A.netDown = true; A.client.setOffline(true); await advance(1000);
+  B.L.save.set('b5', 'm1', { x: 1 }); await advance(2000);
+  A.netDown = false; A.client.setOffline(false); A.show(); await advance(30000);
+  ok(A.L.save.get('b5', 'm1'), 'caught up'); ok(A.client.calls.select > 0 && A.L.save.status === 'online', 'online');
+});
+test('the live player object keeps its nested objects when another device is merged in', async () => {
+  const srv = new FakeServer(); const A = device('A', { server: srv }), B = device('B', { server: srv }); await boot(A, 'Vini'); await boot(B, 'Vini');
+  const F = A.L.save.player.flags, INV = A.L.save.player.inv, P = A.L.save.player;
+  B.L.save.player.flags.seen_lighthouse = 1; B.L.save.player.inv.pedra = 4; B.L.save.dirty(); await advance(6000);
+  ok(A.L.save.player.flags.seen_lighthouse && A.L.save.player.inv.pedra === 4, 'A got it');
+  ok(A.L.save.player === P && A.L.save.player.flags === F && A.L.save.player.inv === INV, 'same objects (player, flags, inv)');
+  F.step = 7; A.L.save.dirty(); await advance(6000); eq(srv.rows.get('teste|p5|vini').d.flags.step, 7, 'written through the cached flags');
+});
+test('same player on two devices at the same time: both changes kept (three-way merge)', async () => {
+  const srv = new FakeServer(); const A = device('A', { server: srv }), B = device('B', { server: srv }); await boot(A, 'Vini'); await boot(B, 'Vini');
+  A.L.save.player.inv.madeira = 10; A.L.save.dirty(); B.L.save.player.inv.pedra = 7; B.L.save.player.notes.n05 = 1; B.L.save.dirty();
+  await advance(20000);
+  same(srv.rows.get('teste|p5|vini').d.inv, { madeira: 10, pedra: 7 }, 'server'); same(A.L.save.player.inv, { madeira: 10, pedra: 7 }, 'A'); same(B.L.save.player.inv, { madeira: 10, pedra: 7 }, 'B');
+  ok(A.L.save.player.notes.n05, 'A got the note');
+  A.L.save.player.inv.madeira -= 4; A.L.save.dirty(); B.L.save.player.inv.madeira += 2; B.L.save.dirty(); await advance(20000);
+  eq([A.L.save.player.inv.madeira, B.L.save.player.inv.madeira, srv.rows.get('teste|p5|vini').d.inv.madeira], [8, 8, 8], 'spent on one, picked up on the other: 10 - 4 + 2');
+});
+test('traffic: presence only on change (+2 s heartbeat), idle player row, m5 own window', async () => {
+  const srv = new FakeServer(); const A = device('A', { server: srv }), B = device('B', { server: srv }); await boot(A, 'Vini'); await boot(B, 'Bia');
+  const ch = [...A.client.chans].find(c => c.name === 'lm-w5-teste'); let sends = 0; const orig = ch.send; ch.send = m => { sends++; return orig.call(ch, m); };
+  for (let i = 0; i < 600; i++) { A.L.save.room.presence({ x: 1, y: 2, z: 3, ry: 0 }); await advance(16); }
+  ok(sends <= 6, 'standing still ~10 s: ' + sends + ' broadcasts (heartbeat only)'); sends = 0;
+  for (let i = 0; i < 600; i++) { A.L.save.room.presence({ x: 1 + i * .1, y: 2, z: 3, ry: 0 }); await advance(16); }
+  ok(sends > 30, 'walking: ' + sends + ' broadcasts'); ok(B.L.save.room.peers().some(p => p.presence.x > 50), 'B sees the walk');
+  const S = device('S', { server: srv, mods: ['save', 'survival'] }); S.L.ground = () => 200; await boot(S, 'Lia'); await advance(5000);
+  let n0 = srv.log.length; for (let i = 0; i < 600; i++) { S.L.surv.tick(.1, { x: 0, y: 200, z: 0, grounded: true }); await advance(100); }
+  const idle = srv.log.slice(n0).filter(l => l.put && l.put.includes('|p5|')).length; ok(idle <= 2, 'idle minute with survival ticking: ' + idle + ' player writes');
+  n0 = srv.log.length; let x = 0; for (let i = 0; i < 600; i++) { x += .6; A.L.save.explored.reveal(x, 0, 110); A.L.save.setPos(x, 200, 0, 0); await advance(100); }
+  const puts = srv.log.slice(n0).filter(l => l.put); const m5 = puts.filter(l => l.put.includes('|m5|vini')).length, p5 = puts.filter(l => l.put.includes('|p5|vini')).length;
+  ok(p5 <= 3 && m5 <= 1, 'walking a minute: p5 ' + p5 + ', m5 ' + m5);
+});
+test('h5 harvest records past the 3 h window are pruned (memory, mirror, event)', async () => {
+  const srv = new FakeServer(); const store = new Map(); let A = device('A', { server: srv, storage: store }); await boot(A, 'Vini');
+  const ex = []; A.L.save.on('h5', (id, d, old, origin) => { if (origin === 'expire') ex.push(id); });
+  for (let i = 0; i < 300; i++) A.L.save.set('h5', 't_' + i + '_0_1', { at: T.now, by: 'vini' });
+  await advance(40000); const mirror = () => [...store.keys()].filter(k => k.includes(':c:h5')).reduce((n, k) => n + (store.get(k) || '').length, 0);
+  ok(mirror() > 3000, 'mirrored'); await advance(3 * H + 15 * MIN);
+  eq(A.L.save.all('h5').size, 0, 'pruned in the session'); eq(ex.length, 300, 'expire events'); await advance(60000); ok(mirror() < 100, 'mirror emptied: ' + mirror());
+  { const c = A.L.save.close(); await advance(2000); await c; } kill(A);
+  T.now += 30 * H; A = device('A2', { server: srv, storage: store }); await boot(A, 'Vini'); await advance(6000); eq(A.L.save.all('h5').size, 0, 'not loaded back from the server either');
+});
+test('mirror: sharded, written at most every 30 s, one change rewrites one shard', async () => {
+  const srv = new FakeServer(); const store = new Map(); const A = device('A', { server: srv, storage: store }); await boot(A, 'Vini');
+  for (let i = 0; i < 400; i++) A.L.save.set('b5', 'p' + i, { t: 'wall', x: i, y: 200, z: 0 }); await advance(35000);
+  const keys = [...store.keys()].filter(k => k.includes(':c:b5:')); eq(keys.length, 16, '16 b5 shards');
+  const writes = []; const ls = A.ctx.localStorage, set0 = ls.setItem; ls.setItem = (k, v) => { writes.push(k); set0(k, v); };
+  A.L.save.set('b5', 'p7', { t: 'wall', x: 7, y: 201, z: 0 }); await advance(10000); ok(!writes.some(k => k.includes(':c:b5')), 'not rewritten at once');
+  await advance(25000); const w = writes.filter(k => k.includes(':c:b5')); eq(w.length, 1, 'one shard rewritten');
+  eq(JSON.parse(store.get(w[0])).p7.y, 201, 'the shard holds the change');
+});
+test('row size: the estimate equals the server octet_length; an oversized player row drops stats instead of failing', async () => {
+  const { srvBytes } = device('x').L.save._t;
+  const objs = [{ a: 1, b: [1, 2, { c: 'x, y: z' }], d: { e: null, f: true } }, { inv: { madeira: 1, 'pão': 2 }, s: 'olá "mundo"', n: [] }, [], {}, { k: [[1, 2], [3]] }];
+  for (const o of objs) eq(srvBytes(o), E.jsonbLen(o), JSON.stringify(o));
+  const srv = new FakeServer(); const A = device('A', { server: srv }); await boot(A, 'Vini');
+  A.L.save.player.inv.madeira = 3; A.L.save.player.stats = {}; for (let i = 0; i < 2600; i++) A.L.save.player.stats['s' + i] = i; A.L.save.dirty(); await advance(8000);
+  const row = srv.rows.get('teste|p5|vini'); ok(row && row.d.inv.madeira === 3, 'player row saved'); eq(Object.keys(row.d.stats).length, 0, 'statistics dropped from the server copy'); eq(A.L.save.pending, 0);
+});
+test('player keys: accents and case fold to one save, other scripts get their own key', () => {
+  const s = device('x').L.save;
+  eq(s.playerKey('Bia'), s.playerKey('bía'), 'same person typing without the accent'); eq(s.playerKey('Vinícius'), 'vinicius');
+  const a = s.playerKey('Юля'), b = s.playerKey('Аня'), c = s.playerKey('さくら'); ok(a !== b && b !== c && a !== 'jogador' && /^jogador-[a-z0-9]{6}$/.test(a), [a, b, c].join(' '));
+  ok(/^ana-[a-z0-9]{6}$/.test(s.playerKey('Ana 🌸')), 'emoji name: ' + s.playerKey('Ana 🌸'));
 });
 
 // ================================================================ survival
@@ -346,8 +480,39 @@ test('survival: falling into the cloud sea and leaving the world -> soft respawn
 test('survival: state persists through L.save (reload)', async () => {
   const srv = new FakeServer(); const store = new Map(); const A = await survDev('A', { server: srv, storage: store }); const S = A.L.surv;
   S.set({ fome: 42.4242, mana: 13, frio: .2 }); S.addBuff('energia', 120); run(A.L, 2.2, { x: 0, y: 200, z: 0, night: 0, grounded: true }); await advance(6000);
-  const st = srv.rows.get('teste|p5|a').d.st; near(st.fome, 42.4, .2); ok(st.buffs.energia > 0, 'buff saved'); kill(A);
-  const N = await survDev('A', { server: srv }); N.L.surv.tick(.01, { x: 0, y: 200, z: 0 }); near(N.L.surv.fome, 42.4, .2, 'restored on a new phone'); ok(N.L.surv.buff('energia') > 100, 'buff restored');
+  const st = srv.rows.get('teste|p5|a').d.st; near(st.fome, 42, .6, 'saved as a whole number'); eq(st.fome, Math.round(st.fome)); ok(st.buffs.energia > 0, 'buff saved'); kill(A);
+  const N = await survDev('A', { server: srv }); N.L.surv.tick(.01, { x: 0, y: 200, z: 0 }); near(N.L.surv.fome, 42, .6, 'restored on a new phone'); ok(N.L.surv.buff('energia') > 100, 'buff restored');
+});
+
+test('survival: bad numbers in ctx (NaN, strings, undefined) never poison the state', async () => {
+  const srv = new FakeServer(); const A = await survDev('A', { server: srv }); const S = A.L.surv; S.set({ fome: 80, en: 100, mana: 100, frio: 0 });
+  S.tick(.1, { x: 0, y: 200, z: 0, night: NaN, grounded: true }); S.tick(.1, { x: NaN, y: 'a', z: undefined, altitude: NaN, raining: NaN, grounded: true });
+  S.tick(NaN, { x: 0, y: 200, z: 0 }); S.tick(.1, null);
+  const v = S.status(); ok(['fome', 'en', 'mana', 'frio', 'wet'].every(k => Number.isFinite(v[k])), 'all finite ' + JSON.stringify([v.fome, v.en, v.mana, v.frio, v.wet]));
+  S.useMana(NaN); S.addMana('x'); S.addBuff('energia', NaN); S.warm(NaN); S.set({ fome: NaN });
+  run(A.L, 5, { x: 0, y: 200, z: 0, grounded: true }); const w = S.status();
+  ok(Number.isFinite(w.fome) && w.fome > 70 && w.fome < 81, 'hunger keeps working: ' + w.fome); ok(S.eat && Number.isFinite(S.status().mana), 'mana finite');
+  await advance(40000); const st = srv.rows.get('teste|p5|a').d.st; ok(Object.values(st).every(x => x === null || typeof x === 'object' || Number.isFinite(x)) && st.fome != null, 'saved copy finite');
+});
+test('survival: a daytime nap gives some energy, then has a cooldown', async () => {
+  const A = await survDev('A'); const S = A.L.surv; A.L.clock.setHours(13); S.set({ en: 20 });
+  const r1 = S.sleep({ x: 1, y: 200, z: 1 }); ok(r1.nap && r1.rested, 'first nap rests'); near(S.status().en, 60, .5, '+40');
+  S.set({ en: 20 }); const r2 = S.sleep({ x: 1, y: 200, z: 1 }); ok(r2.nap && !r2.rested, 'second nap right away: no rest'); near(S.status().en, 20, .5);
+  run(A.L, 481, { x: 1, y: 200, z: 1, grounded: true, moving: true }, .5); A.L.clock.setHours(13); S.set({ en: 20 }); ok(S.sleep({ x: 1, y: 200, z: 1 }).rested, 'rests again 8 min later');
+});
+test('survival: gliding down under the cloud layer to low ground is not a fall into the clouds', async () => {
+  const A = await survDev('A'); const L = A.L, S = L.surv; L.P = { x: 0, y: 200, z: 0, vx: 0, vy: 0, vz: 0 };
+  L.ground = (x) => x > 100 ? 20 : 200; for (let i = 0; i < 30; i++) S.tick(.1, { x: 90, y: 200, z: 0, grounded: true });
+  let y = 200; for (let i = 0; i < 70; i++) { y -= 2.5; S.tick(.1, { x: 105 + i, y, z: 0, grounded: false, gliding: true }); }
+  ok(!S.respawning, 'glided down to a beach at 20 m (no cloud-sea map)');
+  for (let i = 0; i < 20; i++) S.tick(.1, { x: 180, y: 20, z: 0, grounded: true });
+  // with WORLD's cloud-sea map: over the sea the clouds take you back even while gliding; over land never
+  L.cloudSeaAt = x => x > 300; y = 80; for (let i = 0; i < 20; i++) { y -= 2; S.tick(.1, { x: 250, y, z: 0, grounded: false, gliding: true }); } ok(!S.respawning, 'over land: fine');
+  L.ground = () => -30; y = 80; for (let i = 0; i < 20 && !S.respawning; i++) { y -= 2; S.tick(.1, { x: 350, y, z: 0, grounded: false, gliding: true }); } ok(S.respawning, 'over the cloud sea: back to safe ground');
+});
+test('survival: buff names on the chips', async () => {
+  const A = await survDev('A'); const S = A.L.surv; S.addBuff('resistente', 60); S.addBuff('energia', 60); S.warm(60);
+  same(S.buffs().map(b => b.chip).sort(), ['Agasalho', 'Calor', 'Fôlego']);
 });
 
 // ================================================================ farm
@@ -386,6 +551,10 @@ test('farm: the moon flower grows only at night (~36 h real), watering doubles, 
   const s = { crop: 'lua', g: 5 * HOUR, gt: 0, gg: .6 * D, wu: 20 * MIN };
   const left = m.timeLeft(s, 0, .6 * D); let t = 0; while (m.progress(s, t, .6 * D + t) < 1 && t < 80 * HOUR) t += 1000;
   near(left / 1000, t / 1000, 1.5, 'timeLeft matches a step simulation (s)');
+  // design decision: a night skipped by sleeping counts as a night that passed (growth is in game time)
+  const sk = { crop: 'lua', g: 0, gt: 0, gg: 22 / 24 * D, wu: 0 };
+  near(m.effMs(sk, 1000, 22 / 24 * D + 8 / 24 * D + 1000), 8 / 24 * D, 1, 'a 22:00 -> 06:00 skip adds the 8 in-game night hours');
+  near(m.effMs(sk, 1000, 22 / 24 * D + 1000), 1000, 1e-6, 'without the skip: 1 s');
   const wd = { crop: 'lua', pt: 0, gt: 0, gg: 0, g: 0, wu: 60 * MIN }; near(m.effMs(wd, 60 * MIN, 60 * MIN), 2 * m.nightIn(0, 60 * MIN), 1e-6, 'watered night counts double');
 });
 test('farm: two players share plots — plant, same stage on both phones, water, harvest, regrow, Brotar', async () => {
@@ -444,6 +613,7 @@ test('farm: dismantling a canteiro gives the crop back; water plots take lotus; 
   for (const t of tests) {
     if (filter && t.name.indexOf(filter) < 0) continue; cur = t.name; const f0 = fails;
     try { await t.fn(); } catch (e) { fails++; console.log('  EXC [' + t.name + ']', e && e.stack ? e.stack.split('\n').slice(0, 4).join('\n') : e); }
+    T.q.length = 0; // the devices of a finished test are gone: drop their timers
     console.log((fails === f0 ? 'ok   ' : 'FAIL ') + t.name);
   }
   console.log(`\n${passes} checks passed, ${fails} failed`); process.exit(fails ? 1 : 0);

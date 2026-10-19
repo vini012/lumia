@@ -24,6 +24,7 @@
     ok: '<path d="M9.4 14.3l1.9 1.9 3.6-3.8"/>',
     up: '<path d="M12 16.6v-5.2M9.7 13.6 12 11.3l2.3 2.3"/>',
     off: '<path d="M4.6 4.4 19.4 20"/>',
+    wait: '<path d="M9.2 14.9h.01M12 14.9h.01M14.8 14.9h.01" stroke-width="2.3"/>',
     casa: '<path d="M3.8 11.6 12 4.8l8.2 6.8"/><path d="M6.3 9.8v9h11.4v-9"/><path d="M10.4 18.8v-4.3h3.2v4.3"/>',
     lua: '<path class="sv-f" d="M15.4 3.6a8.6 8.6 0 1 0 5 13.9A7.1 7.1 0 0 1 15.4 3.6z"/>',
     sol: '<circle class="sv-f" cx="12" cy="12" r="4.4"/><path d="M12 2.6v2.6M12 18.8v2.6M2.6 12h2.6M18.8 12h2.6M5.4 5.4l1.8 1.8M16.8 16.8l1.8 1.8M5.4 18.6l1.8-1.8M16.8 7.2l1.8-1.8"/>',
@@ -48,7 +49,7 @@
  padding:7px 10px 6px 9px;pointer-events:auto;transform:rotate(-.6deg);transform-origin:0 0;transition:opacity .6s,transform .6s;
  background:radial-gradient(120% 140% at 30% 20%,#fbf3e1 0,var(--paper) 55%,var(--paper2) 100%);
  border:2px solid var(--ink);border-radius:20px 14px 22px 13px/14px 22px 13px 20px;box-shadow:0 3px 0 rgba(122,91,69,.42),0 7px 16px rgba(30,20,10,.2)}
-.sv-hud::before{content:'';position:absolute;left:-14px;top:-9px;width:46px;height:17px;transform:rotate(-24deg);opacity:.9;clip-path:${TAPE};
+.sv-hud::before{content:'';position:absolute;left:62%;top:-9px;width:44px;height:16px;transform:rotate(5deg);opacity:.88;clip-path:${TAPE};
  background:repeating-linear-gradient(-45deg,rgba(255,255,255,.25) 0 4px,rgba(255,255,255,0) 4px 9px),#86bcae}
 #sv.sv-fade .sv-hud{opacity:0;transform:rotate(-.6deg) translateY(-12px)}
 .sv-g{position:relative;width:var(--gs);display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer}
@@ -83,6 +84,7 @@
 .sv-cloud[data-s="saving"] .sv-k{animation:sv-up 1.1s ease-in-out infinite}
 .sv-cloud[data-s="off"]{color:#b4553e}
 .sv-cloud[data-s="off"] .sv-i:first-child{stroke-dasharray:3 2.2}
+.sv-cloud[data-s="err"]{color:#a0773f}
 .sv-buffs{position:absolute;top:calc(var(--sat) + 14px + var(--gs) + 26px);left:calc(var(--sal) + 16px);display:flex;gap:6px;flex-wrap:wrap;max-width:60vw;transition:top .8s}
 #sv.sv-nolabels .sv-buffs{top:calc(var(--sat) + 14px + var(--gs) + 13px)}
 .sv-buff{display:flex;align-items:center;gap:4px;padding:2px 8px 2px 4px;border-radius:11px 8px 12px 9px;background:rgba(251,243,225,.95);border:1.5px solid rgba(122,91,69,.6);
@@ -102,8 +104,8 @@
 .sv-frost::after{content:'';position:absolute;inset:0;opacity:.55;
  background:radial-gradient(circle at 4% 10%,rgba(255,255,255,.8) 0 1.5px,transparent 2.5px) 0 0/37px 41px,radial-gradient(circle at 60% 40%,rgba(255,255,255,.7) 0 1px,transparent 2px) 0 0/23px 29px;
  -webkit-mask:radial-gradient(ellipse 70% 66% at 50% 50%,transparent 62%,#000 92%);mask:radial-gradient(ellipse 70% 66% at 50% 50%,transparent 62%,#000 92%)}
-.sv-veil{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;opacity:0;visibility:hidden;transition:opacity 1.1s,visibility 0s 1.1s;text-align:center;padding:24px}
-.sv-veil.sv-on{opacity:1;visibility:visible;transition:opacity 1.1s,visibility 0s;pointer-events:auto}
+.sv-cover{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;opacity:0;visibility:hidden;transition:opacity 1.1s,visibility 0s 1.1s;text-align:center;padding:24px}
+.sv-cover.sv-on{opacity:1;visibility:visible;transition:opacity 1.1s,visibility 0s;pointer-events:auto}
 .sv-sleep{background:radial-gradient(120% 90% at 50% 18%,#33508f 0,#22376e 45%,#141f45 100%)}
 .sv-stars{position:absolute;inset:0;width:100%;height:100%;animation:sv-tw 4s ease-in-out infinite alternate}
 .sv-sleep::after{content:'';position:absolute;inset:0;opacity:0;transition:opacity 1s;background:linear-gradient(180deg,#9ec6ee 0,#ffd9a6 44%,#ffeccb 62%,#fbf3e3 100%)}
@@ -148,11 +150,11 @@
 @keyframes sv-drift{from{transform:translateX(-1.5%)}to{transform:translateX(1.5%)}}
 @keyframes sv-tw{from{opacity:.65}to{opacity:1}}
 @keyframes sv-zz{0%,100%{opacity:.35;transform:translateY(2px)}50%{opacity:.9;transform:translateY(-3px)}}
-@media (max-height:430px){#sv{--gs:clamp(34px,9.4vh,40px)}.sv-hud{padding:5px 8px 4px 7px}.sv-g b{font-size:9px}}
+@media (max-height:430px){#sv{--gs:clamp(34px,9.4vh,40px)}.sv-hud{padding:5px 8px 4px 7px}.sv-g b{font-size:10px}}
 @media (prefers-reduced-motion:reduce){#sv *{animation:none!important}}
 `;
 
-  // night sky and soft cloud puffs for the veils (random once, drawn as one SVG each)
+  // night sky and soft cloud puffs for the sleep / respawn covers (random once, drawn as one SVG each)
   function starsSVG() {
     let r = 7, c = ''; const R = () => (r = (r * 16807) % 2147483647) / 2147483647;
     for (let i = 0; i < 90; i++) { const x = R() * 1000, y = R() * 560, s = R(), rad = s > .93 ? 2.2 : s > .7 ? 1.5 : .9, op = .45 + R() * .5, col = R() > .8 ? '#fff3c8' : '#e8efff';
@@ -176,9 +178,10 @@
     ok: ['Tudo salvo', 'Seu mundo está guardado.'],
     saving: ['Salvando…', 'Guardando o que mudou.'],
     off: ['Sem internet', 'Tudo fica guardado aqui e segue quando a conexão voltar.'],
+    err: ['Não deu para salvar agora', 'Tentamos de novo daqui a pouco. Nada se perde.'],
     local: ['Salvo neste aparelho', 'Este mundo fica guardado aqui.'],
   };
-  const U = { el: null, g: {}, ready: false, shown: false, last: {}, cloud: 'ok', okSince: 0, hintT: 0, tipT: 0, labelsT: 0, sleepPhase: '', buffsKey: '', iv: 0, warmMax: 60 };
+  const U = { el: null, g: {}, ready: false, shown: false, last: {}, cloud: 'ok', okSince: 0, hintT: 0, tipT: 0, labelsT: 0, sleepPhase: '', buffsKey: null, iv: 0, warmMax: 60 };
   const $ = (cls, parent, tag, html) => { const e = document.createElement(tag || 'div'); if (cls) e.className = cls; if (html != null) e.innerHTML = html; if (parent) parent.appendChild(e); return e; };
 
   function build(opt) {
@@ -189,22 +192,22 @@
     for (const [k, n] of GA) {
       const g = $('sv-g sv-' + k, hud); const d = $('sv-dial', g); $('sv-ring', d); const disc = $('sv-disc', d, 'div', svg(k));
       if (k === 'frio') $('sv-wet', d, 'div', svg('gota'));
-      $('', g, 'b').textContent = n; g.dataset.k = k; U.g[k] = { g, disc, ic: k };
+      const lb = $('', g, 'b'); lb.textContent = n; g.dataset.k = k; U.g[k] = { g, disc, ic: k, lb, name: n };
       g.addEventListener('pointerdown', e => { e.stopPropagation(); tip(k); });
     }
     const cl = U.cloudEl = $('sv-cloud', hud, 'div', svg('nuvem') + '<span class="sv-k" style="position:absolute;inset:0">' + svg('ok') + '</span>'); cl.dataset.s = 'ok';
-    cl.addEventListener('pointerdown', e => { e.stopPropagation(); tip('cloud'); if (U.cloud === 'off' && L.save && L.save.retry) L.save.retry(); });
+    cl.addEventListener('pointerdown', e => { e.stopPropagation(); tip('cloud'); if ((U.cloud === 'off' || U.cloud === 'err') && L.save && L.save.retry) L.save.retry(); });
     U.buffs = $('sv-buffs', root);
     U.bubble = $('sv-bubble', root); U.bubble.setAttribute('role', 'status'); U.bubble.setAttribute('aria-live', 'polite');
     U.tip = $('sv-tip', root);
-    // sleep veil
-    const sl = U.sleep = $('sv-veil sv-sleep', root); sl.innerHTML = starsSVG();
+    // sleep cover
+    const sl = U.sleep = $('sv-cover sv-sleep', root); sl.innerHTML = starsSVG();
     const orb = $('sv-orb', sl); U.sun = $('sv-sun', orb, 'div', svg('sol')); U.moon = $('sv-moon', orb, 'div', svg('lua'));
     U.sBig = $('sv-big', sl); U.sSmall = $('sv-small', sl); U.zz = $('sv-zz', sl); U.zz.textContent = 'z z z';
     U.sBtn = $('sv-btn', sl, 'button'); U.sBtn.type = 'button'; U.sBtn.textContent = 'Levantar';
     U.sBtn.addEventListener('click', e => { e.stopPropagation(); if (L.surv && L.surv.wake) L.surv.wake('user'); });
-    // respawn veil
-    const rs = U.resp = $('sv-veil sv-resp', root); rs.innerHTML = puffsSVG(); U.rBig = $('sv-big', rs);
+    // respawn cover
+    const rs = U.resp = $('sv-cover sv-resp', root); rs.innerHTML = puffsSVG(); U.rBig = $('sv-big', rs);
     (opt.parent || document.body).appendChild(root);
     document.addEventListener('pointerdown', () => { if (U.tip.classList.contains('sv-on')) U.tip.classList.remove('sv-on'); }, { passive: true });
   }
@@ -216,7 +219,7 @@
     G.g.style.setProperty('--v', clamp(v, 0, 1).toFixed(4)); G.g.style.setProperty('--cap', clamp(cap == null ? 1 : cap, 0, 1).toFixed(4));
     G.g.className = 'sv-g sv-' + k + (cls ? ' ' + cls : '') + (G.g.classList.contains('sv-bump') ? ' sv-bump' : '');
   }
-  function setIcon(k, ic) { const G = U.g[k]; if (!G || G.ic === ic) return; G.ic = ic; G.disc.innerHTML = svg(ic); }
+  function setIcon(k, ic, label) { const G = U.g[k]; if (!G || G.ic === ic) return; G.ic = ic; G.disc.innerHTML = svg(ic); G.lb.textContent = label || G.name; }
   function readSurv() {
     const S = L.surv;
     if (S && S.status) return S.status();
@@ -230,7 +233,7 @@
     setG('en', v.en / 100, (v.enMax || 100) / 100, v.exhausted ? 'sv-tired' : '');
     setG('mana', v.mana / (v.manaMax || 100), 1, '');
     const warmLeft = L.surv && L.surv.buff ? L.surv.buff('quente') : 0;
-    if (warmLeft > 0) { U.warmMax = Math.max(U.warmMax, warmLeft); setIcon('frio', 'quente'); setG('frio', warmLeft / U.warmMax, 1, 'sv-warm' + (v.wet > .2 ? ' sv-iswet' : '')); }
+    if (warmLeft > 0) { U.warmMax = Math.max(U.warmMax, warmLeft); setIcon('frio', 'quente', 'Quente'); setG('frio', warmLeft / U.warmMax, 1, 'sv-warm' + (v.wet > .2 ? ' sv-iswet' : '')); }
     else { U.warmMax = 60; setIcon('frio', 'frio'); setG('frio', v.frio, 1, (v.frio >= .45 ? 'sv-cold' : '') + (v.wet > .2 ? ' sv-iswet' : '')); }
     const fr = warmLeft > 0 ? 0 : sst(.3, 1, v.frio); if (Math.abs((U.last.frost || 0) - fr) > .01) { U.last.frost = fr; U.frost.style.opacity = fr.toFixed(3); }
     // buffs
@@ -240,7 +243,7 @@
       const have = new Map([...U.buffs.children].map(c => [c.dataset.id, c]));
       for (const b of bs) {
         let c = have.get(b.id); if (!c) { c = $('sv-buff sv-b-' + b.id, U.buffs, 'div', svg(b.id === 'quente' ? 'quente' : b.id === 'resistente' ? 'frio' : 'en') + '<span></span>'); c.dataset.id = b.id; c.title = b.n || ''; }
-        have.delete(b.id); const s = Math.ceil(b.left); c.lastChild.textContent = (b.n ? b.n.split(' ')[0] + ' ' : '') + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+        have.delete(b.id); const s = Math.ceil(b.left); c.lastChild.textContent = (b.chip || b.n || '') + ' ' + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
       }
       for (const c of have.values()) c.remove();
     }
@@ -250,14 +253,14 @@
   }
   function cloudState() {
     const S = L.save; if (!S || !S.ready) return 'ok';
-    const st = S.status; if (st === 'offline' || st === 'refused') return 'off'; if (st === 'local') return 'local';
+    const st = S.status; if (st === 'offline') return 'off'; if (st === 'refused') return 'err'; if (st === 'local') return 'local';
     return S.saving ? 'saving' : 'ok';
   }
   function cloudTick() {
     const s = cloudState(); const el = U.cloudEl;
     if (s !== U.cloud) {
       U.cloud = s; el.dataset.s = s; el.classList.remove('sv-quiet'); U.okSince = Date.now();
-      el.innerHTML = s === 'local' ? svg('casa') : svg('nuvem') + '<span class="sv-k" style="position:absolute;inset:0">' + svg(s === 'off' ? 'off' : s === 'saving' ? 'up' : 'ok') + '</span>';
+      el.innerHTML = s === 'local' ? svg('casa') : svg('nuvem') + '<span class="sv-k" style="position:absolute;inset:0">' + svg(s === 'off' ? 'off' : s === 'err' ? 'wait' : s === 'saving' ? 'up' : 'ok') + '</span>';
       el.setAttribute('aria-label', CLOUD_TXT[s][0]);
     } else if (s === 'ok' && !el.classList.contains('sv-quiet') && Date.now() - U.okSince > 2500) el.classList.add('sv-quiet');
   }
@@ -267,8 +270,14 @@
   function tip(k) {
     let t; if (k === 'cloud') t = CLOUD_TXT[U.cloud]; else { const a = TIPS[k](readSurv()); t = [a[0] + ' · ' + a[1], a[2]]; }
     U.tip.innerHTML = ''; $('', U.tip, 'b').textContent = t[0]; $('', U.tip, 'em').textContent = t[1];
-    const hr = U.hud.getBoundingClientRect(); U.tip.style.top = (hr.bottom + 8) + 'px'; U.tip.style.left = Math.max(8, anchorX(k) - 30) + 'px';
+    U.tip.style.top = (belowHud() + 8) + 'px'; U.tip.style.left = Math.max(8, anchorX(k) - 30) + 'px';
     U.tip.classList.add('sv-on'); clearTimeout(U.tipT); U.tipT = setTimeout(() => U.tip.classList.remove('sv-on'), 3600);
+  }
+  function belowHud() {
+    let y = U.hud.getBoundingClientRect().bottom;
+    if (U.buffs.childElementCount) y = Math.max(y, U.buffs.getBoundingClientRect().bottom);
+    if (U.bubble.classList.contains('sv-on')) y = Math.max(y, U.bubble.getBoundingClientRect().bottom);
+    return y;
   }
   const HINT_AT = { fome: 'fome', fraco: 'fome', cansaco: 'en', frio: 'frio', calor: 'frio', soneca: 'en' };
   function hint(text, kind, ms) {
@@ -283,7 +292,7 @@
     G.g.classList.remove('sv-bump'); void G.g.offsetWidth; G.g.classList.add('sv-bump'); setTimeout(() => G.g.classList.remove('sv-bump'), 600);
   }
 
-  // ================================================================ sleep / respawn veils
+  // ================================================================ sleep / respawn covers
   function sleepEv(e) {
     const p = e && e.phase; if (!p) return; U.sleepPhase = p;
     if (p === 'start') {
@@ -314,11 +323,11 @@
       S.on('hint', h => hint(h.text, h.kind));
       S.on('sleep', sleepEv); S.on('respawn', respEv);
       S.on('ate', r => { if (r && r.gained > 0) floater('fome', '+' + Math.round(r.gained)); if (r && r.warm) floater('frio', '♨'); update(); });
-      S.on('buff', () => { U.buffsKey = ''; update(); });
+      S.on('buff', () => { U.buffsKey = null; update(); });
     }
     if (L.save && L.save.on) {
       L.save.on('status', () => cloudTick());
-      L.save.on('dup', () => hint('Você também está jogando em outro aparelho. Tudo fica junto.', 'cloud', 5200));
+      L.save.on('dup', () => hint('Você também está jogando em outro aparelho. Use um de cada vez para não se perder nada.', 'cloud', 6500));
     }
   }
   const survUI = {

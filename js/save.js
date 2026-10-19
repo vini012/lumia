@@ -1,13 +1,17 @@
 /* Lumiar v5 persistence (L.save) and shared world clock (L.clock).
-   One server table (public.lumiar_mundo: w, c, id, d jsonb, at) holds the whole world; every client keeps a local
-   mirror and a persistent write queue in localStorage, so nothing is lost when the phone is offline, the tab is
-   closed or the browser data of one device is cleared (progress lives on the server under world + player name).
+   One server table (public.lumiar_mundo: w, c, id, d jsonb, at, sat) holds the whole world; every client keeps a
+   local mirror and a persistent write queue in localStorage, so nothing is lost when the phone is offline, the tab
+   is closed or the browser data of one device is cleared (progress lives on the server under world + player name).
    Backends, picked at init: Supabase (Vercel build: window.LUMIAR_SB + window.supabase), the artifact runtime
    (window.claude.use('db' | 'room')), or this device only (localStorage, other tabs see changes).
    Rules: optimistic local apply, writes coalesced per (c,id) and debounced, newer-wins by the record time `ts`
-   (ms, server-corrected) so an older snapshot never overwrites a newer row, monotonic merge of progress fields when
-   the same player played on two devices, flush on page hide with fetch keepalive, retry with backoff when offline.
-   Server side: tools/sql/v5.sql (collections list, 32 KB rows, newer-wins trigger, lumiar_now()). */
+   (ms, server-corrected) so an older snapshot never overwrites a newer row. The own player record is a three-way
+   merge (base = the server version this device last saw): fields changed only on one side are taken from that side,
+   inventory changes are applied as deltas, story progress is merged (union / max). Until this session has compared
+   with the server, the own records (p5, m5) stay on this device (mirror) and are never sent, not even on page hide.
+   Every request has a timeout (a hung request counts as offline and is retried with backoff).
+   Server side: tools/sql/v5.sql (collections list, 32 KB rows, newer-wins trigger, server receive time `sat` for
+   catch-up reads, lumiar_now()). */
 'use strict';
 (function (L) {
   const G = typeof window !== 'undefined' ? window : globalThis;
@@ -29,23 +33,65 @@
   // progress fields that only ever grow: merged (union / max / or) when two devices of the same player diverged
   const MONO = ['sp', 'notes', 'dreams', 'th', 'tasks', 'flags', 'stats', 'tools'];
   const CFG = {
-    debounce: { p5: 4000, m5: 15000, _: 400 },  // ms from the first change to the write (max-wait, coalesced)
-    window: { h5: 3 * 3600e3 },                 // only load rows newer than this (harvest records expire)
-    maxRow: 30000,                              // bytes of JSON per row (server check is 32000 after v5.sql)
+    // ms from the first change to the write (max-wait, coalesced). p5soft: player changes that only matter a little
+    // (hunger ticking, position, mana) wait longer; a hard change (inventory, progress) is written after 4 s.
+    debounce: { p5: 4000, p5soft: 30000, m5: 60000, _: 400 },
+    window: { h5: 3 * 3600e3 },                 // only rows newer than this matter (harvest records expire)
+    maxRow: 30000,                              // estimated server bytes per row (server check is 32000 after v5.sql)
     page: 1000, loadTimeout: 8000, batch: 200,
-    mirrorEvery: 5000, playerMirrorEvery: 1500,
+    reqTimeout: 15000,                          // every backend request: no answer in time = offline, retry later
+    mirrorEvery: 30000, playerMirrorEvery: 1500, pruneEvery: 10 * 60e3,
+    shards: { b5: 16, h5: 8, f5: 4 },           // the mirror of big collections is split so one change rewrites a part
   };
 
   // ================================================================ small pure helpers (also used by tests)
+  const hash6 = str => { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36).padStart(6, '0').slice(-6); };
+  // player key from the name: accents and case do not matter ("Vinícius" = "vinicius"); names with letters outside
+  // the Latin alphabet (or that would lose characters) get a short hash so two different names never share a save
   function slug(name) {
-    let s = String(name || '').normalize ? String(name || '').normalize('NFD').replace(/[̀-ͯ]/g, '') : String(name || '');
+    const raw = String(name || '').trim();
+    let s = raw.normalize ? raw.normalize('NFD').replace(/[̀-ͯ]/g, '') : raw;
+    const lost = s.replace(/[\x00-\x7f]/g, '');
     s = s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24).replace(/-+$/, '');
+    if (lost) { const n = raw.normalize ? raw.normalize('NFC').toLowerCase() : raw.toLowerCase(); return ((s || 'jogador').slice(0, 17).replace(/-+$/, '') + '-' + hash6(n)); }
     return s || 'jogador';
   }
   function worldCode(w) { return (String(w || '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+/, '').slice(0, 24)) || 'nosso-mundo'; }
   function bytes(o) {
     const s = typeof o === 'string' ? o : JSON.stringify(o); if (s == null) return 0;
     let n = s.length; for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); if (c > 0x7f) n += c > 0x7ff ? 2 : 1; } return n;
+  }
+  // the size the server checks: octet_length(d::text) of the jsonb, which prints a space after every ':' and ','
+  function seps(v) {
+    if (Array.isArray(v)) { let n = Math.max(0, v.length - 1); for (const x of v) n += seps(x); return n; }
+    if (v && typeof v === 'object') { let n = 0, k = 0; for (const key in v) { const x = v[key]; if (x === undefined || typeof x === 'function') continue; k++; n += 1 + seps(x); } return n + Math.max(0, k - 1); }
+    return 0;
+  }
+  function srvBytes(o) { return o == null ? 0 : bytes(o) + seps(o); }
+  // deep equality that ignores key order (null and undefined count as the same "nothing")
+  function deq(a, b) {
+    if (a === b) return true; if (a == null || b == null) return a == null && b == null;
+    if (typeof a !== 'object' || typeof b !== 'object') return a === b || (a !== a && b !== b);
+    const aa = Array.isArray(a); if (aa !== Array.isArray(b)) return false;
+    if (aa) { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (!deq(a[i], b[i])) return false; return true; }
+    for (const k in a) if (a[k] !== undefined && !deq(a[k], b[k])) return false;
+    for (const k in b) if (b[k] !== undefined && a[k] === undefined) return false;
+    return true;
+  }
+  // two versions of a player record hold the same data (record time, device and base time do not count)
+  const META = { ts: 1, dev: 1, bt: 1 };
+  function samePlayer(a, b) {
+    if (!a || !b) return !a && !b;
+    for (const k in a) if (!META[k] && !deq(a[k], b[k])) return false;
+    for (const k in b) if (!META[k] && !(k in a) && b[k] != null) return false;
+    return true;
+  }
+  const isObj = v => !!v && typeof v === 'object' && !Array.isArray(v);
+  // a promise that gives up after ms (a network-class error: the caller goes offline and retries later)
+  function tmo(p, ms) {
+    let tid = null;
+    const to = new Promise((res, rej) => { tid = setTimeout(() => rej(Object.assign(new Error('request timeout'), { code: 'timeout' })), ms || CFG.reqTimeout); });
+    return Promise.race([Promise.resolve(p), to]).then(v => { clearTimeout(tid); return v; }, e => { clearTimeout(tid); throw e; });
   }
   function rowTime(r) { // ms: the record's own t, else the row's at
     if (!r) return 0; const d = r.d; if (d && typeof d.ts === 'number') return d.ts;
@@ -84,9 +130,41 @@
     out.ts = Math.max(a.ts || 0, b.ts || 0);
     return out;
   }
-  // decide the player record at load: `loc` = {d, base, fresh} from this device's mirror, `srv` = server record or null.
-  // base = the server t this local copy was derived from; fresh = created here from defaults, never seen the server.
-  // returns {d, write} (write = the result must be sent to the server)
+  // item counts changed on both sides: apply this device's changes (local - base) on top of the server's counts
+  function mergeCounts(b, l, s) {
+    b = isObj(b) ? b : {}; l = isObj(l) ? l : {}; const out = isObj(s) ? clone(s) : {};
+    const keys = new Set(Object.keys(l).concat(Object.keys(b)));
+    for (const k of keys) {
+      const lv = l[k], bv = b[k];
+      if (typeof lv === 'number' || typeof bv === 'number' || lv == null) {
+        const d = (+lv || 0) - (+bv || 0); if (!d) continue;
+        const v = Math.max(0, (+out[k] || 0) + d); if (v > 0) out[k] = v; else delete out[k];
+      } else if (!deq(lv, bv)) out[k] = clone(lv);
+    }
+    return out;
+  }
+  // three-way merge of the own player record: b = the server version this device last saw (common ancestor),
+  // l = this device, s = the server now. A field changed on one side only is taken from that side; changed on both:
+  // progress (MONO) is merged, inventory counts get this device's deltas, anything else follows the newer record
+  // (a fresh device, which never saw the server, defers to the existing save).
+  function merge3(b, l, s, fresh) {
+    const out = {}, lNewer = !fresh && (l.ts || 0) >= (s.ts || 0);
+    const keys = new Set(Object.keys(s).concat(Object.keys(l)));
+    for (const k of keys) {
+      if (META[k]) continue;
+      const bv = b ? b[k] : undefined, lv = l[k], sv = s[k];
+      if (deq(lv, bv)) { if (sv !== undefined) out[k] = clone(sv); continue; }        // only the server changed it (or nobody)
+      if (deq(sv, bv)) { if (lv !== undefined) out[k] = clone(lv); continue; }        // only this device changed it
+      if (MONO.indexOf(k) >= 0) out[k] = mergeMono(sv, lv, lNewer);
+      else if (k === 'inv') out[k] = mergeCounts(bv, lv, sv);
+      else out[k] = clone(lNewer ? lv : sv);
+    }
+    out.ts = Math.max(l.ts || 0, s.ts || 0); out.dev = lNewer ? l.dev : s.dev;
+    return out;
+  }
+  // decide the player record at load: `loc` = {d, base, fresh, bd} from this device, `srv` = server record or null.
+  // base = the server ts this local copy derives from, bd = that server version (the merge ancestor); fresh = created
+  // here from defaults (bd = the defaults), never seen the server. Returns {d, write} (write = send the result).
   function resolvePlayer(loc, srv) {
     const ld = loc && loc.d, lt = ld ? (ld.ts || 0) : 0, base = loc ? (loc.base || 0) : 0, st = srv ? (srv.ts || 0) : 0;
     if (!ld && !srv) return { d: null, write: false, how: 'none' };
@@ -94,13 +172,15 @@
     if (!srv) return { d: clone(ld), write: lt > 0, how: 'local' };
     if (st <= base) return { d: clone(ld), write: lt > st, how: lt > st ? 'local-newer' : 'same' };
     // the server changed since this device last synced
-    if (loc.fresh) { // a brand-new device that played offline: the existing save wins, progress is merged in
-      const d = clone(srv); for (const k of MONO) if (k in ld || k in srv) d[k] = mergeMono(srv[k], ld[k], false);
-      const changed = !sameJSON(d, srv); if (changed) d.ts = st + 1; return { d, write: changed, how: 'fresh-merge' };
-    }
-    if (lt <= base) return { d: clone(srv), write: false, how: 'server-newer' };
-    const d = mergePlayer(ld, srv); const write = !sameJSON(d, srv); if (write) d.ts = Math.max(d.ts, st) + 1;
-    return { d, write, how: 'conflict-merge' };
+    const bd = loc.bd || null;
+    if (lt <= base || (bd && samePlayer(ld, bd))) return { d: clone(srv), write: false, how: 'server-newer' }; // nothing changed here
+    let d, how;
+    if (bd) { d = merge3(bd, ld, srv, !!loc.fresh); how = loc.fresh ? 'fresh-merge' : 'merge'; }
+    else if (loc.fresh) { // (no ancestor kept) a brand-new device that played offline: the existing save wins, progress merged in
+      d = clone(srv); for (const k of MONO) if (k in ld || k in srv) d[k] = mergeMono(srv[k], ld[k], false); how = 'fresh-merge';
+    } else { d = mergePlayer(ld, srv); how = 'conflict-merge'; }
+    const write = !samePlayer(d, srv); d.ts = write ? Math.max(lt, st) + 1 : st; if (!write) d.dev = srv.dev;
+    return { d, write, how };
   }
 
   // portable base64 (no btoa/Buffer differences between browsers and Node)
@@ -205,16 +285,23 @@
 
   // ================================================================ state
   const S = {
-    world: null, key: null, name: null, dev: null, backend: null, B: null,
+    world: null, key: null, name: null, dev: null, backend: null, B: null, sess: 0,
     status: 'local', ready: false, loaded: false, lastOk: 0, refused: '',
-    data: {}, tomb: new Map(), player: null, pbase: 0, pfresh: true, playerDirty: false, mirrorDirty: new Set(),
+    data: {}, tomb: new Map(), player: null,
+    pbase: 0,          // ts of the server version of the own player record this device last saw
+    pbd: null,         // that server version (the ancestor for three-way merges; for a fresh device: the defaults)
+    pfresh: true,      // never compared with the server
+    hist: new Map(),   // recent server versions of the own record by ts (ancestors for concurrent writes of two devices)
+    playerDirty: false, // false | 'soft' | 'hard'
+    mirrorDirty: new Set(),
   };
   COLS.forEach(c => { S.data[c] = new Map(); });
   const PFX = () => 'lumiar5:' + S.world + ':';
-  const pend = new Map();            // 'c|id' -> {c, id, d, t, chk, bad}
+  const TAB = 't' + rid(6); // this page (two tabs of one browser share the device id)
+  const pend = new Map();            // 'c|id' -> {c, id, d, t, chk, bad, own}
   const pk = (c, id) => c + '|' + id;
   let flushTimer = null, flushDue = Infinity, flushing = null, retryTimer = null, backoff = 0, refusedUntil = 0;
-  let mirrorTimer = null, pmirrorTimer = null, queueTimer = null;
+  let mirrorTimer = null, pmirrorTimer = null, queueTimer = null, pDue = Infinity;
 
   function newPlayer(name, look, defaults) {
     const p = {
@@ -228,10 +315,10 @@
   const MAPS = ['sp', 'notes', 'dreams', 'th', 'tasks', 'flags', 'inv', 'tools', 'stats'];
   function fixPlayer(p) { // tolerate partial / older records
     const d = newPlayer(p.name || S.name);
-    for (const k in d) if (p[k] === undefined || p[k] === null) p[k] = d[k];
+    for (const k in d) if (p[k] === undefined || p[k] === null) { if (k === 'pos' || k === 'home') continue; p[k] = d[k]; }
     for (const k of MAPS) {
       const v = p[k]; if (Array.isArray(v)) { const o = {}; for (const id of v) if (typeof id === 'string' || typeof id === 'number') o[id] = 1; for (const id in v) if (!/^\d+$/.test(id)) o[id] = v[id]; p[k] = o; }
-      else if (typeof v !== 'object') p[k] = {};
+      else if (!v || typeof v !== 'object') p[k] = {};
     }
     if (!p.st || typeof p.st !== 'object') p.st = d.st; for (const k in d.st) if (p.st[k] === undefined) p.st[k] = d.st[k];
     return p;
@@ -243,8 +330,10 @@
     const info = statusInfo(); if (prev !== s || info.saving !== lastSavingFlag) { lastSavingFlag = info.saving; emit('status', info); }
   }
   let lastSavingFlag = false;
-  function statusInfo() { return { status: S.status, saving: pend.size > 0 || !!flushing || S.playerDirty, pending: pend.size, lastOk: S.lastOk, backend: S.backend }; }
-  function bumpSaving() { const s = pend.size > 0 || !!flushing || S.playerDirty; if (s !== lastSavingFlag) { lastSavingFlag = s; emit('status', statusInfo()); } }
+  // "saving" = something the player would miss is on its way (a soft player change, like hunger ticking, does not count)
+  const isSaving = () => pend.size > 0 || !!flushing || S.playerDirty === 'hard';
+  function statusInfo() { return { status: S.status, saving: isSaving(), pending: pend.size, lastOk: S.lastOk, backend: S.backend, loaded: S.loaded }; }
+  function bumpSaving() { const s = isSaving(); if (s !== lastSavingFlag) { lastSavingFlag = s; emit('status', statusInfo()); } }
 
   // ================================================================ local apply
   function getRec(c, id) { return S.data[c].get(id); }
@@ -253,7 +342,7 @@
     const m = S.data[c], old = m.get(id);
     if (d == null) { if (!old) return false; m.delete(id); } else m.set(id, d);
     if (d == null) S.tomb.set(pk(c, id), Math.max(S.tomb.get(pk(c, id)) || 0, (old && old.ts) || 0)); else S.tomb.delete(pk(c, id));
-    if (!(S.backend === 'local' && origin === 'remote')) { S.mirrorDirty.add(c); scheduleMirror(); } // local mode: the mirror is the store
+    if (S.backend !== 'local') markMirror(c, id); // local mode: the store itself is written by put (and by the other tab)
     if (S.ready) emit(c, id, d, old, origin);
     return true;
   }
@@ -277,7 +366,8 @@
     id = String(id); const now = clock.now();
     const prevT = curT(c, id), t = Math.max(now, prevT + 1);
     const rec = d == null ? null : Object.assign({}, d, { ts: t }); // ts: record time (t stays free: build piece type)
-    if (rec && bytes(rec) > CFG.maxRow) { warn('row too big, not saved', c, id, bytes(rec)); emit('status', Object.assign(statusInfo(), { tooBig: c + '/' + id })); return null; }
+    const sz = rec ? srvBytes(rec) : 0;
+    if (sz > CFG.maxRow) { warn('row too big, not saved', c, id, sz); emit('status', Object.assign(statusInfo(), { tooBig: c + '/' + id })); return null; }
     applyLocal(c, id, rec, 'local');
     if (rec == null) S.tomb.set(pk(c, id), t);
     queue(c, id, rec, t);
@@ -288,21 +378,40 @@
     pend.set(pk(c, id), { c, id: String(id), d, t, chk: false, bad: 0 });
     persistQueueSoon(); schedule(c); bumpSaving();
   }
-  function dirty() {
-    if (!S.player) return; const now = clock.now();
+  // the own player record changed. dirty() = something that matters (inventory, progress, home): written after 4 s;
+  // dirty('soft') = hunger/energy ticking, position, mana: written after 30 s (or on page hide / with the next hard one)
+  function dirty(kind) {
+    if (!S.player) return; const now = clock.now(), hard = kind !== 'soft';
     S.player.ts = Math.max(now, (S.player.ts || 0) + 1); S.player.dev = S.dev;
-    if (!S.playerDirty) { S.playerDirty = true; bumpSaving(); }
-    schedule('p5'); mirrorPlayerSoon();
+    const due = Date.now() + (hard ? CFG.debounce.p5 : CFG.debounce.p5soft);
+    if (!S.playerDirty) pDue = due; else if (hard) pDue = Math.min(pDue, due);
+    const was = S.playerDirty; S.playerDirty = hard || was === 'hard' ? 'hard' : 'soft';
+    if (was !== S.playerDirty) bumpSaving();
+    if (S.loaded) scheduleAt(pDue);
+    mirrorPlayerSoon();
   }
-  function schedule(c) {
-    if (!S.world) return;
-    const ms = CFG.debounce[c] != null ? CFG.debounce[c] : CFG.debounce._; const due = Date.now() + ms;
+  function scheduleAt(due) {
+    if (!S.world || !(due < Infinity)) return;
     if (flushTimer && flushDue <= due) return;
     if (flushTimer) clearTimeout(flushTimer);
-    flushDue = due; flushTimer = setTimeout(() => { flushTimer = null; flushDue = Infinity; flush(); }, ms);
+    flushDue = due; flushTimer = setTimeout(() => { flushTimer = null; flushDue = Infinity; flush({ force: false }); }, Math.max(0, due - Date.now()));
+  }
+  function schedule(c) { scheduleAt(Date.now() + (CFG.debounce[c] != null ? CFG.debounce[c] : CFG.debounce._)); }
+  // after a flush: wake up again for whatever is still waiting (own records only once the server load is in)
+  function rearm() {
+    if (retryTimer) return;
+    if (pend.size) schedule('_');
+    if (S.loaded) { const n = Date.now() + 50; if (S.playerDirty) scheduleAt(Math.max(pDue, n)); if (EX.dirty) scheduleAt(Math.max(EX.due, n)); }
   }
 
   // ================================================================ mirror + persistent queue (localStorage)
+  // Mirror keys: lumiar5:<world>:c:<col>[:<shard>] (world rows), p:<key> (own player {d, base, fresh, bd}),
+  // x:<key> (explored map), q (queued world writes not yet confirmed by the server), dead (rows the server refused).
+  const NSH = c => CFG.shards[c] || 1;
+  function shardOf(c, id) { const n = NSH(c); if (n === 1) return 0; let h = 0; for (let i = 0; i < id.length; i++) h = (Math.imul(h, 31) + id.charCodeAt(i)) | 0; return (h >>> 0) % n; }
+  const mkey = (c, s) => PFX() + 'c:' + c + (NSH(c) > 1 ? ':' + s : '');
+  function mirrorRead(c) { const o = {}; for (let s = 0; s < NSH(c); s++) { const part = lsGet(mkey(c, s), null); if (part) Object.assign(o, part); } return o; }
+  function markMirror(c, id) { if (c === 'm5') return; S.mirrorDirty.add(c + '|' + (id == null ? '*' : shardOf(c, id))); scheduleMirror(); }
   function persistQueue() {
     if (!S.world) return; clearTimeout(queueTimer); queueTimer = null;
     const items = []; for (const it of pend.values()) if (it.c !== 'p5' && it.c !== 'm5') items.push({ c: it.c, id: it.id, d: it.d, t: it.t });
@@ -311,58 +420,82 @@
   function persistQueueSoon() { if (!queueTimer) queueTimer = setTimeout(persistQueue, 300); }
   function mirrorPlayer() {
     clearTimeout(pmirrorTimer); pmirrorTimer = null; if (!S.player || !S.world) return;
-    lsSet(PFX() + 'p:' + S.key, { d: S.player, base: S.pbase, fresh: S.pfresh });
+    lsSet(PFX() + 'p:' + S.key, { d: S.player, base: S.pbase, fresh: S.pfresh, bd: S.pbd });
   }
   function mirrorPlayerSoon() { if (!pmirrorTimer) pmirrorTimer = setTimeout(mirrorPlayer, CFG.playerMirrorEvery); }
+  // rewrite only the dirty parts (collection shards) of the mirror
   function writeMirror() {
     clearTimeout(mirrorTimer); mirrorTimer = null; if (!S.world) return;
-    for (const c of S.mirrorDirty) {
-      if (c === 'm5') continue; const o = {};
-      for (const [id, d] of S.data[c]) if (d) o[id] = d;
-      if (!lsSet(PFX() + 'c:' + c, o)) warn('mirror full for', c);
-    }
+    const want = new Map(); // c -> Set(shard) | '*'
+    for (const k of S.mirrorDirty) { const i = k.indexOf('|'), c = k.slice(0, i), s = k.slice(i + 1); if (!S.data[c] || c === 'm5') continue; if (s === '*') want.set(c, '*'); else if (want.get(c) !== '*') { if (!want.has(c)) want.set(c, new Set()); want.get(c).add(+s); } }
     S.mirrorDirty.clear();
+    for (const [c, sh] of want) {
+      const n = NSH(c), parts = [];
+      for (let s = 0; s < n; s++) parts.push(sh === '*' || sh.has(s) ? {} : null);
+      for (const [id, d] of S.data[c]) { if (!d) continue; const s = n > 1 ? shardOf(c, id) : 0; if (parts[s]) parts[s][id] = d; }
+      for (let s = 0; s < n; s++) if (parts[s] && !lsSet(mkey(c, s), parts[s])) warn('mirror full for', c);
+    }
   }
   function scheduleMirror() {
-    if (!S.world || !S.ready) return;
-    if (S.backend === 'local') { writeMirror(); return; }     // the mirror is the store
-    if (!mirrorTimer) mirrorTimer = setTimeout(writeMirror, CFG.mirrorEvery);
+    if (!S.world || !S.ready || mirrorTimer) return;
+    mirrorTimer = setTimeout(() => { mirrorTimer = null; if (G.requestIdleCallback) G.requestIdleCallback(() => writeMirror(), { timeout: 5000 }); else writeMirror(); }, CFG.mirrorEvery);
   }
   function readMirror() {
     for (const c of COLS) {
-      if (c === 'm5') continue; const o = lsGet(PFX() + 'c:' + c, null); if (!o) continue;
+      if (c === 'm5') continue; const o = mirrorRead(c);
       for (const id in o) if (o[id] && !(c === 'p5' && id === S.key)) S.data[c].set(id, o[id]);
     }
   }
+  // harvest records (h5) older than their window mean the plant has grown back: forget them (memory and mirror)
+  function pruneOld() {
+    if (!S.world) return; const now = clock.now();
+    for (const c in CFG.window) {
+      const lim = now - CFG.window[c], m = S.data[c];
+      for (const [id, d] of [...m]) if (d && (d.ts || 0) < lim && !pend.has(pk(c, id))) { m.delete(id); markMirror(c, id); if (S.ready) emit(c, id, null, d, 'expire'); }
+    }
+    const day = now - 24 * 3600e3; for (const [k, t] of S.tomb) if (t < day && !pend.has(k)) S.tomb.delete(k);
+  }
 
   // ================================================================ flush
-  function materialize() {
-    if (S.player && S.playerDirty) {
-      S.playerDirty = false; const d = clone(S.player);
-      let b = bytes(d);
-      if (b > CFG.maxRow) { // keep the essentials: drop the statistics first (they only feed little summaries)
-        d.stats = {}; b = bytes(d);
-        if (b > CFG.maxRow) warn('player record is', b, 'bytes');
+  // own records (player, explored map) go to the queue only when due (or forced: page hide, flush()), and never before
+  // this session has compared with the server: until then they live in the local mirror only
+  function materialize(force) {
+    const now = Date.now();
+    if (S.player && S.playerDirty && (force || now >= pDue - 5)) {
+      if (S.loaded) {
+        const d = clone(S.player);
+        let b = srvBytes(d);
+        if (b > CFG.maxRow) { // keep the essentials: drop the statistics first (they only feed little summaries)
+          d.stats = {}; b = srvBytes(d);
+          if (b > CFG.maxRow) { warn('player record is', b, 'bytes'); emit('status', Object.assign(statusInfo(), { tooBig: 'p5/' + S.key })); }
+        }
+        d.bt = S.pbase; // the server version this one was derived from (lets another device merge concurrent writes)
+        pend.set(pk('p5', S.key), { c: 'p5', id: S.key, d, t: d.ts, chk: false, bad: 0, own: true });
+        S.playerDirty = false; pDue = Infinity;
       }
-      pend.set(pk('p5', S.key), { c: 'p5', id: S.key, d, t: d.ts, chk: false, bad: 0, own: true });
       mirrorPlayer();
     }
-    if (EX.dirty && S.world) {
-      EX.dirty = false; const d = exploredEncode(); d.ts = clock.now();
-      pend.set(pk('m5', S.key), { c: 'm5', id: S.key, d, t: d.ts, chk: false, bad: 0, own: true });
-      lsSet(PFX() + 'x:' + S.key, d);
+    if (EX.dirty && S.world && (force || now >= EX.due - 5)) {
+      const d = exploredEncode(); d.ts = clock.now(); lsSet(PFX() + 'x:' + S.key, d);
+      if (S.loaded) { pend.set(pk('m5', S.key), { c: 'm5', id: S.key, d, t: d.ts, chk: false, bad: 0, own: true }); EX.dirty = false; EX.due = Infinity; }
     }
   }
   function flush(opt) {
     if (!S.world) return Promise.resolve(true);
-    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; flushDue = Infinity; }
-    if (flushing) return flushing.then(() => (pend.size || S.playerDirty || EX.dirty) && !retryTimer ? flush(opt) : !pend.size);
-    flushing = doFlush(opt).catch(e => { warn('flush', e); return false; }).then(r => { flushing = null; bumpSaving(); if ((pend.size || S.playerDirty) && !retryTimer && S.status === 'online') schedule('_'); return r; });
+    opt = opt || { force: true };
+    if (flushTimer && opt.force) { clearTimeout(flushTimer); flushTimer = null; flushDue = Infinity; }
+    if (flushing) return flushing.then(() => (pend.size || (opt.force && (S.playerDirty || EX.dirty))) && !retryTimer ? flush(opt) : !pend.size);
+    flushing = doFlush(opt).catch(e => { warn('flush', e); return false; }).then(r => { flushing = null; bumpSaving(); rearm(); return r; });
     bumpSaving();
     return flushing;
   }
-  async function doFlush() {
-    materialize();
+  // a confirmed write of the own player record: that version is now the server's (unless a newer one is known)
+  function ownSent(it) {
+    if (it.c === 'p5' && it.id === S.key && it.t >= S.pbase) { S.pbase = it.t; S.pbd = it.d; S.pfresh = false; remember(it.d); mirrorPlayer(); }
+  }
+  function remember(d) { if (!d) return; S.hist.set(d.ts || 0, d); if (S.hist.size > 6) S.hist.delete(Math.min(...S.hist.keys())); }
+  async function doFlush(opt) {
+    materialize(!!(opt && opt.force));
     if (!pend.size) return true;
     if (!S.B) return false;
     if (Date.now() < refusedUntil) return false;
@@ -378,13 +511,12 @@
       if (send.length) await S.B.put(send);
       for (const it of send) {
         if (pend.get(pk(it.c, it.id)) === it) pend.delete(pk(it.c, it.id));
-        if (it.c === 'p5' && it.id === S.key) { S.pbase = Math.max(S.pbase, it.t); S.pfresh = false; mirrorPlayer(); }
+        ownSent(it);
         if (S.B.sent) S.B.sent(it);
       }
       backoff = 0; clearTimeout(retryTimer); retryTimer = null; S.lastOk = Date.now();
       setStatus(S.backend === 'local' ? 'local' : 'online', '');
       persistQueue();
-      if (pend.size) schedule('_');
       return true;
     } catch (e) {
       persistQueue();
@@ -411,7 +543,7 @@
     if (items.length > 1) {
       for (const it of items) {
         if (pend.get(pk(it.c, it.id)) !== it) continue;
-        try { await S.B.put([it]); pend.delete(pk(it.c, it.id)); if (S.B.sent) S.B.sent(it); }
+        try { await S.B.put([it]); pend.delete(pk(it.c, it.id)); ownSent(it); if (S.B.sent) S.B.sent(it); }
         catch (e2) { if (isNetErr(e2)) { setStatus('offline'); markChk(); scheduleRetry(); persistQueue(); return; } badRow(it, e2); }
       }
       persistQueue(); return;
@@ -444,25 +576,47 @@
   }
 
   // ================================================================ own player record from another device
-  function ownPlayerRemote(d, t) {
+  // (the same player on another phone, or the server answering after this device already started playing)
+  function ownPlayerRemote(d) {
     if (!d || !S.player) return false;
-    if (d.dev === S.dev && (d.ts || 0) <= (S.player.ts || 0)) { S.pbase = Math.max(S.pbase, d.ts || 0); return false; } // echo
-    if ((d.ts || 0) <= (S.player.ts || 0) && (d.ts || 0) <= S.pbase) return false;
+    const dt = d.ts || 0;
+    if (d.dev === S.dev && dt <= (S.player.ts || 0)) { if (dt >= S.pbase) { S.pbase = dt; S.pbd = clone(d); remember(S.pbd); mirrorPlayer(); } return false; } // our own write coming back
+    // the same record time from another device (two writes in the same ms): the smaller device id merges
+    const tie = dt === S.pbase && !!S.pbd && !samePlayer(d, S.pbd) && String(S.dev) < String(d.dev || '');
+    if (dt < S.pbase || (dt === S.pbase && !tie)) return false;                       // this version (or a newer one) is known
+    // the ancestor: normally the version we hold; a record derived from an older version was written at the same
+    // time as ours (two devices): merge against the version both started from, so neither side's changes are lost
+    let anc = S.pbd; if (d.bt != null && d.bt !== S.pbase && S.hist.has(d.bt)) anc = S.hist.get(d.bt);
+    if (!anc) anc = S.hist.get(0) || null; // both devices started a brand-new player: the defaults are the ancestor
     const before = JSON.stringify(S.player);
+    const own = pend.get(pk('p5', S.key));
+    const changedHere = !!S.playerDirty || !!own || !anc || !samePlayer(S.player, anc);
     let res;
-    if ((d.ts || 0) > (S.player.ts || 0)) res = mergePlayer(S.player, d); else res = mergePlayer(d, S.player);
-    if (activeRecently() && S.player.pos) res.pos = S.player.pos; // two devices at once: keep this device's position
-    S.pbase = Math.max(S.pbase, d.ts || 0);
+    if (!changedHere) res = clone(d);
+    else if (anc) res = merge3(anc, S.player, d, S.pfresh);
+    else res = dt > (S.player.ts || 0) ? mergePlayer(S.player, d) : mergePlayer(d, S.player);
+    if (activeRecently() && S.player.pos) res.pos = S.player.pos;                     // two devices at once: keep this device's position
+    S.pbase = dt; S.pbd = clone(d); S.pfresh = false; remember(S.pbd);
+    const write = !samePlayer(res, d);
+    res.ts = write ? Math.max(dt, S.player.ts || 0) + 1 : dt; if (!write) res.dev = d.dev;
     replacePlayer(res);
+    if (write) dirty();                                                               // we hold changes the server does not have yet
+    else { if (own) pend.delete(pk('p5', S.key)); if (S.playerDirty) { S.playerDirty = false; pDue = Infinity; bumpSaving(); } mirrorPlayer(); }
     if (JSON.stringify(S.player) === before) return false;
-    if (!sameJSON(res, d)) dirty(); // we hold progress the other device does not have yet
     emit('player', S.player, 'remote'); return true;
   }
   let lastActive = 0; const activeRecently = () => Date.now() - lastActive < 60000;
-  function replacePlayer(d) { const p = S.player; for (const k of Object.keys(p)) if (!(k in d)) delete p[k]; Object.assign(p, d); fixPlayer(p); }
+  // L.save.player is a live object: replacing its content keeps the identity of every nested object (flags, inv,
+  // notes...), so modules that hold on to them (story.js caches player.flags) keep writing into the saved record
+  function syncInto(t, s) {
+    for (const k of Object.keys(t)) if (!(k in s)) delete t[k];
+    for (const k in s) { const v = s[k]; if (isObj(v) && isObj(t[k])) syncInto(t[k], v); else t[k] = clone(v); }
+  }
+  function replacePlayer(d) { syncInto(S.player, d); fixPlayer(S.player); }
 
   // ================================================================ explored map (m5, per player)
-  const EX = { res: 512, mask: new Uint8Array(512 * 512), ver: 0, dirty: false, n: 0 };
+  const EX = { res: 512, mask: new Uint8Array(512 * 512), ver: 0, dirty: false, due: Infinity, n: 0 };
+  function exDirty() { if (EX.dirty) return; EX.dirty = true; EX.due = Date.now() + CFG.debounce.m5; if (S.loaded) scheduleAt(EX.due); } // its own window (60 s)
   const WSZ = () => (L.WS || 8000);
   function exploredEncode() {
     let res = EX.res, m = EX.mask, rle = rleEncode(m);
@@ -491,7 +645,7 @@
         const cx = -ws + (i + .5) * cs, cz = -ws + (j + .5) * cs; if ((cx - x) * (cx - x) + (cz - z) * (cz - z) > r2) continue;
         const k = j * res + i; if (!EX.mask[k]) { EX.mask[k] = 1; ch++; }
       }
-      if (ch) { EX.n += ch; EX.ver++; if (!EX.dirty) { EX.dirty = true; schedule('m5'); } emit('explored', EX); }
+      if (ch) { EX.n += ch; EX.ver++; exDirty(); emit('explored', EX); }
       return ch > 0;
     },
     // 0..1, bilinear over cell centres (soft edges for the map)
@@ -503,18 +657,28 @@
     },
     seen(x, z) { const ws = WSZ(), res = EX.res, i = Math.floor((x + ws) / (2 * ws) * res), j = Math.floor((z + ws) / (2 * ws) * res); return i >= 0 && j >= 0 && i < res && j < res && !!EX.mask[j * res + i]; },
     encode: exploredEncode,
-    clear() { EX.mask.fill(0); EX.n = 0; EX.ver++; EX.dirty = true; schedule('m5'); },
+    clear() { EX.mask.fill(0); EX.n = 0; EX.ver++; exDirty(); },
   };
 
   // ================================================================ presence room (transport agnostic, v4 sbRoom port)
+  // what changed since the last message: position more than 5 cm, rotation more than .05 rad, or any other field
+  // (the game may call presence() every frame: unchanged states are only repeated by the 2 s heartbeat, like v4)
+  function presChanged(me, sent) {
+    if (!sent) return true;
+    const dp = Math.abs((+me.x || 0) - (+sent.x || 0)) + Math.abs((+me.y || 0) - (+sent.y || 0)) + Math.abs((+me.z || 0) - (+sent.z || 0));
+    if (dp > .05 || Math.abs((+me.ry || 0) - (+sent.ry || 0)) > .05) return true;
+    for (const k in me) if (k !== 'x' && k !== 'y' && k !== 'z' && k !== 'ry' && !deq(me[k], sent[k])) return true;
+    for (const k in sent) if (!(k in me)) return true;
+    return false;
+  }
   function makeRoom(tr) {
-    const meId = 'pr' + rid(8), map = new Map(), hs = []; let snap = [], last = 0, timer = null, closed = false;
+    const meId = 'pr' + rid(8), map = new Map(), hs = []; let snap = [], last = 0, timer = null, closed = false, sent = null;
     const me = {};
     const emitPeers = () => {
       snap = []; for (const [peer, v] of map) if (v.p && v.p.w === S.world) snap.push({ peer, presence: v.p, sameTab: false });
       for (const h of hs.slice()) { try { h({ peers: snap }); } catch (e) { warn('peers', e); } }
     };
-    const send = () => { if (closed) return Promise.resolve(); last = Date.now(); clearTimeout(timer); timer = null; return tr.send('p', { id: meId, p: me }); };
+    const send = () => { if (closed) return Promise.resolve(); last = Date.now(); clearTimeout(timer); timer = null; sent = clone(me); return tr.send('p', { id: meId, p: sent }); };
     tr.on('p', q => { if (!q || !q.id || q.id === meId || !q.p) return; const was = map.has(q.id); map.set(q.id, { p: q.p, t: Date.now() }); if (!was && Object.keys(me).length) send(); emitPeers(); });
     tr.on('bye', q => { if (q && map.delete(q.id)) emitPeers(); });
     const iv = setInterval(() => {
@@ -526,8 +690,9 @@
       id: meId, me,
       presence(patch) {
         if (patch) for (const k in patch) { if (patch[k] === null) delete me[k]; else me[k] = patch[k]; }
+        if (timer || !presChanged(me, sent)) return Promise.resolve();
         const n = Date.now(); if (n - last >= 120) return send();
-        if (!timer) timer = setTimeout(send, 120 - (n - last)); return Promise.resolve();
+        timer = setTimeout(send, 120 - (n - last)); return Promise.resolve();
       },
       peers: () => snap,
       onPeers(h) { hs.push(h); return () => { const i = hs.indexOf(h); if (i >= 0) hs.splice(i, 1); }; },
@@ -536,15 +701,20 @@
     };
   }
   function artifactRoom(R) {
-    const hs = []; let last = 0, timer = null; const me = {};
+    const hs = []; let last = 0, timer = null, sent = null; const me = {};
     const list = () => { try { return R.peers().filter(p => !p.isMe && !p.sameTab && p.presence && p.presence.w === S.world).map(p => ({ peer: p.peer, presence: p.presence, sameTab: false })); } catch (e) { return []; } };
     try { R.onPeers(() => { const pe = list(); for (const h of hs.slice()) { try { h({ peers: pe }); } catch (e) { } } }, () => { }); } catch (e) { }
-    const send = () => { last = Date.now(); clearTimeout(timer); timer = null; return Promise.resolve(R.presence(Object.assign({}, me))).catch(() => { }); };
+    const send = () => { last = Date.now(); clearTimeout(timer); timer = null; sent = clone(me); return Promise.resolve(R.presence(Object.assign({}, me))).catch(() => { }); };
+    const iv = setInterval(() => { if (Object.keys(me).length && Date.now() - last > 2000) send(); }, 1000);
     return {
       id: 'art', me,
-      presence(patch) { if (patch) for (const k in patch) { if (patch[k] === null) delete me[k]; else me[k] = patch[k]; } const n = Date.now(); if (n - last >= 150) return send(); if (!timer) timer = setTimeout(send, 150 - (n - last)); return Promise.resolve(); },
+      presence(patch) {
+        if (patch) for (const k in patch) { if (patch[k] === null) delete me[k]; else me[k] = patch[k]; }
+        if (timer || !presChanged(me, sent)) return Promise.resolve();
+        const n = Date.now(); if (n - last >= 150) return send(); timer = setTimeout(send, 150 - (n - last)); return Promise.resolve();
+      },
       peers: list, onPeers(h) { hs.push(h); return () => { const i = hs.indexOf(h); if (i >= 0) hs.splice(i, 1); }; },
-      bye() { }, close() { try { R.leave && R.leave(); } catch (e) { } },
+      bye() { }, close() { clearInterval(iv); clearTimeout(timer); try { R.leave && R.leave(); } catch (e) { } },
     };
   }
   function bcTransport(name) {
@@ -562,10 +732,14 @@
     get online() { return !!RM; },
   };
   function attachRoom(rm) {
-    RM = rm; RM.presence({ w: S.world, k: S.key, pid: S.key, n: S.name, dev: S.dev });
+    RM = rm; RM.presence({ w: S.world, k: S.key, pid: S.key, n: S.name, dev: S.dev, tab: TAB });
     RM.onPeers(ev => {
       const peers = (ev && ev.peers) || RM.peers();
-      for (const p of peers) { const q = p.presence || {}; if (q.k === S.key && q.dev && q.dev !== S.dev && !dupSeen.has(q.dev)) { dupSeen.add(q.dev); emit('dup', { dev: q.dev, peer: p.peer }); } }
+      for (const p of peers) { // the same player on another device, or in another tab of this browser
+        const q = p.presence || {}; if (q.k !== S.key) continue;
+        const other = (q.dev && q.dev !== S.dev) || (q.tab && q.tab !== TAB); const id = (q.dev || '') + '/' + (q.tab || '');
+        if (other && !dupSeen.has(id)) { dupSeen.add(id); emit('dup', { dev: q.dev, tab: q.tab, peer: p.peer }); }
+      }
       for (const fn of roomHs.slice()) { try { fn(peers); } catch (e) { warn('room', e); } }
       emit('peers', peers);
     });
@@ -584,30 +758,35 @@
         if (o.since) q = q.gt('at', new Date(o.since).toISOString());
         if (!o.tomb) q = q.not('d', 'is', null);
         if (last != null) q = q.gt('id', last);
-        const { data, error } = await q.order('id', { ascending: true }).limit(CFG.page);
+        const { data, error } = await tmo(q.order('id', { ascending: true }).limit(CFG.page));
         if (error) throw error;
         for (const r of data) out.push(r);
         if (data.length < CFG.page) break; last = data[data.length - 1].id;
       }
       return out;
     };
-    B.since = async (ms) => { // every row changed after ms (catch-up after the socket slept), tombstones included
-      const out = []; for (let p = 0; p < 20; p++) {
-        const { data, error } = await T().select('c,id,d,at').eq('w', S.world).gt('at', new Date(ms).toISOString()).order('at', { ascending: true }).order('c').order('id').range(p * CFG.page, p * CFG.page + CFG.page - 1);
-        if (error) throw error; for (const r of data) out.push(r); if (data.length < CFG.page) break;
+    // every v5 row the server received after ms (server time; catch-up after the socket slept), tombstones included.
+    // `sat` is the server receive time kept by v5.sql (a row written offline long ago and delivered now has an old
+    // `at` but a new `sat`); without that column (migration not applied) the record time `at` is used.
+    B.since = async (ms) => {
+      const col = B.noSat ? 'at' : 'sat', out = [];
+      for (let p = 0; p < 20; p++) {
+        const { data, error } = await tmo(T().select('c,id,d,at').eq('w', S.world).in('c', COLS).gt(col, new Date(ms).toISOString()).order(col, { ascending: true }).order('c').order('id').range(p * CFG.page, p * CFG.page + CFG.page - 1));
+        if (error) { if (!B.noSat && (String(error.code) === '42703' || /\bsat\b/.test(String(error.message || '')))) { B.noSat = true; warn('catch-up without sat (apply tools/sql/v5.sql)'); return B.since(ms); } throw error; }
+        for (const r of data) out.push(r); if (data.length < CFG.page) break;
       }
       return out;
     };
     B.fetchIds = async (c, ids) => {
       const out = []; for (let i = 0; i < ids.length; i += 100) {
-        const { data, error } = await T().select('c,id,d,at').eq('w', S.world).eq('c', c).in('id', ids.slice(i, i + 100));
+        const { data, error } = await tmo(T().select('c,id,d,at').eq('w', S.world).eq('c', c).in('id', ids.slice(i, i + 100)));
         if (error) throw error; for (const r of data) out.push(r);
       }
       return out;
     };
     const toRow = it => ({ w: S.world, c: it.c, id: it.id, d: it.d, at: new Date(it.t).toISOString() });
     B.put = async items => {
-      const t0 = Date.now(); const { error } = await T().upsert(items.map(toRow));
+      const t0 = Date.now(); const { error } = await tmo(T().upsert(items.map(toRow)));
       if (error) throw error; const t1 = Date.now(); for (const it of items) sentAt.set(pk(it.c, it.id) + '@' + it.t, (t0 + t1) / 2);
     };
     // page hide: a plain keepalive POST (survives the page being closed); the queue stays until confirmed
@@ -633,7 +812,7 @@
     };
     B.skewSample = () => { if (skewS.length < 3 || B.rpcSkew) return; const s = skewS.slice().sort((a, b) => a - b)[skewS.length >> 1]; if (Math.abs(s) > 1500) clock.skew = Math.round(s); };
     B.serverNow = async () => {
-      try { const t0 = Date.now(); const { data, error } = await SB.rpc('lumiar_now'); const t1 = Date.now(); if (error || !data) return; const sv = Date.parse(data); if (sv === sv) { const sk = sv - (t0 + t1) / 2; B.rpcSkew = true; clock.skew = Math.abs(sk) > 400 ? Math.round(sk) : 0; } } catch (e) { }
+      try { const t0 = Date.now(); const { data, error } = await tmo(SB.rpc('lumiar_now'), 8000); const t1 = Date.now(); if (error || !data) return; const sv = Date.parse(data); if (sv === sv) { const sk = sv - (t0 + t1) / 2; B.rpcSkew = true; clock.skew = Math.abs(sk) > 400 ? Math.round(sk) : 0; } } catch (e) { }
     };
     B.room = () => {
       const ch = SB.channel('lm-w5-' + S.world, { config: { broadcast: { self: false } } }); const hs = {};
@@ -648,13 +827,13 @@
     const B = { kind: 'db' }; const path = c => 'worlds5/' + S.world + '/' + c;
     const asRow = (c, s) => { const d = s.data(); if (!d) return null; if (d._del) return { c, id: s.id, d: null, at: new Date(d.ts || 0).toISOString() }; return { c, id: s.id, d, at: new Date(d.ts || 0).toISOString() }; };
     B.loadCol = async (c, o) => {
-      o = o || {}; if (o.id != null) { const s = await db.doc(path(c) + '/' + o.id).get(); const r = s.exists ? asRow(c, s) : null; return r && r.d ? [r] : []; }
+      o = o || {}; if (o.id != null) { const s = await tmo(db.doc(path(c) + '/' + o.id).get()); const r = s.exists ? asRow(c, s) : null; return r && r.d ? [r] : []; }
       let q = db.collection(path(c)); if (o.since) q = q.where('ts', '>', o.since);
-      const snap = await q.get(); return snap.docs.map(s => asRow(c, s)).filter(r => r && (r.d || o.tomb));
+      const snap = await tmo(q.get(), 2 * CFG.reqTimeout); return snap.docs.map(s => asRow(c, s)).filter(r => r && (r.d || o.tomb));
     };
-    B.fetchIds = async (c, ids) => { const out = []; for (const id of ids) { try { const s = await db.doc(path(c) + '/' + id).get(); if (s.exists) { const r = asRow(c, s); if (r) out.push(r); } } catch (e) { throw e; } } return out; };
+    B.fetchIds = async (c, ids) => { const out = []; for (const id of ids) { const s = await tmo(db.doc(path(c) + '/' + id).get()); if (s.exists) { const r = asRow(c, s); if (r) out.push(r); } } return out; };
     B.put = async items => {
-      for (const it of items) { await db.doc(path(it.c) + '/' + it.id).set(it.d ? it.d : { ts: it.t, _del: 1 }); }
+      for (const it of items) { await tmo(db.doc(path(it.c) + '/' + it.id).set(it.d ? it.d : { ts: it.t, _del: 1 })); }
     };
     B.subscribe = (onRow, onState) => {
       const uns = []; let first = {};
@@ -674,22 +853,23 @@
   // ================================================================ backend: this device only
   function localBackend() {
     const B = { kind: 'local' };
-    B.loadCol = async c => { const o = lsGet(PFX() + 'c:' + c, {}); return Object.keys(o).filter(id => o[id]).map(id => ({ c, id, d: o[id], at: new Date(o[id].ts || 0).toISOString() })); };
-    B.fetchIds = async (c, ids) => { const o = lsGet(PFX() + 'c:' + c, {}); return ids.filter(id => o[id]).map(id => ({ c, id, d: o[id], at: '' })); };
+    // the store is the mirror itself (same keys and shards)
+    B.loadCol = async c => { const o = mirrorRead(c); return Object.keys(o).filter(id => o[id]).map(id => ({ c, id, d: o[id], at: new Date(o[id].ts || 0).toISOString() })); };
+    B.fetchIds = async (c, ids) => { const o = mirrorRead(c); return ids.filter(id => o[id]).map(id => ({ c, id, d: o[id], at: '' })); };
     B.put = async items => {
-      const by = {}; for (const it of items) (by[it.c] || (by[it.c] = [])).push(it);
-      for (const c in by) {
-        if (c === 'm5') continue; const k = PFX() + 'c:' + c, o = lsGet(k, {});
-        for (const it of by[c]) { if (it.d == null) delete o[it.id]; else o[it.id] = it.d; }
+      const by = new Map(); for (const it of items) { if (it.c === 'm5') continue; const k = mkey(it.c, shardOf(it.c, it.id)); if (!by.has(k)) by.set(k, []); by.get(k).push(it); }
+      for (const [k, list] of by) {
+        const o = lsGet(k, {});
+        for (const it of list) { if (it.d == null) delete o[it.id]; else o[it.id] = it.d; }
         if (!lsSet(k, o)) throw Object.assign(new Error('localStorage full'), { code: 'quota_exceeded' });
       }
     };
     B.subscribe = (onRow, onState) => { // other tabs of this browser
       const fn = e => {
-        if (!e.key || e.key.indexOf(PFX() + 'c:') !== 0) return; const c = e.key.slice((PFX() + 'c:').length); if (!COLSET.has(c)) return;
+        if (!e.key || e.key.indexOf(PFX() + 'c:') !== 0) return; const rest = e.key.slice((PFX() + 'c:').length).split(':'), c = rest[0], sh = rest.length > 1 ? +rest[1] : 0; if (!COLSET.has(c)) return;
         let o = {}; try { o = JSON.parse(e.newValue || '{}') || {}; } catch (er) { return; }
         for (const id in o) if (o[id]) onRow({ c, id, d: o[id], at: '' });
-        for (const [id, d] of S.data[c]) if (!o[id] && !(c === 'p5' && id === S.key) && !pend.has(pk(c, id))) onRow({ c, id, d: null, at: new Date((d && d.ts || 0) + 1).toISOString() });
+        for (const [id, d] of S.data[c]) if (!o[id] && shardOf(c, id) === sh && !(c === 'p5' && id === S.key) && !pend.has(pk(c, id))) onRow({ c, id, d: null, at: new Date((d && d.ts || 0) + 1).toISOString() });
       };
       if (G.addEventListener) G.addEventListener('storage', fn); onState('SUBSCRIBED');
       return () => { if (G.removeEventListener) G.removeEventListener('storage', fn); };
@@ -700,12 +880,13 @@
 
   // ================================================================ connection + initial load
   let unsub = null, buffer = null, hiddenAt = 0, wired = false, lastRowAt = 0;
+  let loading = null, loadRetryTimer = null, loadTries = 0;
   async function pickBackend(want) {
     if (want === 'local') return localBackend();
     const c = G.claude;
     if ((want === 'auto' || want === 'db') && c && typeof c.use === 'function') {
       try {
-        const [db, rm] = await Promise.all([c.use('db'), c.use('room').catch(() => null)]);
+        const [db, rm] = await tmo(Promise.all([c.use('db'), c.use('room').catch(() => null)]), 10000);
         if (db) return dbBackend(db, rm);
       } catch (e) { warn('artifact runtime', e); }
     }
@@ -729,14 +910,17 @@
       const again = everSub && !subOk; subOk = true; everSub = true;
       if (S.backend !== 'local') setStatus('online');
       if (again) catchUp(hiddenAt || (Date.now() - 120e3));
+      if (S.ready && !S.loaded) ensureLoaded();
       if (pend.size && S.ready) flush();
     } else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT' || st === 'CLOSED') {
       if (subOk) hiddenAt = hiddenAt || Date.now(); subOk = false;
     }
   }
+  // rows the server received while this device was not listening (socket down, phone asleep): `since` is a device
+  // time; the query runs on the server receive time, so rows delivered late by an offline partner are found too
   async function catchUp(since) {
     if (!S.B || !S.B.since || !S.loaded) return;
-    try { const rows = await S.B.since(since - 5 * 60e3); for (const r of rows) incoming(r.c, r.id, r.d, rowTime(r), 'remote'); hiddenAt = 0; if (S.backend !== 'local') setStatus('online'); }
+    try { const rows = await S.B.since(since + clock.skew - 5 * 60e3); for (const r of rows) incoming(r.c, r.id, r.d, rowTime(r), 'remote'); hiddenAt = 0; if (S.backend !== 'local') setStatus('online'); }
     catch (e) { if (isNetErr(e)) setStatus('offline'); }
   }
   // full server load: world collections, every player's p5 (small), my m5; returns rows
@@ -747,47 +931,91 @@
     jobs.push(B.loadCol('m5', { id: S.key }).then(rs => { for (const r of rs) rows.push(r); }));
     await Promise.all(jobs); return rows;
   }
-  // apply a completed server load. World collections become exactly the server set (+ our pending writes);
-  // the player is resolved against the local mirror; my explored map is OR-merged.
-  function ingestLoad(rows) {
+  // apply a completed server load (t0 = server time when it started). World collections become the server set, but
+  // rows this device already holds win when newer (pending writes, realtime rows received while the load was on its
+  // way, a late load after an offline start); the own player is resolved against this device's copy (three-way
+  // merge); my explored map is OR-merged.
+  function ingestLoad(rows, t0) {
     const by = {}; for (const c of COLS) by[c] = new Map();
-    let srvP = null, srvM = null;
+    let srvP = null, srvM = null; const now = clock.now();
     for (const r of rows) { if (!COLSET.has(r.c) || r.d == null) continue; if (r.c === 'm5') { if (r.id === S.key) { srvM = r.d; mergeExplored(r.d, !S.ready); } continue; } if (r.c === 'p5' && r.id === S.key) { srvP = r.d; continue; } by[r.c].set(r.id, r.d); }
     for (const c of COLS) {
-      if (c === 'm5') continue; const cur = S.data[c], nxt = by[c];
-      if (CFG.window[c]) for (const [id, d] of cur) if (!nxt.has(id) && (d.ts || 0) < clock.now() - CFG.window[c]) nxt.set(id, d); // outside the window: keep
+      if (c === 'm5') continue; const cur = S.data[c], nxt = by[c], win = CFG.window[c];
+      if (win) for (const [id, d] of [...nxt]) if ((d.ts || 0) < now - win) nxt.delete(id);      // expired harvest records
+      for (const [id, d] of cur) {
+        if (!d || (c === 'p5' && id === S.key)) continue; const sd = nxt.get(id);
+        if (sd) { if ((d.ts || 0) > (sd.ts || 0)) nxt.set(id, d); }
+        else if (t0 != null && (d.ts || 0) >= t0 - 60e3 && !(win && (d.ts || 0) < now - win)) nxt.set(id, d); // newer than the load
+      }
+      for (const [id, sd] of [...nxt]) { const tt = S.tomb.get(pk(c, id)); if (tt && tt > (sd.ts || 0)) nxt.delete(id); } // deleted since
       for (const it of pend.values()) if (it.c === c) { const sd = nxt.get(it.id); if (!sd || (sd.ts || 0) <= it.t) { if (it.d == null) nxt.delete(it.id); else nxt.set(it.id, it.d); } }
       if (c === 'p5' && S.player) nxt.set(S.key, S.player);
       // swap with change events (only after ready: before that the game reads all() itself)
       const old = new Map(cur); cur.clear(); for (const [id, d] of nxt) cur.set(id, d);
       if (S.ready) { for (const [id, d] of nxt) { const o = old.get(id); if (!o || !sameJSON(o, d)) emit(c, id, d, o, 'remote'); } for (const [id, o] of old) if (!nxt.has(id)) emit(c, id, null, o, 'remote'); }
-      S.mirrorDirty.add(c);
+      if (S.backend !== 'local') markMirror(c, null);
     }
     // the player
-    const loc = S.player ? { d: S.player, base: S.pbase, fresh: S.pfresh } : lsGet(PFX() + 'p:' + S.key, null);
+    const loc = S.player ? { d: S.player, base: S.pbase, fresh: S.pfresh, bd: S.pbd } : null;
     const res = resolvePlayer(loc, srvP);
-    S.pfresh = false;
     if (res.d) {
-      if (!S.player) S.player = fixPlayer(res.d); else if (!sameJSON(S.player, res.d)) { replacePlayer(res.d); if (S.ready) emit('player', S.player, 'load'); }
-      S.pbase = Math.max(S.pbase, srvP ? (srvP.ts || 0) : 0);
-      if (res.write) { S.playerDirty = true; schedule('p5'); }
+      if (!S.player) S.player = fixPlayer(res.d);
+      else { const ch = !samePlayer(S.player, res.d); replacePlayer(res.d); if (ch && S.ready) emit('player', S.player, 'load'); }
     }
+    if (srvP && (srvP.ts || 0) >= S.pbase) { S.pbase = srvP.ts || 0; S.pbd = clone(srvP); remember(S.pbd); }
+    S.pfresh = false;
+    S.playerDirty = res.write ? 'hard' : false; pDue = res.write ? Date.now() + CFG.debounce._ : Infinity; // a reconciliation: send soon
     if (S.player) S.data.p5.set(S.key, S.player);
-    if (EX.n > (srvM ? (srvM.n || 0) : 0)) { EX.dirty = true; schedule('m5'); } // this device saw places the server has not
+    // the explored map: this device saw places the server has not
+    if (EX.n > (srvM ? (srvM.n || 0) : 0)) { if (!EX.dirty) { EX.dirty = true; EX.due = Date.now() + CFG.debounce.m5; } } else { EX.dirty = false; EX.due = Infinity; }
     S.loaded = true;
+    if (S.ready) { mirrorPlayer(); bumpSaving(); }
+  }
+  // one server load at a time; a late one (after an offline start) is merged in when it arrives
+  function startLoad() {
+    if (loading) return loading;
+    const sess = S.sess, t0 = clock.now();
+    loading = serverLoad().then(rows => {
+      loading = null; if (sess !== S.sess || !S.world) return false; if (S.loaded) return true;
+      const buf = buffer || []; buffer = null;
+      ingestLoad(rows, t0);
+      for (const r of buf) incoming(r.c, r.id, r.d, rowTime(r), 'remote');
+      loadTries = 0; S.loadErr = null;
+      if (S.ready) { if (S.backend !== 'local') setStatus('online'); flush(); }
+      return true;
+    }, e => { loading = null; if (sess === S.sess) S.loadErr = e; return false; });
+    return loading;
+  }
+  // the load failed (or timed out): try again with backoff until it works; 'online', page show and the realtime
+  // socket coming back try at once (ensureLoaded)
+  function retryLoadLater(ms) {
+    if (!S.world || S.loaded || loadRetryTimer) return;
+    const sess = S.sess;
+    loadRetryTimer = setTimeout(() => {
+      loadRetryTimer = null; if (sess !== S.sess || S.loaded) return;
+      startLoad().then(ok => { if (!ok && sess === S.sess) { loadTries++; retryLoadLater(Math.min(60000, 4000 * Math.pow(2, Math.min(loadTries, 4))) * (.8 + Math.random() * .4)); } });
+    }, ms == null ? 4000 : ms);
+  }
+  function ensureLoaded() {
+    if (!S.world || S.loaded || !S.ready) return;
+    if (loadRetryTimer) { clearTimeout(loadRetryTimer); loadRetryTimer = null; }
+    const sess = S.sess; startLoad().then(ok => { if (!ok && sess === S.sess) retryLoadLater(); });
   }
 
   async function init(opt) {
     opt = opt || {};
     if (S.world) await close();
+    S.sess++;
     S.world = worldCode(opt.world); S.name = String(opt.name || 'Jogador').trim().slice(0, 24) || 'Jogador'; S.key = slug(opt.key || S.name);
     S.dev = lsGet('lumiar5:dev', null); if (!S.dev) { S.dev = 'd' + rid(10); lsSet('lumiar5:dev', S.dev); }
-    S.ready = false; S.loaded = false; S.player = null; S.pbase = 0; S.pfresh = true; S.tomb.clear(); pend.clear(); dupSeen.clear();
+    S.ready = false; S.loaded = false; S.loadErr = null; S.player = null; S.pbase = 0; S.pbd = null; S.pfresh = true; S.playerDirty = false; pDue = Infinity; S.hist.clear();
+    S.tomb.clear(); pend.clear(); dupSeen.clear(); S.mirrorDirty.clear(); EX.dirty = false; EX.due = Infinity;
+    loading = null; loadTries = 0; clearTimeout(loadRetryTimer); loadRetryTimer = null; hiddenAt = 0;
     for (const c of COLS) S.data[c].clear();
     // 1) what this device knows: mirror, explored map, queued writes from a previous session
     readMirror();
     const pm = lsGet(PFX() + 'p:' + S.key, null);
-    if (pm && pm.d) { S.player = fixPlayer(pm.d); S.pbase = pm.base || 0; S.pfresh = !!pm.fresh; }
+    if (pm && pm.d) { S.player = fixPlayer(pm.d); S.pbase = pm.base || 0; S.pfresh = !!pm.fresh; S.pbd = pm.bd || null; }
     exploredLoad(lsGet(PFX() + 'x:' + S.key, null));
     for (const it of lsGet(PFX() + 'q', [])) { if (!it || !COLSET.has(it.c) || it.c === 'p5' || it.c === 'm5') continue; pend.set(pk(it.c, it.id), { c: it.c, id: it.id, d: it.d, t: it.t, chk: true, bad: 0 }); if (it.d == null) S.data[it.c].delete(it.id); else S.data[it.c].set(it.id, it.d); }
     // 2) backend
@@ -796,19 +1024,23 @@
     buffer = []; subOk = false; everSub = false;
     try { unsub = S.B.subscribe(onRow, onSubState); } catch (e) { warn('subscribe', e); }
     if (S.B.serverNow) S.B.serverNow();
-    let loadErr = null, loaded = false;
-    const loadP = serverLoad().then(rows => { loaded = true; const buf = buffer || []; buffer = null; ingestLoad(rows); for (const r of buf) incoming(r.c, r.id, r.d, rowTime(r), 'remote'); return true; }, e => { loadErr = e; return false; });
+    const sess = S.sess;
+    const loadP = startLoad();
     const timeout = opt.timeout != null ? opt.timeout : CFG.loadTimeout;
     await Promise.race([loadP, sleep(timeout)]);
-    if (!loaded) { // offline at boot: play from the mirror, merge when the server answers
+    const loaded = S.loaded;
+    if (!loaded) { // offline at boot (or a slow network): play from the mirror, merge when the server answers
       const buf = buffer || []; buffer = null; for (const r of buf) incoming(r.c, r.id, r.d, rowTime(r), 'remote');
-      if (loadErr) warn('load failed, playing from this device', loadErr && (loadErr.message || loadErr));
+      warn('server load not in yet, playing from this device', S.loadErr ? (S.loadErr.message || S.loadErr) : '(slow)');
       setStatus(S.backend === 'local' ? 'local' : 'offline');
-      if (!loadErr) loadP.then(ok => { if (ok) { setStatus('online'); flush(); } });
-      else retryLoadLater();
+      loadP.then(ok => { if (!ok && sess === S.sess) retryLoadLater(); }); // failed now or later: keep trying
       markChk();
     } else if (S.backend !== 'local') setStatus('online');
-    if (!S.player) { S.player = newPlayer(S.name, opt.look, opt.defaults); S.pfresh = !loaded; } // fresh = never compared with the server
+    if (!S.player) { // fresh = never compared with the server; its defaults are the ancestor of a later merge
+      S.player = newPlayer(S.name, opt.look, opt.defaults); S.pfresh = !loaded; S.pbd = loaded ? null : clone(S.player);
+      remember(clone(S.player)); // version 0
+    }
+    const look0 = JSON.stringify(S.player.look), name0 = S.player.name;
     if (opt.look && Object.keys(opt.look).length) S.player.look = Object.assign({}, S.player.look, opt.look);
     if (S.player.name !== S.name) S.player.name = S.name;
     S.data.p5.set(S.key, S.player);
@@ -816,57 +1048,54 @@
     const ck = S.data.w5.get('clock'); if (ck && typeof ck.off === 'number') clock.off = ck.off;
     wire();
     S.ready = true;
+    if (JSON.stringify(S.player.look) !== look0 || S.player.name !== name0) dirty();
     if (!ck && opt.startHour != null && loaded) { // a brand-new world starts in the morning (an old ts: any real clock row wins)
       const g = clock.gameMs(); const target = Math.floor(g / DAY_MS) * DAY_MS + opt.startHour / 24 * DAY_MS; clock.off += Math.round(target - g);
       const rec = { off: clock.off, by: S.key, ts: 1 }; S.data.w5.set('clock', rec); pend.set(pk('w5', 'clock'), { c: 'w5', id: 'clock', d: rec, t: 1, chk: true, bad: 0 }); schedule('w5');
     }
     // 3) presence
-    try { const rm = await S.B.room(); if (rm) attachRoom(rm); } catch (e) { warn('room', e); }
-    S.mirrorDirty = new Set(COLS); writeMirror(); mirrorPlayer();
-    if (pend.size || S.playerDirty) schedule('_');
+    try { const rm = await tmo(Promise.resolve(S.B.room()), 10000); if (rm) attachRoom(rm); } catch (e) { warn('room', e); }
+    if (S.backend !== 'local') { for (const c of COLS) markMirror(c, null); writeMirror(); }
+    mirrorPlayer(); rearm();
     emit('ready', S.player); emit('status', statusInfo());
     return S.player;
   }
-  function retryLoadLater() {
-    const tryLoad = async () => {
-      if (!S.world || S.loaded) return;
-      try { const rows = await serverLoad(); ingestLoad(rows); setStatus('online'); flush(); }
-      catch (e) { setTimeout(tryLoad, Math.min(60000, 5000 * (1 + Math.random()))); }
-    };
-    setTimeout(tryLoad, 4000);
-  }
-  // page lifecycle: write everything down synchronously, then best-effort send (keepalive) before the page sleeps
+  // page lifecycle: write everything down synchronously, then best-effort send (keepalive) before the page sleeps.
+  // The own records (player, map) are sent only once this session has compared them with the server: a phone that
+  // started offline (or whose load is still on its way) must never overwrite the saved progress from its stale copy.
   function onHide() {
-    if (!S.world || !S.ready) return; hiddenAt = Date.now();
-    materialize(); persistQueue(); writeMirror(); mirrorPlayer();
-    if (S.B && S.B.keepalive && pend.size && !(S.B.offline && S.B.offline())) {
-      const items = [...pend.values()].sort((a, b) => (b.own ? 1 : 0) - (a.own ? 1 : 0));
+    if (!S.world || !S.ready) return; hiddenAt = hiddenAt || Date.now();
+    materialize(true); persistQueue(); writeMirror(); mirrorPlayer();
+    const items = [...pend.values()].filter(i => S.loaded || !i.own).sort((a, b) => (b.own ? 1 : 0) - (a.own ? 1 : 0));
+    if (S.B && S.B.keepalive && items.length && !(S.B.offline && S.B.offline())) {
       const p = S.B.keepalive(items);
-      if (p) p.then(() => { for (const it of items) if (pend.get(pk(it.c, it.id)) === it) { pend.delete(pk(it.c, it.id)); if (it.c === 'p5' && it.id === S.key) { S.pbase = Math.max(S.pbase, it.t); S.pfresh = false; mirrorPlayer(); } } persistQueue(); S.lastOk = Date.now(); bumpSaving(); }, () => { });
-    } else if (S.B && S.B.kind !== 'sb' && pend.size) flush();
+      if (p) p.then(() => { for (const it of items) if (pend.get(pk(it.c, it.id)) === it) { pend.delete(pk(it.c, it.id)); ownSent(it); } persistQueue(); S.lastOk = Date.now(); bumpSaving(); }, () => { });
+    } else if (S.B && S.B.kind !== 'sb' && items.length) flush();
     if (RM && RM.bye) RM.bye();
   }
   function onShow() {
     if (!S.world || !S.ready) return; lastActive = Date.now();
-    if (hiddenAt && Date.now() - hiddenAt > 15000) catchUp(hiddenAt);
+    if (hiddenAt && Date.now() - hiddenAt > 15000) catchUp(hiddenAt); else if (subOk) hiddenAt = 0;
+    ensureLoaded();
     retryNow();
   }
   function wire() {
     if (wired || !G.addEventListener) return; wired = true;
     G.addEventListener('pagehide', onHide);
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') onHide(); else onShow(); });
-    G.addEventListener('online', () => { if (S.ready) retryNow(); });
+    G.addEventListener('online', () => { if (S.ready) { ensureLoaded(); retryNow(); } });
     G.addEventListener('offline', () => { if (S.ready && S.backend !== 'local') setStatus('offline'); });
     const act = () => { lastActive = Date.now(); }; G.addEventListener('pointerdown', act, { passive: true }); G.addEventListener('keydown', act);
+    setInterval(pruneOld, CFG.pruneEvery);
     // w5/clock from anyone moves our clock
     on('w5', (id, d) => { if (id === 'clock' && d && typeof d.off === 'number' && d.off !== clock.off) clock.setOffset(d.off, false); });
   }
   async function close() {
     if (!S.world) return; try { await flush(); } catch (e) { }
     onHide(); if (unsub) { try { unsub(); } catch (e) { } unsub = null; } if (RM) { RM.close(); RM = null; }
-    clearTimeout(flushTimer); clearTimeout(retryTimer); clearTimeout(mirrorTimer); clearTimeout(pmirrorTimer); clearTimeout(queueTimer);
-    flushTimer = retryTimer = mirrorTimer = pmirrorTimer = queueTimer = null; flushDue = Infinity;
-    S.ready = false; S.world = null;
+    clearTimeout(flushTimer); clearTimeout(retryTimer); clearTimeout(mirrorTimer); clearTimeout(pmirrorTimer); clearTimeout(queueTimer); clearTimeout(loadRetryTimer);
+    flushTimer = retryTimer = mirrorTimer = pmirrorTimer = queueTimer = loadRetryTimer = null; flushDue = Infinity;
+    S.sess++; S.ready = false; S.loaded = false; S.world = null;
   }
 
   // ================================================================ public API
@@ -876,7 +1105,8 @@
     all: c => S.data[c],
     get player() { return S.player; },
     get status() { return S.status; },
-    get saving() { return pend.size > 0 || !!flushing || S.playerDirty; },
+    get saving() { return isSaving(); },
+    get loaded() { return S.loaded; },
     get pending() { return pend.size; },
     get ready() { return S.ready; },
     get world() { return S.world; },
@@ -890,13 +1120,14 @@
     setPos(x, y, z, ry) {
       const p = S.player; if (!p) return; const o = p.pos;
       if (o && Math.abs(o[0] - x) + Math.abs(o[1] - y) + Math.abs(o[2] - z) < .5 && Math.abs((o[3] || 0) - (ry || 0)) < .3) return;
-      p.pos = [+x.toFixed(2), +y.toFixed(2), +z.toFixed(2), +(ry || 0).toFixed(2)]; dirty();
+      if (![x, y, z].every(Number.isFinite)) return;
+      p.pos = [+x.toFixed(2), +y.toFixed(2), +z.toFixed(2), +(+ry || 0).toFixed(2)]; dirty('soft');
     },
     room, explored,
     playerKey: slug, worldCode,
     CFG, COLS,
     // internals for tests
-    _t: { mergeMono, mergePlayer, resolvePlayer, rleEncode, rleDecode, b64enc, b64dec, resample, slug, rowTime, bytes, pend, S, EX, incoming, onHide, onShow, catchUp, isNetErr },
+    _t: { mergeMono, mergePlayer, merge3, mergeCounts, resolvePlayer, samePlayer, deq, rleEncode, rleDecode, b64enc, b64dec, resample, slug, rowTime, bytes, srvBytes, pend, S, EX, incoming, onHide, onShow, catchUp, isNetErr, pruneOld, ensureLoaded, writeMirror, shardOf, TAB },
   };
   L.save = save;
 })(typeof window !== 'undefined' ? (window.L = window.L || {}) : (globalThis.L = globalThis.L || {}));

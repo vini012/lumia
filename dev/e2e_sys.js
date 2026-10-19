@@ -15,16 +15,21 @@ const MODE = process.argv[2] || 'test';
 fs.mkdirSync(OUT, { recursive: true });
 const MIME = { '.html': 'text/html', '.js': 'application/javascript', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.woff2': 'font/woff2', '.css': 'text/css', '.svg': 'image/svg+xml' };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+// size of d as the server measures it (octet_length(d::text) of jsonb: a space after every ':' and ',')
+function jsonbLen(v) {
+  const sep = x => { if (Array.isArray(x)) return Math.max(0, x.length - 1) + x.reduce((n, y) => n + sep(y), 0); if (x && typeof x === 'object') { const ks = Object.keys(x).filter(k => x[k] !== undefined); return ks.length + Math.max(0, ks.length - 1) + ks.reduce((n, k) => n + sep(x[k]), 0); } return 0; };
+  return Buffer.byteLength(JSON.stringify(v)) + sep(v);
+}
 
 // ================================================================ mocked Supabase (shared by every phone)
 class Server {
-  constructor() { this.rows = new Map(); this.subs = new Map(); this.latency = 25; this.log = []; this.upserts = 0; }
+  constructor() { this.rows = new Map(); this.subs = new Map(); this.latency = 25; this.log = []; this.upserts = 0; this.refuse = false; }
   rowT(r) { return r && r.d && typeof r.d.ts === 'number' ? r.d.ts : (r && r.at ? Date.parse(r.at) : 0); }
   async handle(ph, m) {
     await sleep(this.latency);
     if (ph.offline) return { data: null, error: { code: '', message: 'TypeError: Failed to fetch' } };
     if (m.op === 'select') {
-      let out = [...this.rows.values()].filter(r => m.f.every(([op, k, v]) => op === 'eq' ? r[k] === v : op === 'in' ? v.includes(r[k]) : op === 'notnull' ? r[k] !== null : op === 'gt' ? (k === 'at' ? Date.parse(r.at) > Date.parse(v) : r[k] > v) : true));
+      let out = [...this.rows.values()].filter(r => m.f.every(([op, k, v]) => op === 'eq' ? r[k] === v : op === 'in' ? v.includes(r[k]) : op === 'notnull' ? r[k] !== null : op === 'gt' ? (k === 'at' || k === 'sat' ? Date.parse(r[k]) > Date.parse(v) : r[k] > v) : true));
       out.sort((a, b) => { for (const [k, asc] of m.ord) { if (a[k] < b[k]) return asc ? -1 : 1; if (a[k] > b[k]) return asc ? 1 : -1; } return 0; });
       out = out.slice(m.from || 0, m.lim == null ? undefined : (m.from || 0) + m.lim);
       return { data: JSON.parse(JSON.stringify(out)), error: null };
@@ -43,11 +48,12 @@ class Server {
     return { data: null, error: { code: 'x', message: 'bad op' } };
   }
   upsert(rows, who) {
-    for (const r of rows) if (r.d != null && Buffer.byteLength(JSON.stringify(r.d)) > 32000) return { data: null, error: { code: '23514', message: 'violates check constraint "lumiar_mundo_d_size"' } };
+    if (this.refuse) return { data: null, error: { code: '42501', message: 'new row violates row-level security policy for table "lumiar_mundo"' } };
+    for (const r of rows) if (r.d != null && jsonbLen(r.d) > 32000) return { data: null, error: { code: '23514', message: 'violates check constraint "lumiar_mundo_d_size"' } };
     for (const r of rows) {
       const k = r.w + '|' + r.c + '|' + r.id, old = this.rows.get(k);
       if (old && this.rowT(r) < this.rowT(old)) { this.log.push('skip ' + k + ' by ' + who); continue; } // v5.sql trigger
-      const row = { w: r.w, c: r.c, id: r.id, d: r.d == null ? null : JSON.parse(JSON.stringify(r.d)), at: r.at || new Date().toISOString() };
+      const row = { w: r.w, c: r.c, id: r.id, d: r.d == null ? null : JSON.parse(JSON.stringify(r.d)), at: r.at || new Date().toISOString(), sat: new Date().toISOString() }; // sat: server receive time (v5.sql trigger)
       this.rows.set(k, row); this.log.push('put ' + k + ' by ' + who);
       const ev = { schema: 'public', table: 'lumiar_mundo', eventType: old ? 'UPDATE' : 'INSERT', new: row, old: {}, commit_timestamp: new Date().toISOString() };
       for (const s of this.subs.values()) if (!s.ph.offline && s.pg.some(f => f === 'w=eq.' + row.w)) this.push(s.ph, { sub: s.id, kind: 'pg', payload: ev });
@@ -174,10 +180,25 @@ async function testMode() {
   await B.ev(() => L.surv.sleep({ x: 9, y: 200, z: 9 }));
   ok(await until(async () => { const a = await A.st(), b = await B.st(); return a.hours > 5.9 && a.hours < 7 && b.hours > 5.9 && b.hours < 7; }, 20000), 'both asleep: the night is skipped for both');
   await sleep(700); await A.shot('e2e_a_dawn');
-  ok(await until(() => A.ev(() => !L.surv.sleeping) && B.ev(() => !L.surv.sleeping), 9000), 'both woke up');
+  ok(await until(async () => (await A.ev(() => !L.surv.sleeping)) && (await B.ev(() => !L.surv.sleeping)), 9000), 'both woke up');
+  ok(await until(() => A.ev(() => /woke/.test(H.log.join(' '))), 3000), 'A heard woke');
   const logA = await A.ev(() => H.log.join(' ')); ok(/slept/.test(logA) && /woke/.test(logA), 'slept/woke events: ' + logA.slice(-80));
 
-  console.log('== 5. page hide sends with keepalive');
+  console.log('== 5. HUD: buff chips end on time, Frio/Quente label, server refusing writes');
+  await A.ev(() => L.surv.addBuff('energia', 1.5));
+  ok(await until(() => A.ev(() => document.querySelectorAll('#sv .sv-buff').length === 1 && /Fôlego/.test(document.querySelector('#sv .sv-buff').textContent)), 3000), 'chip "Fôlego" shown');
+  ok(await until(() => A.ev(() => L.surv.buff('energia') === 0), 4000), 'buff ended');
+  await sleep(1000); ok(await A.ev(() => document.querySelectorAll('#sv .sv-buff').length === 0), 'the chip is gone 1 s after the buff ended (game loop ticking)');
+  await A.ev(() => L.surv.warm(1.5));
+  ok(await until(() => A.ev(() => document.querySelector('#sv .sv-frio b').textContent === 'Quente' && /Calor/.test(document.querySelector('#sv .sv-buff').textContent)), 3000), 'warm: gauge says "Quente", chip "Calor"');
+  ok(await until(() => A.ev(() => document.querySelector('#sv .sv-frio b').textContent === 'Frio' && document.querySelectorAll('#sv .sv-buff').length === 0), 5000), 'warmth over: "Frio" again, no chip');
+  server.refuse = true; await A.ev(() => L.save.set('b5', 'e2e_ref1', { t: 'wall', x: 1, y: 200, z: 1, r: 0 }));
+  ok(await until(() => A.ev(() => L.save.status === 'refused' && document.querySelector('.sv-cloud').dataset.s === 'err'), 8000), 'server refuses: cloud says "Não deu para salvar agora" (not "Sem internet")');
+  ok((await A.ev(() => document.querySelector('.sv-cloud').getAttribute('aria-label'))) === 'Não deu para salvar agora', 'cloud label');
+  server.refuse = false; await A.ev(() => L.save.retry());
+  ok(await until(async () => !!server.get('e2e', 'b5', 'e2e_ref1') && (await A.ev(() => L.save.status === 'online')), 8000), 'retry after the server accepts again: delivered, online');
+
+  console.log('== 6. page hide sends with keepalive');
   await A.ev(() => { L.save.player.inv.madeira = 99; L.save.dirty(); document.dispatchEvent(new Event('visibilitychange')); });
   await A.ev(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); });
   ok(await until(() => (server.get('e2e', 'p5', 'vini') || {}).inv && server.get('e2e', 'p5', 'vini').inv.madeira === 99, 5000), 'hidden page: progress sent at once (keepalive) ' + server.log.filter(l => /keepalive/.test(l)).slice(-1));
@@ -201,13 +222,15 @@ async function shotsMode() {
   await P.ev(() => { L.clock.setHours(23); L.surv.sleep({ x: 0, y: 200, z: 0 }); }); await sleep(1600);
   await P.ev(() => { document.querySelector('.sv-sleep .sv-small').textContent = 'Esperando Bia dormir também…'; document.querySelector('.sv-sleep .sv-btn').classList.add('sv-on'); });
   await sleep(600); await P.shot(pre + '_5_sleep');
-  // (screenshots are slow here: the game loop is paused for the dawn shot so the veil does not fade first)
+  // (screenshots are slow here: the game loop is paused for the dawn shot so the dawn cover does not fade first)
   await until(() => P.ev(() => document.querySelector('.sv-sleep').classList.contains('sv-dawn') && (H.paused = true)), 15000, 50); await sleep(1300); await P.shot(pre + '_6_dawn');
   await P.ev(() => { H.paused = false; });
   await until(() => P.ev(() => !L.surv.sleeping), 10000); await sleep(1500);
   await P.ev(() => { L.P.vy = -30; L.surv.respawn('nuvens'); }); await sleep(1300); await P.shot(pre + '_7_respawn');
   await sleep(2500);
   await P.ev(() => { L.surv.set({ fome: 40, en: 100, mana: 100, frio: 0 }); L.save.player.inv.pao = 1; L.surv.eat('pao'); }); await sleep(250); await P.shot(pre + '_8_eat');
+  await sleep(2500); server.refuse = true; await P.ev(() => { L.save.set('b5', 'y', { x: 2 }); }); await until(() => P.ev(() => L.save.status === 'refused'), 8000);
+  await P.ev(() => { L.survUI.update(); L.survUI.tip('cloud'); }); await sleep(700); await P.shot(pre + '_9_refused'); server.refuse = false;
   for (const p of phones) ok(!p.errs.length, 'no page errors on ' + p.name);
 }
 
