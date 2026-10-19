@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lumiar — World Lab</title>
+<base href="../">
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#9cc6ec;font:13px system-ui,sans-serif;touch-action:none}
+#game{position:fixed;inset:0}
+#hud{position:fixed;left:8px;top:8px;color:#fff;text-shadow:0 1px 2px #000a;pointer-events:none;white-space:pre;font:12px ui-monospace,monospace}
+body.nohud #hud{display:none}
+#help{position:fixed;right:8px;bottom:8px;color:#fff;text-shadow:0 1px 2px #000a;font-size:11px;text-align:right;pointer-events:none}
+body.nohud #help{display:none}
+</style>
+<script>
+// ?q=alto|medio|baixo picks the quality tier before the engine reads it
+(function () { const q = new URLSearchParams(location.search).get('q'); if (q) try { localStorage.setItem('lumiar:q', JSON.stringify(q)); } catch (e) { } })();
+</script>
+</head><body>
+<div id="game"></div><div id="hud"></div>
+<div id="help">arrastar: olhar · WASD/setas: mover · Q/E: descer/subir · Shift: rápido · roda: velocidade · M: mapa · H: HUD</div>
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script src="js/engine.js"></script>
+<script>window.L && (L.__devSkip = true);</script>
+<script src="js/sky.js"></script>
+<script src="js/terramat.js"></script>
+<script src="js/flora.js"></script>
+<script src="js/terrain.js"></script>
+<script src="js/scatter.js"></script>
+<script src="js/world.js"></script>
+<script src="dev/world_dev.js"></script>
+</body></html>
