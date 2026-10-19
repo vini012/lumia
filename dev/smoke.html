@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;overflow:hidden;background:#000}#game{position:fixed;inset:0}</style></head><body><div id="game"></div>
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script src="../js/engine.js"></script><script src="../js/sky.js"></script><script src="../js/terramat.js"></script><script src="../js/flora.js"></script><script src="../js/grass.js"></script>
+<script>
+L.makeMaterials(); L.skyInit();
+L.setTimeOfDay(L.todPreset(new URLSearchParams(location.search).get('t')||'day'));
+const s=new THREE.Mesh(new THREE.SphereGeometry(5,32,16),L.MAT.v5); const c=new Float32Array(s.geometry.attributes.position.count*3).fill(.8); s.geometry.setAttribute('color',new THREE.BufferAttribute(c,3)); s.castShadow=true; s.position.set(0,6,0); L.scene.add(s);
+const lam=L.stylize(new THREE.MeshLambertMaterial({color:0xcc6644})); const s2=new THREE.Mesh(new THREE.SphereGeometry(4,32,16),lam); s2.position.set(12,5,0); L.scene.add(s2);
+const g=new THREE.PlaneGeometry(400,400,40,40); g.rotateX(-Math.PI/2); const n=g.attributes.position.count; const col=new Float32Array(n*3), aT=new Float32Array(n*4), aU=new Float32Array(n*2); const cc=L.C(0xc7c051); for(let i=0;i<n;i++){col[i*3]=cc.r;col[i*3+1]=cc.g;col[i*3+2]=cc.b; const x=g.attributes.position.getX(i); aT[i*4]=x>100?1:0; aT[i*4+1]=Math.abs(x)<4?1:0;}
+g.setAttribute('color',new THREE.BufferAttribute(col,3)); g.setAttribute('aT',new THREE.BufferAttribute(aT,4)); g.setAttribute('aU',new THREE.BufferAttribute(aU,2));
+const t=new THREE.Mesh(g,L.makeTerrainMaterial()); t.receiveShadow=true; L.scene.add(t);
+const w=new THREE.Mesh(new THREE.PlaneGeometry(20000,20000).rotateX(-Math.PI/2),L.makeWaterMaterial({depthAttr:false,depth:20,ocean:true})); w.position.y=-30; L.scene.add(w);
+L.cloudSea.setClumpDensity(()=>.7);
+L.ground=(x,z)=>0; L.waterAt=()=>-Infinity; L.terrainSample=(x,z,o)=>{o=o||{};o.h=0;o.sl=0;o.region=0;o.c=[cc.r,cc.g,cc.b];o.rock=x>100?1:0;o.path=Math.abs(x)<4?1:0;o.sand=0;o.snow=0;o.forest=0;o.wet=0;o.meadow=1-o.rock-o.path;return o;};
+L.flowerHint=()=>3; L.grassInit();
+L.clouds.addCumulus(-300,200,-1500,700,500,3);
+L.camera.position.set(-20,15,40); L.camera.lookAt(20,8,-60);
+let T=0; window.step=(n)=>{for(let i=0;i<(n||1);i++){T+=1/30; L.lookTick(1/30,T,L.camera);} L.grassUpdate(L.camera.position.x,L.camera.position.z,true); L.render(); return L.renderStats;};
+window.ready=true;
+</script></body></html>
