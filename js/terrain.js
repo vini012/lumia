@@ -538,11 +538,23 @@
   }
 
   // ---------------------------------------------------------------- quadtree LOD
-  const ROOT = 16384, R0 = -ROOT / 2, MAXLVL = 8, NSEG = 32;   // level 8 = 64 m nodes with 2 m cells
-  const MACRO_LVL = 5;                                          // levels <= 5 (>= 16 m cells) sample the macro grid only
-  const FALLBACK_LVL = 3;                                       // 2048 m nodes kept as cover while finer ones stream
-  L.LOD_K = 1.3;                                                // split when distance < size * K * (relief factor)
-  L.LOD_FLAT = .8; L.LOD_CLIFF = 1.6;                           // relief factor range (flat ground .. cliffs)
+  // few, big nodes (draw calls matter more than triangles on phones): 64x64 cells per node
+  const ROOT = 16384, R0 = -ROOT / 2, MAXLVL = 7, NSEG = 64;   // level 7 = 128 m nodes with 2 m cells (2x2 physics tiles)
+  const MACRO_LVL = 4;                                          // levels <= 4 (>= 16 m cells) sample the macro grid only
+  const FALLBACK_LVL = 2;                                       // 4096 m nodes kept as cover while finer ones stream
+  // split when distance < size * K * (relief factor); relief factor runs FLAT (flat ground) .. CLIFF (walls).
+  // Per quality tier; setting L.LOD_K / L.LOD_FLAT / L.LOD_CLIFF explicitly overrides the tier.
+  L.LOD_TIERS = { alto: [.42, .7, 1.25], medio: [.3, .6, 1.1], baixo: [.26, .55, 1.0] };
+  L.LOD_K = null; L.LOD_FLAT = null; L.LOD_CLIFF = null;
+  const _lod = [1, 1, 1];
+  function lodParams() {
+    const t = L.LOD_TIERS[L.quality] || L.LOD_TIERS.medio;
+    _lod[0] = L.LOD_K != null ? L.LOD_K : t[0]; _lod[1] = L.LOD_FLAT != null ? L.LOD_FLAT : t[1]; _lod[2] = L.LOD_CLIFF != null ? L.LOD_CLIFF : t[2];
+    return _lod;
+  }
+  const FAR_LVL = 3;                                            // nodes of 2048 m and up use NSEG/2 (cheaper far field)
+  L.LOD_FLATSEG = .1;                                           // below this relief/size a node (above the finest level) uses NSEG/2
+  const nsOf = (l, rel) => (l <= FAR_LVL || (l < MAXLVL && rel < L.LOD_FLATSEG)) ? NSEG >> 1 : NSEG;
   const nodes = new Map(); let TMAT = null, WMAT = null, FMAT = null;
   const group = new THREE.Group(); group.name = 'terrain'; L.terrainGroup = group;
   const waterGroup = new THREE.Group(); waterGroup.name = 'water';
@@ -553,13 +565,21 @@
 
   function buildNode(l, i, j) {
     const t0 = now();
-    const size = ROOT / (1 << l), x0 = R0 + i * size, z0 = R0 + j * size, cs = size / NSEG, Wd = NSEG + 1, E = NSEG + 3;
+    const size = ROOT / (1 << l), x0 = R0 + i * size, z0 = R0 + j * size;
+    rangeOf(x0, z0, size, _rng);
+    const NS = nsOf(l, (_rng[1] - _rng[0] - 6) / size), cs = size / NS, Wd = NS + 1, E = NS + 3;
     const fine = l > MACRO_LVL;
     const Hx = new Float32Array(E * E);
-    const tile = l === MAXLVL ? getTile(Math.round(x0 / TS), Math.round(z0 / TS)) : null;
+    // finest level: the inner grid comes from the cached physics tiles (so L.ground matches this mesh exactly)
+    const TT = l === MAXLVL ? size / TS : 0, ti0 = Math.round(x0 / TS), tj0 = Math.round(z0 / TS);
+    const tiles = TT ? [] : null;
+    if (TT) for (let tj = 0; tj < TT; tj++) for (let ti = 0; ti < TT; ti++) tiles.push(getTile(ti0 + ti, tj0 + tj));
     for (let b = 0; b < E; b++) for (let a = 0; a < E; a++) {
       const ga = a - 1, gb = b - 1, x = x0 + ga * cs, z = z0 + gb * cs;
-      Hx[b * E + a] = (tile && ga >= 0 && gb >= 0 && ga <= NSEG && gb <= NSEG) ? tile[gb * TW + ga] : (fine ? rawH(x, z) : macro(x, z));
+      if (TT && ga >= 0 && gb >= 0 && ga <= NS && gb <= NS) {
+        const ti = Math.min(TT - 1, (ga / TN) | 0), tj = Math.min(TT - 1, (gb / TN) | 0);
+        Hx[b * E + a] = tiles[tj * TT + ti][(gb - tj * TN) * TW + (ga - ti * TN)];
+      } else Hx[b * E + a] = fine ? rawH(x, z) : macro(x, z);
     }
     // vertices: grid + 4 skirt strips
     const nv = Wd * Wd + 4 * Wd; const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3), aT = new Float32Array(nv * 4), aU = new Float32Array(nv * 2);
@@ -577,11 +597,11 @@
       aT[v * 4] = P.rock; aT[v * 4 + 1] = P.path; aT[v * 4 + 2] = P.sand; aT[v * 4 + 3] = P.snow; aU[v * 2] = P.forest; aU[v * 2 + 1] = P.wet;
     }
     const idx = [];
-    for (let b = 0; b < NSEG; b++) for (let a = 0; a < NSEG; a++) { const p = b * Wd + a, q = p + 1, r = p + Wd, s = r + 1; idx.push(p, r, q, q, r, s); }
+    for (let b = 0; b < NS; b++) for (let a = 0; a < NS; a++) { const p = b * Wd + a, q = p + 1, r = p + Wd, s = r + 1; idx.push(p, r, q, q, r, s); }
     // skirts (depth follows the local relief so LOD cracks at cliffs stay covered)
     let sv = Wd * Wd;
     const edges = [[], [], [], []];
-    for (let a = 0; a < Wd; a++) { edges[0].push(a); edges[1].push(a * Wd + NSEG); edges[2].push(NSEG * Wd + (NSEG - a)); edges[3].push((NSEG - a) * Wd); }
+    for (let a = 0; a < Wd; a++) { edges[0].push(a); edges[1].push(a * Wd + NS); edges[2].push(NS * Wd + (NS - a)); edges[3].push((NS - a) * Wd); }
     for (const e of edges) {
       const s0 = sv;
       for (let k = 0; k < e.length; k++) {
@@ -599,21 +619,21 @@
     g.setAttribute('aT', new THREE.BufferAttribute(aT, 4)); g.setAttribute('aU', new THREE.BufferAttribute(aU, 2));
     g.setIndex(new THREE.BufferAttribute(nv > 65535 ? new Uint32Array(idx) : new Uint16Array(idx), 1));
     g.boundingBox = new THREE.Box3(new THREE.Vector3(x0, minH - 40, z0), new THREE.Vector3(x0 + size, maxH, z0 + size)); g.boundingSphere = g.boundingBox.getBoundingSphere(new THREE.Sphere());
-    const m = new THREE.Mesh(g, TMAT); m.receiveShadow = true; m.castShadow = l >= MAXLVL - 1; m.matrixAutoUpdate = false; m.userData.lvl = l; m.name = 'tn' + l;
+    const m = new THREE.Mesh(g, TMAT); m.receiveShadow = true; m.castShadow = l >= MAXLVL; m.matrixAutoUpdate = false; m.userData.lvl = l; m.name = 'tn' + l;
     const node = { mesh: m, water: null, l, i, j, x0, z0, size, minH, maxH, k: nkey(l, i, j), tris: idx.length / 3 };
-    node.water = buildWater(node, Hx, E, cs);
+    node.water = buildWater(node, Hx, E, cs, NS);
     const dt = now() - t0; const S = L.terrainStats; S.built++; S.buildMs += dt; S.last = dt;
     return node;
   }
 
   // per-node water: ocean (y = 0) and lakes (their own level), one geometry with aDepth
-  function buildWater(node, Hx, E, cs) {
+  function buildWater(node, Hx, E, cs, NS) {
     const { x0, z0, size, minH } = node;
     const bodies = [];
     if (minH < .4) bodies.push({ y: 0, lake: null });
     for (const lk of LAKES) { const b = lk.bbox; if (b[2] < x0 - 30 || b[0] > x0 + size + 30 || b[3] < z0 - 30 || b[1] > z0 + size + 30) continue; if (minH > lk.level) continue; bodies.push({ y: lk.level, lake: lk }); }
     if (!bodies.length) return null;
-    const WN = node.l >= MAXLVL - 1 ? NSEG : NSEG / 2, step = NSEG / WN, ww = WN + 1, wcs = size / WN;
+    const WN = node.l >= MAXLVL - 1 ? NS : NS / 2, step = NS / WN, ww = WN + 1, wcs = size / WN;
     const pos = [], dep = [], idx = [];
     for (const B of bodies) {
       const base = pos.length / 3; const lid = B.lake ? LAKES.indexOf(B.lake) + 1 : 0;
@@ -649,10 +669,27 @@
           for (let c = -2; c <= 2; c++) { const f = c / 2; pos.push(x + nx * hw * f, y, z + nz * hw * f); dep.push((1 - f * f) * (.6 + w * .06) + .05); uv.push(f * .5 + .5, k * 20); }
           if (k > s) { const o = (k - s - 1) * 5; for (let c = 0; c < 4; c++) idx.push(o + c, o + c + 5, o + c + 1, o + c + 1, o + c + 5, o + c + 6); }
         }
-        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('aDepth', new THREE.Float32BufferAttribute(dep, 1)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeBoundingSphere(); g.computeBoundingBox();
-        const m = new THREE.Mesh(g, WMAT); m.renderOrder = 2; m.matrixAutoUpdate = false; m.name = 'river'; riverMeshes.push(m); waterGroup.add(m);
+        bucket(rb, pos[0], pos[2], { position: [pos, 3], aDepth: [dep, 1], uv: [uv, 2] }, idx);
       }
     }
+    for (const g of flush(rb)) { const m = new THREE.Mesh(g, WMAT); m.renderOrder = 2; m.matrixAutoUpdate = false; m.name = 'river'; riverMeshes.push(m); waterGroup.add(m); }
+  }
+  // merge small ribbons into one geometry per 2 km cell (one draw call each, still frustum-culled)
+  const rb = new Map(), fb = new Map();
+  function bucket(B, x, z, attrs, idx) {
+    const k = Math.floor((x + WS) / 2000) * 100 + Math.floor((z + WS) / 2000);
+    let e = B.get(k); if (!e) { e = { a: {}, idx: [], n: 0 }; B.set(k, e); }
+    let n = 0; for (const name in attrs) { const [arr, sz] = attrs[name]; (e.a[name] = e.a[name] || [sz, []])[1].push(...arr); n = arr.length / sz; }
+    for (const v of idx) e.idx.push(v + e.n); e.n += n;
+  }
+  function flush(B) {
+    const out = [];
+    for (const e of B.values()) {
+      const g = new THREE.BufferGeometry();
+      for (const name in e.a) g.setAttribute(name, new THREE.Float32BufferAttribute(e.a[name][1], e.a[name][0]));
+      g.setIndex(e.idx); g.computeBoundingSphere(); g.computeBoundingBox(); out.push(g);
+    }
+    B.clear(); return out;
   }
 
   // waterfall ribbons (uv.x across, uv.y along in metres, aSteep 0..1)
@@ -671,10 +708,10 @@
         }
         if (k) { const o = (k - 1) * (XS + 1); for (let c = 0; c < XS; c++) idx.push(o + c, o + c + 1, o + c + XS + 1, o + c + 1, o + c + XS + 2, o + c + XS + 1); }
       }
-      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setAttribute('aSteep', new THREE.Float32BufferAttribute(st, 1)); g.setIndex(idx); g.computeBoundingSphere();
-      const m = new THREE.Mesh(g, FMAT); m.renderOrder = 3; m.matrixAutoUpdate = false; m.name = 'fall'; waterGroup.add(m); L.fallMeshes.push(m);
+      bucket(fb, f.bx, f.bz, { position: [pos, 3], normal: [nor, 3], uv: [uv, 2], aSteep: [st, 1] }, idx);
       if (L.addFallMist) { try { L.addFallMist(f.bx, f.cloudEnd ? L.CLOUD_Y : f.bottom, f.bz, f.w); } catch (e) { } }
     }
+    for (const g of flush(fb)) { const m = new THREE.Mesh(g, FMAT); m.renderOrder = 3; m.matrixAutoUpdate = false; m.name = 'fall'; waterGroup.add(m); L.fallMeshes.push(m); }
   }
 
   // far ocean beyond the quadtree root
@@ -708,12 +745,12 @@
     const dx = Math.max(x0 - cx, 0, cx - (x0 + size)), dz = Math.max(z0 - cz, 0, cz - (z0 + size)), dy = Math.max(_rng[0] - cy, 0, cy - _rng[1]);
     _nd[0] = Math.sqrt(dx * dx + dz * dz + dy * dy); _nd[1] = Math.sqrt(dx * dx + dz * dz);
     const rel = (_rng[1] - _rng[0]) / size;          // relief relative to the node size
-    _nd[2] = L.LOD_FLAT + (L.LOD_CLIFF - L.LOD_FLAT) * sstep(.05, .28, rel);
+    _nd[2] = _lod[1] + (_lod[2] - _lod[1]) * sstep(.05, .28, rel);
     return _nd;
   }
   let want = [], wantSet = new Set(), lastCam = [1e9, 1e9, 1e9], visible = new Set();
   function computeWant(cx, cy, cz) {
-    const out = []; const far = L.TERRAIN_FAR, K = L.LOD_K;
+    const out = []; const far = L.TERRAIN_FAR, K = lodParams()[0];
     const rec = (l, i, j) => {
       const nd = nodeDist(l, i, j, cx, cy, cz), d = nd[0], dh = nd[1]; if (dh > far) return;
       const size = ROOT / (1 << l);
