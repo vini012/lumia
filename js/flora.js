@@ -37,23 +37,31 @@
       g.save(); g.globalCompositeOperation = 'source-atop'; g.fillStyle = sg; g.fillRect(l.x - l.r, l.y, l.r * 2, l.r * 1.8); g.restore();
     }
   }
-  // pine bough: a drooping fan of needle strokes, lit along the top and darkening toward the tips below
+  // One whorl of a conifer seen from the side: a drooping umbrella with a serrated hem, painted as needle tufts that are
+  // lit along the top and darken toward the hem. Several of these stacked on a cone read as a layered pine.
   function drawBough(g, ox, oy, S, seed) {
-    const r = rnd(seed), cx = ox + S / 2, top = oy + S * .16;
+    const r = rnd(seed), cx = ox + S / 2, top = oy + S * .1, hem = oy + S * .8;
+    const edge = u => top + (hem - top) * (Math.pow(Math.abs(u), .8) * .82 + .1);      // the upper outline, u = -1..1
     g.lineCap = 'round';
-    for (let layer = 0; layer < 3; layer++) {
-      const spread = S * .42 * (1 - layer * .1);
-      for (let k = 0; k < 90; k++) {
-        const t = r() * 2 - 1;
-        const bx = cx + t * spread * .3, by = top + layer * S * .07 + Math.abs(t) * S * .06 + r() * S * .05;
-        const len = S * (.2 + r() * .17) * (1 - Math.abs(t) * .3);
-        const ang = Math.PI / 2 + t * 1.2 + (r() - .5) * .22;
-        const ex = bx + Math.cos(ang) * len, ey = by + Math.sin(ang) * len * .72;
-        const yN = clamp((ey - top) / (S * .62), 0, 1);
-        g.strokeStyle = shadeCol(clamp(.98 - yN * .5 - layer * .05 + (r() - .5) * .12, .3, 1), .35); g.lineWidth = S * (.013 + r() * .01);
-        g.beginPath(); g.moveTo(bx, by); g.quadraticCurveTo(bx + Math.cos(ang) * len * .55, by + Math.sin(ang) * len * .18, ex, ey); g.stroke();
+    // body: umbrella silhouette with a toothed lower edge (teeth = drooping branch tips)
+    g.beginPath(); g.moveTo(cx - S * .47, edge(-1) + S * .05);
+    for (let k = -20; k <= 20; k++) { const u = k / 20; g.lineTo(cx + u * S * .45, edge(u) - S * .02); }
+    const teeth = 9; for (let k = teeth; k >= 0; k--) { const u = k / teeth * 2 - 1, x = cx + u * S * .46, yb = hem - (1 - Math.abs(u)) * S * .06; g.lineTo(x, yb + S * (.05 + r() * .04)); if (k) g.lineTo(x - S * .046, yb - S * (.06 + r() * .04)); }
+    g.closePath(); g.fillStyle = shadeCol(.5, .2); g.fill();
+    // needle tufts: strokes fanning out and down from the axis, lighter near the top of the whorl
+    for (let layer = 0; layer < 4; layer++) {
+      for (let k = 0; k < 120; k++) {
+        const u = (r() * 2 - 1) * (1 - layer * .12), bx = cx + u * S * .42, by0 = edge(u) + S * (.02 + layer * .07 + r() * .06);
+        if (by0 > hem - S * .05) continue;
+        const len = S * (.06 + r() * .08), ang = Math.PI / 2 + Math.sign(u || 1) * (.55 + r() * .5) * Math.min(1, Math.abs(u) * 3 + .3);
+        const ex = bx + Math.cos(ang) * len, ey = by0 + Math.sin(ang) * len;
+        const yN = clamp((by0 - top) / (hem - top), 0, 1);
+        g.strokeStyle = shadeCol(clamp(1.02 - yN * .52 - layer * .03 + (r() - .5) * .1, .32, 1.05), .45); g.lineWidth = S * (.012 + r() * .01);
+        g.beginPath(); g.moveTo(bx, by0); g.lineTo(ex, ey); g.stroke();
       }
     }
+    // bright rim along the top of the whorl
+    for (let k = 0; k < 70; k++) { const u = r() * 2 - 1, bx = cx + u * S * .43, by = edge(u) + S * r() * .03, a = Math.PI / 2 + Math.sign(u || 1) * (.9 + r() * .4); g.strokeStyle = shadeCol(1.05 + r() * .06, .7, .9); g.lineWidth = S * .011; g.beginPath(); g.moveTo(bx, by); g.lineTo(bx + Math.cos(a) * S * .05, by + Math.sin(a) * S * .035); g.stroke(); }
   }
   function drawStrands(g, ox, oy, S, seed) {
     const r = rnd(seed);
@@ -178,7 +186,7 @@
           if (-pv.z > .5 && vViewZ < -pv.z - .6) { vec2 dxy = (-vViewPosition.xy) / vViewZ - pv.xy / -pv.z; float cut = 1. - smoothstep(.07, .2, length(dxy * vec2(1., 1.25))); if (dn < cut * .92) discard; }`);
     };
     mat.customProgramCacheKey = () => 'foliage-v5';
-    L.stylize(mat, { wrap: .6, rim: .45, transl: opts.transl != null ? opts.transl : .55 });
+    L.stylize(mat, { wrap: .55, rim: .45, transl: opts.transl != null ? opts.transl : .45 });
     const dm = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map, alphaTest: .42 });
     dm.onBeforeCompile = sh => { foliageVert(sh, wind); sh.vertexShader = sh.vertexShader.replace('varying float vViewZ;', 'float vViewZ;'); };
     dm.customProgramCacheKey = () => 'foliage-depth-v5';
@@ -225,6 +233,44 @@
     g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setIndex(ind);
     g.computeBoundingSphere(); g.boundingSphere.radius += opts.size[1];
     return g;
+  };
+
+  // ---------- procedural conifer: whorls of bough cards on a cone (stand-in until v5 tree models; also a good far LOD) ----------
+  // opts: {h: height m (10), r: base radius (h*.27), tiers, seed, lo: fewer cards}. Returns {canopy, bark, h}:
+  // canopy uses the foliage material (atlas cell 2), bark is an open trunk cylinder for L.MAT.bark.
+  L.pineCards = function (opts) {
+    opts = opts || {}; const r = rnd(opts.seed || 5), H = opts.h || 10, R = opts.r || H * .27, lo = !!opts.lo;
+    const nt = opts.tiers || (lo ? 5 : Math.round(lerp(7, 9, r())));
+    const pos = [], off = [], uv = [], nor = [], col = [], ind = [];
+    const [u0, v0] = QUAD_UV[2];
+    const card = (x, y, z, w, h, nx, ny, nz, shade, rot) => {
+      const nl = Math.hypot(nx, ny, nz) || 1, cs = Math.cos(rot), sn = Math.sin(rot), base = pos.length / 3;
+      for (const [cx, cy] of [[-.5, -.5], [.5, -.5], [.5, .5], [-.5, .5]]) {
+        pos.push(x, y, z); const ox = cx * w, oy = cy * h; off.push(ox * cs - oy * sn, ox * sn + oy * cs);
+        uv.push(u0 + .002 + (cx + .5) * .246, v0 + .004 + (cy + .5) * .492); nor.push(nx / nl, ny / nl, nz / nl); col.push(shade, shade, shade);
+      }
+      ind.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    };
+    const yb = H * (.17 + r() * .05), yt = H * .86;
+    for (let i = 0; i < nt; i++) {
+      const t = i / (nt - 1), y = lerp(yb, yt, Math.pow(t, .92)), rr = R * Math.pow(1 - t * .9, 1.1) + H * .02;
+      const m = lo ? Math.max(2, Math.round(1.5 + rr / R * 2.5)) : Math.max(3, Math.round(3 + rr / R * 5));
+      const a0 = r() * TAU;
+      for (let k = 0; k < m; k++) {
+        const a = a0 + (k + (r() - .5) * .5) / m * TAU, ca = Math.cos(a), sa = Math.sin(a), d = rr * (.42 + r() * .22);
+        const w = rr * (lo ? 1.5 : 1.25) + H * .06, h = w * .78;
+        card(ca * d, y - h * .22, sa * d, w, h, ca, .5, sa, clamp(.66 + .34 * t + (r() - .5) * .1, .5, 1.05), (r() - .5) * .22);
+      }
+      if (!lo || i % 2 === 0) card(0, y - rr * .25, 0, rr * 1.7 + H * .04, rr * 1.25 + H * .03, 0, .3, 0, .42 + .2 * t, (r() - .5) * .2);   // dark core
+    }
+    card(0, H * .92, 0, R * .42 + H * .03, H * .17, 0, 1, 0, 1, 0);   // leader
+    const cg = new THREE.BufferGeometry();
+    cg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); cg.setAttribute('aOff', new THREE.Float32BufferAttribute(off, 2)); cg.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    cg.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); cg.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); cg.setIndex(ind);
+    cg.computeBoundingSphere(); cg.boundingSphere.radius += R * 1.3;
+    const bark = new THREE.CylinderGeometry(H * .014, H * .032, H * .62, lo ? 5 : 7, 1, true); bark.translate(0, H * .29, 0);
+    bark.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(bark.attributes.position.count * 3).fill(.8), 3));
+    return { canopy: cg, bark, h: H };
   };
 
   // ---------- legacy grass patch + material (kept for callers outside grass.js; grass.js v5 has its own) ----------

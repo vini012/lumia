@@ -268,7 +268,7 @@ vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack) {
     return mat;
   };
   // white mist where a waterfall hits the ground or the cloud sea (a few low cloud puffs)
-  L.addFallMist = function (x, y, z, w) { if (!L.clouds) return null; return L.clouds.addClump(x, y - w * .15, z, w * 1.6, w * .7, Math.floor(x * 13 + z * 7), 3); };
+  L.addFallMist = function (x, y, z, w) { if (!L.clouds) return null; return L.clouds.addClump(x, y - w * .15, z, w * 1.6, w * .7, Math.floor(x * 13 + z * 7), 3, 1, 3); };
 
   // ================================================================ time of day hook (runs every frame: no allocation)
   const WC = { sh: C(0x63b2d4), shN: C(0x1a3a6a), dp: C(0x2a7fc4), dpN: C(0x0b1d44) };

@@ -108,7 +108,7 @@
   L.cloudU = cloudU;
   // aP: half size (m), horizontal stretch, sun occlusion, seed | aQ: cluster centre xyz, flag | aB: base y, top y, base softness (m),
   // sprite tilt range | aL: offset from the puff to its lobe centre xyz, lobe radius | aS: style (0 cumulus, 1 flat sea
-  // island, 2 mist), lobe y-stretch.
+  // island, 2 Névoa mist wall, 3 thin see-through mist: banks, waterfall spray), lobe y-stretch.
   // Shading: the normal is the analytic normal of the LOBE sphere at this pixel (every puff of a lobe agrees, so a lobe
   // reads as one big smooth cauliflower head like in the paintings); the sprite's own bump normal adds a little relief.
   // Sea islands get the painted two-tone (lit top band over blue-grey sides).
@@ -157,6 +157,7 @@
       float style = vB.w;
       float hp = clamp((vW.y - vB.x) / max(vB.y - vB.x, 1.), 0., 1.);
       float a = tx.a * vFade * smoothstep(vB.x - vB.z * .25, vB.x + vB.z, vW.y);   // flat, soft bases
+      if (style > 2.5) a *= .38 * smoothstep(.0, .5, tx.a);                       // thin mist (banks, waterfall spray): see-through
       if (a < .004) discard;
       vec2 nxy = tx.rg * 2. - 1.; nxy = vec2(vRot.x * nxy.x - vRot.y * nxy.y, vRot.y * nxy.x + vRot.x * nxy.y);
       vec3 nS = vec3(nxy, sqrt(max(0., 1. - dot(nxy, nxy))));
@@ -175,7 +176,7 @@
       } else {
         sun *= smoothstep(-.25, .3, hp + ndl * .3);                                  // undersides stay in shade
         l = sun * .58 + sky * .3 + .12 + hp * .06;
-        if (style > 1.5) l = mix(.55, l, .6);                                        // the mist: soft, low contrast
+        if (style > 1.5) l = mix(style > 2.5 ? .66 : .55, l, style > 2.5 ? .45 : .6);   // the mist: soft, low contrast
       }
       vec3 col = cloudRamp(l);
       vec3 V = normalize(vW - cameraPosition);
@@ -358,9 +359,9 @@
       shadeCluster(cl, L.TOD.lightDir.x, L.TOD.lightDir.y, L.TOD.lightDir.z);
       return (opts && opts.low ? FB : FA).add(cl);
     },
-    // low, wide cloud (cloud sea clump, waterfall spray): base at y
-    addClump(x, y, z, w, h, seed, flag, nMul) {
-      const r = rnd(seed || 1); const cl = placeCluster(islandPuffs(r, w, h, nMul || 1), x, y, z, w, h, flag == null ? 3 : flag, .5, 1);
+    // low, wide cloud (cloud sea clump, mist bank, waterfall spray): base at y; style 1 = flat island (default), 3 = thin mist
+    addClump(x, y, z, w, h, seed, flag, nMul, style) {
+      const r = rnd(seed || 1); const cl = placeCluster(islandPuffs(r, w, h, nMul || 1), x, y, z, w, h, flag == null ? 3 : flag, .5, style || 1);
       shadeCluster(cl, L.TOD.lightDir.x, L.TOD.lightDir.y, L.TOD.lightDir.z); return FB.add(cl);
     },
     remove(cl) { (FA.clusters.includes(cl) ? FA : FB).remove(cl); },
@@ -413,6 +414,7 @@
     }`;
   const SEA_FS = `
     #define STEPS ${SEA_STEPS}
+    uniform mat4 projectionMatrix;
     uniform sampler2D tNoise, tDens, tDome; uniform vec4 uDensXf; uniform vec3 uSunW, uLit, uBody, uShade, uDeep, uSunCol; uniform float uTime, uCov, uSeaY, uNight; uniform vec2 uSlab, uFar;
     varying vec3 vW;
     #include <fog_pars_fragment>
@@ -469,6 +471,8 @@
       float a = hit * smoothstep(.0, .12, hf + hgt * .3) * smoothstep(uFar.x, uFar.y, length(hp - ro));
       if (above) a *= smoothstep(.006, .03, -rd.y);           // edge-on from just above the slab it would be a hard line: leave the horizon to the islands
       gl_FragColor = vec4(col, a);
+      // depth of the relief hit, not of the slab plane: land between the plane and a far hit stays in front
+      { vec4 cp = projectionMatrix * viewMatrix * vec4(hp, 1.); gl_FragDepthEXT = clamp(cp.z / cp.w * .5 + .5, 0., 1.); }
       #ifdef USE_FOG
         vec3 fw = hp - ro; float fogDist = length(fw);
         float hH = hzD.w; float fe = fw.y / hH; float fInt = abs(fe) > 1e-3 ? (1. - exp(-fe)) / fe : 1. - fe * .5;
@@ -488,7 +492,7 @@
     for (let j = 0; j < segs; j++) idx.push(0, 1 + (j + 1) % segs, 1 + j);
     for (let i = 1; i < rings; i++) for (let j = 0; j < segs; j++) { const a = 1 + (i - 1) * segs + j, b = 1 + (i - 1) * segs + (j + 1) % segs, c = 1 + i * segs + j, d = 1 + i * segs + (j + 1) % segs; idx.push(a, b, c, b, d, c); }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
-    const mat = new THREE.ShaderMaterial({ uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]), vertexShader: SEA_VS, fragmentShader: SEA_FS, transparent: true, depthWrite: false, fog: true, side: THREE.DoubleSide });
+    const mat = new THREE.ShaderMaterial({ uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]), vertexShader: SEA_VS, fragmentShader: SEA_FS, transparent: true, depthWrite: false, fog: true, side: THREE.DoubleSide, extensions: { fragDepth: true } });
     for (const k in seaU) mat.uniforms[k] = seaU[k];
     seaMesh = new THREE.Mesh(g, mat); seaMesh.frustumCulled = false; seaMesh.renderOrder = 3; seaMesh.name = 'cloudsea'; L.scene.add(seaMesh);
   }
@@ -550,7 +554,7 @@
       for (let b = 0; b < g; b++) for (let a = 0; a < g; a++) {
         const k = b * g + a, x = i * CT + (a + .15 + h2(i, j, k * 5 + lod) * .7) * cs, z = j * CT + (b + .15 + h2(i, j, k * 5 + 1 + lod) * .7) * cs;
         const c = islandCov(x, z); if (c < .0 || h2(i, j, k * 5 + 2) > sstep(.0, .14, c) * .9) continue;
-        let w = (lod ? 300 + h2(i, j, k + 50) * 260 : 130 + h2(i, j, k + 50) * 170) * (.75 + .5 * sstep(0, .3, c)); const hh = w * (.2 + h2(i, j, k + 60) * .16);
+        let w = (lod ? 300 + h2(i, j, k + 50) * 260 : 120 + h2(i, j, k + 50) * 170) * (.75 + .5 * sstep(0, .3, c)); const hh = w * (.11 + h2(i, j, k + 60) * .08);
         const by = base0 + h2(i, j, k + 70) * 12;
         if (hfn && hfn(x, z) > by + hh * .4) continue;   // not inside land
         list.push(L.clouds.addClump(x, by, z, w, hh, i * 7919 + j * 104729 + k, 3, lod ? .22 : .38));

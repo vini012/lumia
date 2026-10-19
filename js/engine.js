@@ -210,11 +210,12 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
   float soft = smoothstep(0., uV5P.x, lam);
   float d = mix(lam, soft * (.55 + .45 * lam), uV5P.y);
   float lit = d * sh;
-  float back = (pow(max(-ndl, 0.), 2.) + .25 * (1. - lam)) * uV5m.z;
+  float back = (pow(max(-ndl, 0.), 2.) + .15 * (1. - lam)) * uV5m.z;
   rl.directDiffuse += alb * Lc * (lit + back * sh * clamp(dot(V, -Ld) * .5 + .5, .2, 1.));
-  float hw = dot(N, up) * .5 + .5;
+  float hw = dot(N, up) * .5 + .5, litK = clamp(lit * 1.25, 0., 1.);
+  hw = mix(hw, 1., .4 * (1. - litK));                 // shade is lit by the sky dome more than by the ground bounce: blue
   vec3 fill = mix(gndC, skyC, hw) * uV5P.z;
-  fill *= mix(uV5ShadowTint, vec3(1.), clamp(lit * 1.25, 0., 1.));
+  fill *= mix(uV5ShadowTint, vec3(1.), litK);
   rl.indirectDiffuse += alb * (fill + uV5Lift);
   float fr = pow(1. - clamp(dot(N, V), 0., 1.), 3.);
   rl.indirectDiffuse += alb * uV5Rim * Lc * fr * uV5m.y * (.25 + .75 * sh);
@@ -536,7 +537,7 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
   // Palettes (sRGB hex in, linear out). L.TOD holds the blended state that sky/terramat/grass read.
   const PAL = {
     day: { zen: 0x4b9fe6, mid: 0x5aa8ea, hor: 0x9cc6ec, low: 0xdfe6ee, sun: 0xfff1d8, sunI: 1.32, sky: 0xa8cff4, skyI: .6, gnd: 0xc4bf7a, gndI: .36,
-      veilD: 0x2c5f98, veilL: 0x88cdec, hazeA: 0xa9cdee, hazeS: 0xe4ecf0, cLit: 0xf4f6f8, cBody: 0xd9dde2, cShade: 0xb6c3d3, cDeep: 0x95a9c4, tint: [.6, .73, 1.0], exp: 1 },
+      veilD: 0x2c5f98, veilL: 0x88cdec, hazeA: 0xa9cdee, hazeS: 0xe4ecf0, cLit: 0xf4f6f8, cBody: 0xd9dde2, cShade: 0xb6c3d3, cDeep: 0x95a9c4, tint: [.5, .66, 1.0], exp: 1 },
     dusk: { zen: 0x2f5aa8, mid: 0x6d86c4, hor: 0xf0b48a, low: 0xffd4a0, sun: 0xffa45c, sunI: 1.25, sky: 0x8c95cc, skyI: .5, gnd: 0xa4805a, gndI: .28,
       veilD: 0x3b4e8c, veilL: 0xc9a2a0, hazeA: 0xb9a5c4, hazeS: 0xffc58e, cLit: 0xffd8b0, cBody: 0xe9b9a6, cShade: 0x8f8db5, cDeep: 0x6c6996, tint: [.66, .62, 1.0], exp: 1 },
     night: { zen: 0x0a1838, mid: 0x112552, hor: 0x24406f, low: 0x2e4b7c, sun: 0xa8c0ff, sunI: .3, sky: 0x4a66aa, skyI: .5, gnd: 0x22304e, gndI: .22,
@@ -582,7 +583,7 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
     mix3('hazeA', TOD.hazeA); mix3('hazeS', TOD.hazeS);
     if (R > 0) { TOD.hazeA.lerp(_c.copy(GREY).multiplyScalar(1 - TOD.night * .7), R * .8); TOD.hazeS.lerp(TOD.hazeA, R * .8); }
     scene.fog.color.copy(TOD.hazeA); scene.background.copy(TOD.hor);
-    scene.fog.density = .00045 * (1 + R * 2.2 + TOD.dusk * .15);
+    scene.fog.density = .0006 * (1 + R * 2.2 + TOD.dusk * .15);
     mix3('veilD', _c); HZ.A[0] = _c.r; HZ.A[1] = _c.g; HZ.A[2] = _c.b;
     mix3('veilL', _c); if (R > 0) _c.lerp(_c2.copy(GREY).multiplyScalar(1 - TOD.night * .7), R * .7); HZ.B[0] = _c.r; HZ.B[1] = _c.g; HZ.B[2] = _c.b;
     HZ.C[0] = TOD.hazeS.r; HZ.C[1] = TOD.hazeS.g; HZ.C[2] = TOD.hazeS.b; HZ.C[3] = 6 - TOD.dusk * 3;
