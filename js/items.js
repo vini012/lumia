@@ -53,6 +53,8 @@
     missing(cost) { const o = invObj(), out = {}; for (const k in cost) if ((o[k] || 0) < cost[k]) out[k] = cost[k] - (o[k] || 0); return out; },
     on(fn) { hs.push(fn); return () => { const i = hs.indexOf(fn); if (i >= 0) hs.splice(i, 1); }; },
     // tools: player.tools = { axe: level, ... }
+    // a recipe item learnt from a note (story calls it; the known list lives in L.story.recipes())
+    recipe(id) { changed('recipe:' + id, 1); },
     tool: k => ((L.save && L.save.player && L.save.player.tools) || {})[k] || 0,
     giveTool(k, lv) { const p = L.save && L.save.player; if (!p) return; p.tools = p.tools || {}; if ((p.tools[k] || 0) < lv) { p.tools[k] = lv; changed('tool:' + k, lv); } },
   };

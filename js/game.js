@@ -36,7 +36,7 @@
     // what the first view needs: world data, textures, the hero, trees + rocks near the spawn.
     // Later (after the start screen shows): POI dressing (village, props, totems), creatures, build kits, map image.
     L.MAP_LAZY = true;
-    const jobs = [L.worldLoad(), L.loadTextures(), L.loadModel('hero_' + wantLook.g), L.loadModel('trees5'), L.loadModel('rocks5')];
+    const nat = {}; const jobs = [L.worldLoad(), L.loadTextures(), L.loadModel('hero_' + wantLook.g), L.loadModel('trees5').then(s => nat.trees5 = s), L.loadModel('rocks5').then(s => nat.rocks5 = s)];
     let done = 0; jobs.forEach(p => Promise.resolve(p).then(() => { done++; L.ui.loading(.05 + .5 * done / jobs.length); }, () => { done++; }));
     await Promise.all(jobs);
     G.times.data = Math.round(now() - t0);
@@ -45,7 +45,7 @@
     L.setTimeOfDay(L.clock.sky());
     if (L.cloudSea) { L.cloudSea.setY(L.CLOUD_Y); L.cloudSea.setDensityMap(L.cloudMaskTexture(), -L.WS, -L.WS, 2 * L.WS); }
     if (L.mistVisual && L.MIST) L.mistVisual.setDisc(L.MIST.x, L.MIST.z, L.MIST.r);
-    L.terrainInit(); L.scatterInit(); L.grassInit();
+    L.terrainInit(); L.scatterInit(nat); L.grassInit();
     G.times.init = Math.round(now() - t0);
     // title view: the spawn, seen from behind the hero
     const sp = spawnPoint(null); placePlayer(sp);
@@ -154,6 +154,26 @@
     const v = { x: +P.x.toFixed(2), y: +P.y.toFixed(2), z: +P.z.toFixed(2), ry: +P.ry.toFixed(2), v: +P.speed.toFixed(1), sw: P.swim > .5 ? 1 : 0, g: G.look.g, c: G.look.pal };
     const s = JSON.stringify(v); if (s === presLast && presT > -2) return; presLast = s; L.save.room.presence(v).catch(() => { });
   }
+
+  // ================================================================ phase-B hooks (stubs; owners replace them, INTEG §3)
+  // each stub is installed only when nothing defined the hook first (B-* files load before game.js)
+  const hook = (name, fn) => { if (typeof L[name] !== 'function') L[name] = fn; };
+  // B-world: named pieces of the authored keep (story animates doors, lock, vines), restoration, story anchors
+  hook('castleObj', name => null);
+  hook('castleRestore', amount => { });
+  hook('storyAnchor', objId => null);
+  hook('storyWorldEvent', (name, d) => { });
+  // B-actors: tamed companion from the story, build records for the story's checks, outfit pieces
+  hook('giveTame', species => { console.info('[game] giveTame (B-actors)', species); return false; });
+  hook('storyBuilds', () => { const m = L.save.ready ? L.save.all('b5') : null; const out = []; if (m && m.forEach) m.forEach((v, id) => { if (v) out.push(Object.assign({ id }, v)); }); return out; });
+  hook('onStoryLook', look => { const M = G.M; if (M && M.part) { M.part('cape', !!look.cape); M.part('hat', !!look.hat); } });
+  // B-game: light the nearest unlit fire build within r (spell Faísca), spell side effects (sound, particles)
+  hook('lightFireNear', (x, z, r) => {
+    let best = null, bd = r * r; const m = L.save.ready ? L.save.all('b5') : null;
+    if (m && m.forEach) m.forEach((v, id) => { if (!v || v.lit || !(v.t === 'fogueira' || v.t === 'lareira' || v.t === 'forno')) return; const d = (v.x - x) * (v.x - x) + (v.z - z) * (v.z - z); if (d < bd) { bd = d; best = [id, v]; } });
+    if (!best) return false; L.save.set('b5', best[0], Object.assign({}, best[1], { lit: 1, litAt: Date.now() })); return true;
+  });
+  hook('onSpell', id => { });
 
   // ================================================================ action button (phase A: story objects only)
   let target = null, targetT = 0;

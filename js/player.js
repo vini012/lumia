@@ -85,11 +85,15 @@
     M.dispose = function () { L.scene.remove(M.root); M.root.traverse(m => { if (m.isSkinnedMesh && m.skeleton) m.skeleton.dispose(); }); mats.forEach(m => m.dispose()); };
     return M;
   };
+  // TECH §4 names: L.makeHero(g, look {pal, cape, hat}) / L.animHero(M, dt, t, s)
+  L.makeHero = (g, look) => L.makeMage4(Object.assign({ gender: g }, look || {}));
   // animate a mage: s = { speed, air, swim, ride, act, now, turn, wave, hold, fist }
   L.animMage4 = function (M, dt, t, s) {
     const st = M.st; st.dt = dt; st.t = t; st.speed = s.speed; st.air = s.air || 0; st.swim = s.swim || 0; st.ride = s.ride || 0; st.act = s.act || null; st.now = s.now || t; st.turn = s.turn || 0; st.wave = s.wave || 0; st.hold = !!M.toolName; st.fistR = M.toolName ? 1 : .25; st.rideHz = s.rideHz || 6;
     L.humanAnim(M.rig, st);
   };
+
+  L.animHero = (M, dt, t, s) => L.animMage4(M, dt, t, s);
 
   // ------------------------------------------------------------------ local player
   const P = {

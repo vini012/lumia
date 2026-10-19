@@ -1,7 +1,7 @@
 /* Lumiar v5 interface (B-ui owns this file): loading screen, start screen, touch / keyboard input (L.input),
    HUD buttons, toasts, hint, minimap + clock, panels (Bolsa, Construir, Mapa, Baú, Ajuda, Config).
    Phase A: everything the boot and the walk need, plus placeholder panels. Contract: v5docs/INTEG.md §6.
-   Layers: #game 0 · #hud 10 · #panels 12 · #start 25 · #loading 30 · #rotate 40 · survui #sv 50 · storyui #lu 60.
+   Layers: #game 0 · #hud 10 · #start 25 · #loading 30 · #rotate 40 · survui #sv 50 · #panels 55 · storyui #lu 60.
    The v4 map UI (explored mask, full map with landmarks and waypoint) is in git history (v4 js/ui.js) for B-ui. */
 'use strict';
 (function (L) {

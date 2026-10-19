@@ -446,7 +446,9 @@
     }
   }
 
-  L.scatterInit = function () {
+  // srcs (optional): AW-nature scenes the caller already loaded ({trees5, rocks5}): built once, no fallback pass, no probe
+  L.scatterInit = function (srcs) {
+    if (srcs && srcs.trees5 && srcs.rocks5) { Object.assign(SRC, srcs); initAsked = true; }
     if (!L.MAT && L.makeMaterials) L.makeMaterials();
     makeMats(); buildExclusion();
     disposeBuckets(); KIND.length = 0; for (const k in KI) delete KI[k];
