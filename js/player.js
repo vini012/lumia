@@ -8,7 +8,7 @@
   const wrapA = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
 
   // v4 colour pairs (kept for old presence records; v5 uses L.HERO_PALETTES)
-  L.MAGE_COLORS = [
+  L.V4_COLORS = [
     { n: 'Safira', robe: 0x3f63c9, hat: 0x2c3f8f, orb: 0x9fd0ff },
     { n: 'Rubi', robe: 0xb8384a, hat: 0x7a1f30, orb: 0xffa0a8 },
     { n: 'Esmeralda', robe: 0x2f9a62, hat: 0x1f5e3e, orb: 0x9fffd0 },
@@ -55,10 +55,11 @@
   L.TOOL_FOR = TOOL_FOR;
   let TOOLS = null; const toolsP = () => L.loadModel('tools').then(sc => { if (!sc) return null; if (!TOOLS) { TOOLS = {}; sc.traverse(o => { if (o.parent === sc && o.name) TOOLS[o.name] = o; }); } return TOOLS; });
 
-  // ------------------------------------------------------------------ mage model
-  // o: { gender 'f'|'m', pal 0..2 (v5) | ci (v4 colour index, mapped onto a palette) }
-  L.makeMage4 = async function (o) {
-    o = o || {}; const g = o.gender === 'f' ? 'f' : 'm';
+  // ------------------------------------------------------------------ hero model (INTEG §4)
+  // L.makeHero(g 'f'|'m', look { pal 0..2 (v5) | ci (v4 colour index, mapped onto a palette), cape, hat }) → Promise<M>
+  // M = { root, rig, grip, g, pal, mats, st, part(name, on), setTool(name | ''), dispose() }
+  L.makeHero = async function (g, o) {
+    o = o || {}; g = g === 'f' ? 'f' : 'm';
     const src = await L.loadModel('hero_' + g); if (!src) return null;
     const I = L.instRigged(src); const PAL = L.HERO_PALETTES[g]; const pi = ((o.pal != null ? o.pal : o.ci) | 0) % PAL.length; const C = PAL[pi];
     const zone = { top: [C.top[0], C.top[1]], bottom: [C.bottom, '#ffffff'], cape: [C.cape, '#ffffff'], hat: [C.hat, '#ffffff'] };
@@ -85,27 +86,25 @@
     M.dispose = function () { L.scene.remove(M.root); M.root.traverse(m => { if (m.isSkinnedMesh && m.skeleton) m.skeleton.dispose(); }); mats.forEach(m => m.dispose()); };
     return M;
   };
-  // TECH §4 names: L.makeHero(g, look {pal, cape, hat}) / L.animHero(M, dt, t, s)
-  L.makeHero = (g, look) => L.makeMage4(Object.assign({ gender: g }, look || {}));
-  // animate a mage: s = { speed, air, swim, ride, act, now, turn, wave, hold, fist }
-  L.animMage4 = function (M, dt, t, s) {
+  // animate a hero: s = { speed, air, swim, turn, now, ride, act {kind, t0, dur} | null, wave 0..1, rideHz } (INTEG §5.6)
+  L.animHero = function (M, dt, t, s) {
     const st = M.st; st.dt = dt; st.t = t; st.speed = s.speed; st.air = s.air || 0; st.swim = s.swim || 0; st.ride = s.ride || 0; st.act = s.act || null; st.now = s.now || t; st.turn = s.turn || 0; st.wave = s.wave || 0; st.hold = !!M.toolName; st.fistR = M.toolName ? 1 : .25; st.rideHz = s.rideHz || 6;
     L.humanAnim(M.rig, st);
   };
-
-  L.animHero = (M, dt, t, s) => L.animMage4(M, dt, t, s);
 
   // ------------------------------------------------------------------ local player
   const P = {
     x: L.SPAWN[0], y: 5, z: L.SPAWN[1], vx: 0, vy: 0, vz: 0, ry: Math.PI, onGround: true, swim: 0, wade: 0, air: 0, speed: 0, turn: 0, fallY: 0, glide: false, lastGround: 0, mount: null, onCol: null, waterWalk: false, jumpQ: 0
   };
   L.P = P;
+  L.WALK_SPEED = 5; L.RUN_SPEED = 7.8;
   const _p = new THREE.Vector3();
   // inp: { mx, mz (world dir, 0..1), run, jump (edge), jumpHeld, up, down }, mods: { speedMul, jumpMul, climb, waterWalk, swimMul, glide }
   L.playerStep = function (dt, t, inp, mods) {
     if (P.mount) return; // riding: the mount moves, the player sits
-    const ml = Math.min(1, Math.hypot(inp.mx, inp.mz)); const run = inp.run || ml > .86;
-    let top = ml < .08 ? 0 : (run ? 7.8 : lerp(2.2, 5.2, clamp((ml - .08) / .78, 0, 1))) * (mods.speedMul || 1);
+    // walk 2.2..5 m/s with the stick, run 7.8 m/s only while run is held (Shift / the HUD run toggle) and allowed
+    const ml = Math.min(1, Math.hypot(inp.mx, inp.mz)); const run = !!inp.run && ml > .5;
+    let top = ml < .08 ? 0 : (run ? L.RUN_SPEED : lerp(2.2, L.WALK_SPEED, clamp((ml - .08) / .78, 0, 1))) * (mods.speedMul || 1);
     const gy0 = L.ground(P.x, P.z); const ws = L.waterAt ? L.waterAt(P.x, P.z) : 0; const surf = ws > -1e9 ? ws : -1e9; const water = surf - gy0; // water depth (lakes, rivers, sea)
     P.surf = surf; P.waterWalk = !!mods.waterWalk && water > .25 && P.y > surf - .4;
     const swimming = !P.waterWalk && water > 1.15 && P.y < surf + .2; P.swim = lerp(P.swim, swimming ? 1 : 0, Math.min(1, dt * 6)); P.wade = clamp(water / 1.15, 0, 1) * (P.waterWalk ? 0 : 1);
@@ -142,7 +141,9 @@
   const camPos = new THREE.Vector3(), look = new THREE.Vector3(), aim = new THREE.Vector3();
   // target: { x, y, z, ry, moving, h (look height), far (extra distance) }
   L.cameraStep = function (dt, t, T) {
-    if (T.moving && t - cam.lastDrag > 2.0) { const d = wrapA(T.ry - cam.tyaw); cam.tyaw += d * Math.min(1, dt * (T.fast ? 1.6 : .8)); }
+    // auto-follow swings the camera behind the hero only while the hero heads roughly away from it (full within
+    // 30°, none past 70°): strafing and walking toward the camera keep the view (game.js latches the stick's frame)
+    if (T.moving && t - cam.lastDrag > 2.0) { const d = wrapA(T.ry - cam.tyaw), w = 1 - sstep(.52, 1.22, Math.abs(d)); cam.tyaw += d * w * Math.min(1, dt * (T.fast ? 1.6 : .8)); }
     cam.yaw += wrapA(cam.tyaw - cam.yaw) * Math.min(1, dt * 10); cam.pitch += (cam.tpitch - cam.pitch) * Math.min(1, dt * 10);
     const want = clamp(cam.tdist + (T.far || 0), cam.min, cam.max + (T.far || 0)); cam.dist += (want - cam.dist) * Math.min(1, dt * 5);
     look.set(T.x, T.y + (T.h || 1.55), T.z);
@@ -169,7 +170,7 @@
       if (!r || r.nm !== nm || r.ci !== ci || r.g !== g) {
         if (r && r.M) r.M.dispose(); if (r && r.tag) L.scene.remove(r.tag);
         r = { peer: p.peer, nm, ci, g, x: pr.x, y: pr.y || L.ground(pr.x, pr.z), z: pr.z, ry: pr.ry || 0, M: null, emo: pr.e || 0, act: pr.a || 0, v: 0 }; REM.set(p.peer, r);
-        L.makeMage4({ gender: g, pal: ci }).then(M => { if (REM.get(p.peer) !== r || !M) { M && M.dispose(); return; } r.M = M; L.scene.add(M.root); });
+        L.makeHero(g, { pal: ci }).then(M => { if (REM.get(p.peer) !== r || !M) { M && M.dispose(); return; } r.M = M; L.scene.add(M.root); });
         r.tag = L.textSprite(nm, .5, '#fff3c4'); r.tag.material.depthTest = false; L.scene.add(r.tag); if (onJoin) onJoin(r);
       }
       r.pr = pr; r.pid = pr.pid; r.tx = pr.x; r.ty = pr.y; r.tz = pr.z; r.try = pr.ry || 0; r.tv = pr.v || 0; r.sw = pr.sw || 0; r.rd = pr.rd || null; r.fl = pr.fl || 0;
@@ -192,7 +193,7 @@
       if (c && c.I) { const s = L.crSeat(c); R.position.copy(s); R.position.y -= r.M.rig.hipH * .92; R.rotation.set(0, c.ry, 0); }
       else { R.position.set(r.x, r.y, r.z); R.rotation.set(0, r.ry, 0); }
       const act = r.actT && now - r.actT < .6 ? { kind: r.actK, t0: r.actT, dur: .6 } : null;
-      L.animMage4(r.M, dt, t, { speed: c ? 0 : r.v, swim: r.sw ? 1 : 0, ride: c ? 1 : 0, air: 0, act, now, turn: da * 3, wave: r.emoT && now - r.emoT < 1.6 ? Math.sin((now - r.emoT) / 1.6 * Math.PI) : 0, rideHz: c ? 2 + (c.v || 0) * .45 : 6 });
+      L.animHero(r.M, dt, t, { speed: c ? 0 : r.v, swim: r.sw ? 1 : 0, ride: c ? 1 : 0, air: 0, act, now, turn: da * 3, wave: r.emoT && now - r.emoT < 1.6 ? Math.sin((now - r.emoT) / 1.6 * Math.PI) : 0, rideHz: c ? 2 + (c.v || 0) * .45 : 6 });
       r.tag.position.set(R.position.x, R.position.y + 2.45, R.position.z);
     }
   };

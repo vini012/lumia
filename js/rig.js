@@ -137,7 +137,7 @@
     rig.apply();
   };
 
-  // ------------------------------------------------------------------ humanoid (mage): walk/run/sprint, jump, swim, ride, tool actions
+  // ------------------------------------------------------------------ humanoid (hero): walk/run/sprint, jump, swim, ride, tool actions
   // st: { speed, t, dt, air 0..1, swim 0..1, ride 0..1, act:{kind, t0}, now, turn, wave }
   L.humanAnim = function (rig, st) {
     rig.reset(); const dt = st.dt, t = st.t, v = Math.max(0, st.speed), Lg = rig.legLen || .9;

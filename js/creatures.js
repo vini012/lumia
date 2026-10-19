@@ -310,6 +310,7 @@
 
   // ------------------------------------------------------------------ main update
   let spawnT = 0, frame = 0;
+  L.CR_VIEW_R = { alto: 240, medio: 130, baixo: 90 };
   // ctx: { px, py, pz, pv, night, foodOf(sp)->bool, sombra, owners, camera, shadowR }
   L.crUpdate = function (dt, t, ctx) {
     frame++; night = !!ctx.night;
@@ -333,7 +334,7 @@
       }
       // visibility: frustum + distance fade
       const r = c.rad || 1; SPH.center.set(c.x, c.y + r * .4, c.z); SPH.radius = r; const dC = Math.hypot(c.x - cx, c.z - cz);
-      c.visibleNow = dC < 240 && FR.intersectsSphere(SPH);
+      c.visibleNow = dC < (L.CR_VIEW_R[L.quality] || 240) && FR.intersectsSphere(SPH);   // view distance per tier (integration A, INTEG §0.1)
       c.fade = Math.min(1, c.fade + dt * 1.5); const sc = c.scale * (c.fade < 1 ? sstep(0, 1, c.fade) : 1);
       const R = c.I.root; R.visible = c.visibleNow; if (!R.visible && !c.mounted) continue;
       R.position.set(c.x, c.y, c.z); R.rotation.set(c.pitch || 0, c.ry, 0, 'YXZ'); R.scale.setScalar(Math.max(.001, sc));

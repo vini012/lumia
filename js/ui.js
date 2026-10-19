@@ -165,32 +165,80 @@
     miniT -= dt; if (miniT > 0 || $('#hud').hidden) return; miniT = .25;
     if (L.clock && L.clock.hours) { const h = L.clock.hours(); const t = String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); const c = $('#clock'); if (c.textContent !== t) c.textContent = t; }
     const cv = $('#miniCv'); if (!cv || !s) return; const g = cv.getContext('2d'), W = cv.width;
-    const img = L.mapDone && L.mapDone() ? L.mapCanvas : null, R = 260; // metres from the centre to the edge
+    const R = 260; // metres from the centre to the edge
     g.fillStyle = '#efdfbd'; g.fillRect(0, 0, W, W);
-    if (img && L.MAPRES) { const k = L.MAPRES / (2 * L.WS); const sx = (s.x + L.WS) * k, sz = (s.z + L.WS) * k, sr = R * k; try { g.drawImage(img, sx - sr, sz - sr, sr * 2, sr * 2, 0, 0, W, W); } catch (e) { } }
+    miniMap(g, W, s, R);
     if (L.REMOTE) for (const r of L.REMOTE.values()) { const px = W / 2 + (r.x - s.x) / R * W / 2, pz = W / 2 + (r.z - s.z) / R * W / 2; if (px < 0 || pz < 0 || px > W || pz > W) continue; g.fillStyle = '#e2b84f'; g.beginPath(); g.arc(px, pz, 7, 0, 7); g.fill(); g.strokeStyle = '#5a3f2e'; g.lineWidth = 2; g.stroke(); }
     // player arrow: forward is (sin ry, cos ry) in world x/z; the map has +x right and +z down
     g.save(); g.translate(W / 2, W / 2); g.rotate(Math.atan2(Math.cos(s.ry || 0), Math.sin(s.ry || 0)) + Math.PI / 2); g.fillStyle = '#c9573f'; g.strokeStyle = '#5a3f2e'; g.lineWidth = 3;
     g.beginPath(); g.moveTo(0, -14); g.lineTo(10, 10); g.lineTo(0, 5); g.lineTo(-10, 10); g.closePath(); g.fill(); g.stroke(); g.restore();
   };
 
-  // ------------------------------------------------------------------ panels (placeholders; B-ui / B-game fill them)
+  // ------------------------------------------------------------------ the explored part of the baked map (cached per explored.ver)
+  // the map shows only what the players have seen (GDD: o mapa se revela conforme vocês exploram)
+  let seenCv = null, seenVer = -1, seenT = 0;
+  function mapSeen(fresh) {
+    if (!(L.mapDone && L.mapDone()) || !L.mapCanvas) return null;
+    const E = L.save && L.save.explored; if (!E || !E.mask) return null;
+    if (seenCv && (seenVer === E.ver || (!fresh && performance.now() - seenT < 4000))) return seenCv;   // without fresh: re-masked at most every 4 s
+    const src = L.mapCanvas, W = src.width, H = src.height, res = E.res, M = E.mask;
+    const mc = document.createElement('canvas'); mc.width = mc.height = res; const mg = mc.getContext('2d'), id = mg.createImageData(res, res);
+    for (let i = 0; i < M.length; i++) id.data[i * 4 + 3] = M[i] ? 255 : 0; mg.putImageData(id, 0, 0);
+    seenCv = seenCv || document.createElement('canvas'); seenCv.width = W; seenCv.height = H; const g = seenCv.getContext('2d');
+    g.clearRect(0, 0, W, H); g.drawImage(src, 0, 0); g.globalCompositeOperation = 'destination-in'; g.imageSmoothingEnabled = true; g.drawImage(mc, 0, 0, W, H); g.globalCompositeOperation = 'source-over';
+    seenVer = E.ver; seenT = performance.now(); return seenCv;
+  }
+  ui.mapSeen = mapSeen;
+  // minimap: the map crop masked by the explored cells under it (a few cells: cheap at 4 Hz, unlike re-masking the
+  // whole map); same rule as mapSeen, nothing unexplored is drawn
+  let mm = null;
+  function miniMap(g, W, s, R) {
+    const E = L.save && L.save.explored; if (!(L.mapDone && L.mapDone()) || !L.mapCanvas || !L.MAPRES || !E || !E.mask) return;
+    if (!mm) { mm = { cv: document.createElement('canvas'), mk: document.createElement('canvas') }; }
+    if (mm.cv.width !== W) { mm.cv.width = mm.cv.height = W; }
+    const c = mm.cv.getContext('2d'), k = L.MAPRES / (2 * L.WS), sx = (s.x + L.WS) * k, sz = (s.z + L.WS) * k, sr = R * k;
+    c.globalCompositeOperation = 'source-over'; c.clearRect(0, 0, W, W);
+    try { c.drawImage(L.mapCanvas, sx - sr, sz - sr, sr * 2, sr * 2, 0, 0, W, W); } catch (e) { return; }
+    // explored cells covering the crop (+1 cell border), drawn scaled with smoothing as a soft mask
+    const res = E.res, cell = 2 * L.WS / res, i0 = Math.floor((s.x - R + L.WS) / cell) - 1, j0 = Math.floor((s.z - R + L.WS) / cell) - 1, n = Math.ceil(2 * R / cell) + 3;
+    if (mm.mk.width !== n) { mm.mk.width = mm.mk.height = n; }
+    const mg = mm.mk.getContext('2d'), id = mg.createImageData(n, n), M = E.mask;
+    for (let b = 0; b < n; b++) for (let a = 0; a < n; a++) { const i = i0 + a, j = j0 + b; id.data[(b * n + a) * 4 + 3] = i >= 0 && j >= 0 && i < res && j < res && M[j * res + i] ? 255 : 0; }
+    mg.putImageData(id, 0, 0);
+    const px = W / (2 * R) * cell, ox = ((i0 * cell - L.WS) - (s.x - R)) * W / (2 * R), oz = ((j0 * cell - L.WS) - (s.z - R)) * W / (2 * R);
+    c.globalCompositeOperation = 'destination-in'; c.imageSmoothingEnabled = true; c.drawImage(mm.mk, ox, oz, n * px, n * px); c.globalCompositeOperation = 'source-over';
+    g.drawImage(mm.cv, 0, 0);
+  }
+
+  // ------------------------------------------------------------------ panels (chrome here; B-ui writes every filler, INTEG §5.4)
   const PANELS = { bolsa: 'Bolsa', construir: 'Construir', mapa: 'Mapa', bau: 'Baú', ajuda: 'Ajuda', config: 'Configurações' };
-  let open = null;
-  ui.panels = {};   // ui.panels[name] = body => fill (called on every open)
+  let open = null, openOpt = null, openBody = null, onClose = null;
+  // ui.panels[name] = (body, opt) => fill; it runs on open and on ui.refresh(name) and may return a function called
+  // when the panel closes (or before a refresh): unhook listeners there
+  ui.panels = {};
   ui.isOpen = () => open;
-  ui.toggle = function (name) { if (open === name) ui.closePanels(); else ui.open(name); };
-  ui.open = function (name) {
+  ui.toggle = function (name, opt) { if (open === name) ui.closePanels(); else ui.open(name, opt); };
+  function fill() {
+    if (onClose) { try { onClose(); } catch (e) { } onClose = null; }
+    const body = openBody, name = open; body.innerHTML = '';
+    let r = null; if (ui.panels[name]) r = ui.panels[name](body, openOpt); else if (name === 'bolsa') bagPanel(body); else if (name === 'mapa') mapPanel(body); else body.innerHTML = '<div class="soon">Em breve.</div>';
+    if (typeof r === 'function') onClose = r;
+  }
+  // opt: panel data (e.g. ui.open('bau', {id}) for a chest)
+  ui.open = function (name, opt) {
     if (!PANELS[name]) return; ui.closePanels(true);
     const el = document.createElement('div'); el.className = 'panel paper'; el.dataset.p = name;
     el.innerHTML = `<div class="tape"></div><button class="btn x" type="button" aria-label="Fechar">✕</button><h2>${PANELS[name]}</h2><div class="body"></div>`;
     el.querySelector('.x').onclick = () => ui.closePanels();
-    $('#panels').appendChild(el); open = name;
-    const body = el.querySelector('.body');
-    if (ui.panels[name]) ui.panels[name](body); else if (name === 'bolsa') bagPanel(body); else if (name === 'mapa') mapPanel(body); else body.innerHTML = '<div class="soon">Em breve.</div>';
-    emit('panel', { name, open: true });
+    $('#panels').appendChild(el); open = name; openOpt = opt || null; openBody = el.querySelector('.body');
+    fill(); emit('panel', { name, open: true });
   };
-  ui.closePanels = function (quiet) { const box = $('#panels'); if (box) box.innerHTML = ''; const was = open; open = null; if (was && !quiet) emit('panel', { name: was, open: false }); };
+  // re-fill the panel if it is open (inventory changed, chest changed, ...)
+  ui.refresh = function (name) { if (open && (!name || name === open)) fill(); };
+  ui.closePanels = function (quiet) {
+    if (onClose) { try { onClose(); } catch (e) { } onClose = null; }
+    const box = $('#panels'); if (box) box.innerHTML = ''; const was = open; open = null; openOpt = openBody = null; if (was && !quiet) emit('panel', { name: was, open: false });
+  };
   function bagPanel(body) {
     const inv = L.inv ? L.inv.all() : {}; const ks = Object.keys(inv).filter(k => inv[k] > 0);
     body.innerHTML = ks.length ? '<div style="display:flex;flex-wrap:wrap;gap:8px">' + ks.map(k => { const i = L.itemInfo(k); return `<span class="btn" title="${esc(i.n)}">${i.ic} ${esc(i.n)} <b>${inv[k]}</b></span>`; }).join('') + '</div>' : '<div class="soon">A bolsa está vazia.</div>';
@@ -200,7 +248,7 @@
     const cv = document.createElement('canvas'); cv.width = cv.height = 640; cv.style.cssText = 'width:min(68vh,100%);aspect-ratio:1;display:block;margin:0 auto;border-radius:12px';
     body.appendChild(cv); const g = cv.getContext('2d');
     const draw = () => {
-      g.fillStyle = '#efdfbd'; g.fillRect(0, 0, 640, 640); if (L.mapDone && L.mapDone()) try { g.drawImage(L.mapCanvas, 0, 0, 640, 640); } catch (e) { }
+      g.fillStyle = '#efdfbd'; g.fillRect(0, 0, 640, 640); const img = mapSeen(true); if (img) try { g.drawImage(img, 0, 0, 640, 640); } catch (e) { }
       const P = L.P; if (P) { const px = (P.x + L.WS) / (2 * L.WS) * 640, pz = (P.z + L.WS) / (2 * L.WS) * 640; g.fillStyle = '#c9573f'; g.strokeStyle = '#5a3f2e'; g.lineWidth = 3; g.beginPath(); g.arc(px, pz, 8, 0, 7); g.fill(); g.stroke(); }
     };
     draw(); if (!(L.mapDone && L.mapDone())) { const iv = setInterval(() => { if (!cv.isConnected) return clearInterval(iv); if (L.mapDone()) { draw(); clearInterval(iv); } }, 300); }

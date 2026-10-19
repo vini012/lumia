@@ -21,7 +21,7 @@ window.L = window.L || {};
       grassR: 52, grassSp: .5, grassFull: 18, grassBlades: 12, grassMaxTris: 260000, flowerMul: 1, grassMul: 1.3, scatterMul: 1.3, lodMul: 1.25, impostorMul: 1.25,
       cloudPuffs: 1, lowCap: 6500, seaSteps: 5, mistPuffs: 1, rainDrops: 6000, pointLights: 6, lod: 130, grass: 3200 },
     medio: { name: 'medio', dpr: 1.5, shadow: 1536, shadowDist: 45, shadowTaps: 4, post: true, bloom: .4, fxaa: true, far: 12000,
-      grassR: 36, grassSp: .58, grassFull: 13, grassBlades: 10, grassMaxTris: 120000, flowerMul: .8, grassMul: 1, scatterMul: 1, lodMul: 1, impostorMul: 1,
+      grassR: 36, grassSp: .58, grassFull: 13, grassBlades: 10, grassMaxTris: 65000, flowerMul: .8, grassMul: 1, scatterMul: 1, lodMul: 1, impostorMul: 1,
       cloudPuffs: .7, lowCap: 4000, seaSteps: 4, mistPuffs: .7, rainDrops: 3500, pointLights: 4, lod: 95, grass: 1800 },
     baixo: { name: 'baixo', dpr: 1, shadow: 1024, shadowDist: 32, shadowTaps: 1, post: false, bloom: 0, fxaa: false, far: 12000,
       grassR: 22, grassSp: .7, grassFull: 8, grassBlades: 7, grassMaxTris: 45000, flowerMul: .5, grassMul: .6, scatterMul: .65, lodMul: .75, impostorMul: .75,

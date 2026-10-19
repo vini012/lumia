@@ -292,6 +292,10 @@
   // landmarks seen across the valleys (the high town from the Annecy viewpoint is 3.1-3.8 km away)
   const FAR_ID = { high_plaza: 4800, royal_forge: 4800, high_school: 4800, high_tower: 5200, tower_house: 2600 };
   let DRESSED = false;
+  // first view of a new player (game.js spawnPoint): {ry, pitch, dist} or null for the world data's yaw (SPAWN5.ry).
+  // B-world owns the arrival framing (INTEG §11): the village and its tower in the mid-ground, cliffs and falls aside.
+  // phase A: tower house and village left of centre in the mid-ground, the falls and cliffs to the right
+  L.SPAWN_VIEW = { ry: 3.45, pitch: .34, dist: 8 };
   L.worldInit = async function () {
     if (DRESSED) return; DRESSED = true;
     const v4files = ['cliffs', 'rocks', 'ruins', 'nature'], v5files = ['village5', 'props5', 'totems5'];
@@ -304,14 +308,15 @@
     L.WORLD_DRESS_FILES = files;
     for (const p of L.POIS || []) {
       const fn = DRESS_ID[p.id] || DRESS[p.kind]; if (!fn) continue;
+      // groups start hidden: worldUpdate shows the near ones (no frame with every POI drawn)
       RR = L.mulberry32(((p.x * 73856093) ^ (p.z * 19349663)) | 0);
-      CUR = new THREE.Group(); CUR.name = 'poi_' + p.id; CUR.userData.poi = p; CUR.userData.far = FAR_ID[p.id] || FAR[p.kind] || 900;
+      CUR = new THREE.Group(); CUR.name = 'poi_' + p.id; CUR.visible = false; CUR.userData.poi = p; CUR.userData.far = FAR_ID[p.id] || FAR[p.kind] || 900;
       if (CUR.userData.far > LOD_NEAR + 200) CUR.userData.lod = [];
       try { fn(p); } catch (e) { console.warn('dress', p.id, e.message); }
       if (CUR.children.length) {
         L.scene.add(CUR); try { batchGroup(CUR); } catch (e) { console.warn('batch', p.id, e.message); } L.POIGROUPS.push(CUR);
         if (CUR.userData.lod && CUR.userData.lod.length) try {
-          const lo = new THREE.Group(); lo.name = 'poilo_' + p.id; lo.add(lodMesh(CUR.userData.lod)); lo.userData.poi = p; lo.userData.near = LOD_NEAR; lo.userData.far = CUR.userData.far;
+          const lo = new THREE.Group(); lo.name = 'poilo_' + p.id; lo.add(lodMesh(CUR.userData.lod)); lo.userData.poi = p; lo.userData.near = LOD_NEAR; lo.userData.far = CUR.userData.far; lo.visible = false;
           CUR.userData.far = LOD_NEAR; L.scene.add(lo); L.POIGROUPS.push(lo);
         } catch (e) { console.warn('lod', p.id, e.message); }
         CUR.userData.lod = null;
@@ -322,7 +327,7 @@
     for (const c of L.CROSSINGS || []) {
       if (c.kind !== 'bridge') continue;
       const p = Object.assign({ id: 'xb_' + nb++ }, c);
-      CUR = new THREE.Group(); CUR.name = 'bridge_' + p.id; CUR.userData.poi = p; CUR.userData.far = FAR.bridge;
+      CUR = new THREE.Group(); CUR.name = 'bridge_' + p.id; CUR.visible = false; CUR.userData.poi = p; CUR.userData.far = FAR.bridge;
       try { DRESS.bridge(p); } catch (e) { console.warn('dress bridge', e.message); }
       if (CUR.children.length) { L.scene.add(CUR); try { batchGroup(CUR); } catch (e) { } L.POIGROUPS.push(CUR); }
     }

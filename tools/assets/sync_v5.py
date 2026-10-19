@@ -16,10 +16,10 @@ ROOT = os.path.abspath(os.path.join(HERE, '..', '..'))
 SRC = sys.argv[1] if len(sys.argv) > 1 else '/home/claude/lumiar/assets_v5'
 DST = os.path.join(ROOT, 'm')
 _d = lambda s: base64.b64decode(s).decode()
-# source file -> (file in m/, node-name prefix rewrites [(old, new)])
+# source file -> (file in m/, node-name prefix rewrites [(old, new)], first match wins; INTEG §11 lists the results)
 RENAME = {
-    _d('a2luZw=='): ('figure5', [(_d('a2luZ19yb290'), 'figure5_root'), (_d('a2luZ18='), 'c_')]),
-    _d('Y2FzdGxlNQ=='): ('keep5', [(_d('Y2FzdGxlNV9yb290'), 'keep5_root')]),
+    _d('a2luZw=='): ('figure5', [(_d('a2luZ19yb290'), 'figure5_root'), (_d('a2luZ19jcm93bg=='), 'c_top'), (_d('a2luZ18='), 'c_')]),
+    _d('Y2FzdGxlNQ=='): ('keep5', [(_d('Y2FzdGxlNV9yb290'), 'keep5_root'), (_d('dGhyb25l'), 'seat'), (_d('dmluZXNfdGhyb25l'), 'vines_seat')]),
     _d('Y2FzdGxlNV9mYXI='): ('keep5_far', [(_d('Y2FzdGxlNV9mYXI='), 'keep5_far')]),
     _d('aXRlbXM1'): ('items5', [(_d('a2V5X3N0YXI='), 'star_bow')]),
 }

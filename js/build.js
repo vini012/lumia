@@ -43,6 +43,8 @@
     estante: { nome: 'Estante', cat: 'casa', cost: { madeira: 5 }, r: .8 },
     tapete: { nome: 'Tapete', cat: 'casa', cost: { fibra: 6 }, r: 1.2, flat: true },
     lanterna: { nome: 'Lanterna', cat: 'casa', cost: { ferro: 1, cristal: 1 }, r: .4, light: 0xffc46a, desc: 'acende sozinha à noite' },
+    // the lighthouse lamp (story trial f3, INTEG §4): record t 'lanterna_farol', model = furniture node 'lanterna'
+    lanterna_farol: { nome: 'Lanterna do Farol', obj: 'lanterna', cat: 'casa', cost: { ferro: 2, cristal: 1, madeira: 2 }, r: .5, light: 0xffd27a, desc: 'acenda no alto de uma torre' },
     vaso: { nome: 'Vaso de flores', cat: 'casa', cost: { pedra: 2, sementes: 1 }, r: .35 },
     estatua: { nome: 'Estátua', cat: 'casa', cost: { pedra: 14, cristal: 1 }, r: .8, desc: 'enfeite de pedra para o jardim' },
     canteiro: { nome: 'Canteiro', cat: 'faz', cost: { madeira: 2 }, r: 1.1, plant: true, desc: 'plante sementes, colha abóboras' },

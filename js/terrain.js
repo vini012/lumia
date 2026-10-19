@@ -577,9 +577,9 @@
   const FALLBACK_LVL = 2;                                       // 4096 m nodes kept as cover while finer ones stream
   // split when distance < size * K * (relief factor); relief factor runs FLAT (flat ground) .. CLIFF (walls).
   // Per quality tier; setting L.LOD_K / L.LOD_FLAT / L.LOD_CLIFF explicitly overrides the tier.
-  // medio K .26 -> .2 (integration A): the spawn view was 454k triangles in all (terrain + shadow pass), now ~385k;
-  // no visible change at the spawn or the Annecy view (shots/integ e02/e03)
-  L.LOD_TIERS = { alto: [.42, .7, 1.25], medio: [.2, .6, 1.1], baixo: [.2, .55, 1.0] };   // medio: ~320k terrain tris in view range (TECH: 450k on screen in all)
+  // medio K .26 -> .2 -> .15 (integration A): the village view went 237k -> 186k terrain triangles with no visible
+  // change (shots/integ d01/d02); the per-owner allowance is in INTEG §0.1
+  L.LOD_TIERS = { alto: [.42, .7, 1.25], medio: [.15, .6, 1.1], baixo: [.2, .55, 1.0] };
   L.LOD_K = null; L.LOD_FLAT = null; L.LOD_CLIFF = null;
   const _lod = [1, 1, 1];
   function lodParams() {
@@ -932,13 +932,23 @@
     for (const w of want) if (w.l === 1) draw(w);
     let tris = 0, wat = 0;
     for (const k of visible) if (!show.has(k)) { const n = nodes.get(k); if (n) { group.remove(n.mesh); if (n.water) waterGroup.remove(n.water); } }
-    for (const k of show) { const n = nodes.get(k); if (!visible.has(k)) { group.add(n.mesh); if (n.water) waterGroup.add(n.water); } tris += n.tris; if (n.water) wat++; n.used = frameNo; }
+    // shadow casters (integration A): only finest nodes near the shadow focus cast; the far ones fall outside the
+    // shadow box anyway but the sun-aligned shadow frustum still drew them (~100k triangles, 10+ calls on medio)
+    const U = L.uPlayer && L.uPlayer.value, fx = U && U.y > -900 ? U.x : lastCam[0], fz = U && U.y > -900 ? U.z : lastCam[2];
+    const pad = L.TERRAIN_SHADOW[L.quality], shR = pad == null || pad < 0 ? -1 : (L.Q ? L.Q().shadowDist : 45) + pad;
+    for (const k of show) {
+      const n = nodes.get(k); if (!visible.has(k)) { group.add(n.mesh); if (n.water) waterGroup.add(n.water); } tris += n.tris; if (n.water) wat++; n.used = frameNo;
+      if (n.l >= MAXLVL) { const dx = Math.max(n.x0 - fx, 0, fx - n.x0 - n.size), dz = Math.max(n.z0 - fz, 0, fz - n.z0 - n.size); n.mesh.castShadow = shR >= 0 && dx * dx + dz * dz < shR * shR; }
+    }
     visible = show; const S = L.terrainStats; S.visible = show.size; S.tris = tris; S.water = wat; S.nodes = nodes.size; S.pending = pending.length + (job ? 1 : 0); S.bytes = nodeBytes;
     // rivers: distance cull
     for (const m of riverMeshes) { const s = m.geometry.boundingSphere; m.visible = Math.hypot(s.center.x - lastCam[0], s.center.z - lastCam[2]) < L.TERRAIN_FAR * .6 + s.radius; }
   }
   // memory cap per quality tier (node count and bytes, GPU + CPU): evict the farthest nodes first, then the least
   // recently shown; nodes on screen or wanted by the current LOD selection are never evicted
+  // per tier: m beyond the shadow distance in which finest terrain nodes cast shadows; < 0 = terrain casts none
+  // (medio: up to 4 nodes = 35k triangles in the shadow pass near node corners; INTEG §0.1)
+  L.TERRAIN_SHADOW = { alto: 12, medio: -1, baixo: -1 };
   L.NODE_CAPS = { alto: 320, medio: 200, baixo: 120 };
   L.NODE_BYTES = { alto: 72e6, medio: 48e6, baixo: 28e6 };
   L.NODE_CAP = null;   // explicit override of the tier's node count
