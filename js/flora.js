@@ -281,7 +281,7 @@
     return { canopy: cg, bark, h: H };
   };
 
-  // ---------- procedural broadleaf: a short trunk forking into boughs, each ending in a leaf mass of cards ----------
+  // ---------- procedural broadleaf: a short trunk forking into boughs, each finishing in a leaf mass of cards ----------
   // opts: {h: height m (9), seed, lo: fewer, larger cards, low: forks near the ground with spreading, low boughs (a
   // framing tree for close views)}. Returns {canopy, bark, h}. The gaps between the masses
   // let the boughs show, which reads far less like a ball than a single canopy shell.
@@ -305,7 +305,7 @@
       blobs.push([ex * 1.05, ey + rc * .2, ez * 1.05, rc * 1.12, rc * .95, rc * 1.12]);
       const t = .5; blobs.push([ex * t + (r() - .5) * H * .1, sy + (ey - sy) * t + rc * .35, ez * t + (r() - .5) * H * .1, rc * .85, rc * .7, rc * .85]);
     }
-    blobs.push([0, H * .8, 0, H * .26, H * .18, H * .26]);   // crown
+    blobs.push([0, H * .8, 0, H * .26, H * .18, H * .26]);   // top mass
     const canopy = L.blobCards(blobs, { n: lo ? 56 : 170, size: lo ? [H * .3, H * .4] : [H * .19, H * .27], quads: [0, 1], inset: lo ? .2 : .38, seed: (opts.seed || 13) + 1 });
     let n = 0; for (const p of parts) n += p.attributes.position.count;
     const P = new Float32Array(n * 3), N = new Float32Array(n * 3); let o = 0;

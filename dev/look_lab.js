@@ -3,8 +3,11 @@
               b = vale + cidade alta no planalto + mar (57faf138)
               c = terceira pessoa no prado junto à cerca acima do mar de nuvens (be82a764)
               n = a Névoa vista do prado (?mist=in dentro dela, ?mist=open com o corredor aberto); k = bancada de nuvens
-   ?t=day|golden|night|rain|dawn   ?q=alto|medio|baixo   ?hud=1
-   window.step(n) renders n frames and returns render stats; window.ready is set once the first frame is drawn. */
+              m = a Névoa sobre um planalto a 742 m (alturas relativas ao chão; ?mist=in|open como em n)
+   ?t=day|golden|night|rain|dawn   ?q=alto|medio|baixo   ?hud=1   ?grid=256 (lighter lab terrain for budget checks)
+   ?tod=sys[&hour=h&day=d]  drives the sky every frame with the SYS clock output shape (plain arrays, moon phase)
+   window.step(n) renders n frames and returns render stats; window.ready is set once the first frame is drawn;
+   window.lookAsserts() checks the integration contracts and returns {ok, fails, ...}. */
 'use strict';
 (function (L) {
   const { clamp, lerp, sstep, C } = L;
@@ -38,6 +41,8 @@
   const SEA = -28;
   const OB = [-6500, 0];                 // origin of area B (valley + high town)
   const OC = [7000, 0];                  // origin of area C (meadow on a sea cliff, village across a cloud gap)
+  const OM = [0, 9000];                  // origin of preset m (a 742 m plateau with the Névoa disc on it)
+  const M_DISC = [OM[0], OM[1] - 2600, 1250];
   const rel = (P, o) => P.map(p => [p[0] + o[0], p[1] + o[1]]);
   // ---- area A, laid out from the reference frame itself: camera at (0, A_EYE, 0) looking -z, level, vfov 40
   //      (f = 821 px for the 598 px frame); scr(sx, sy, D) puts a reference pixel at forward distance D.
@@ -97,7 +102,7 @@
   mesa({ poly: T2, warp: 8, seed: 12, w: 12, prof: ledges(2, .7), top(x, z) { return 108 + .26 * Math.max(0, x - 20) + (fbm(x * .01, z * .01, 2, 4) - .5) * 4; } });
   // the tilted plateau: front edge from A_EDGE, top rising away from it (a broad green slab), stepped grey cliff
   mesa({ poly: PA, warp: 22, seed: 13, w: 230, wf: (t, x) => lerp(230, 70, sstep(220, 380, x)), foot: 380, rimIn: true, prof: ledges(3, .92), top(x, z) {
-    // the prow (right end) stays level behind its rim: a sheer wall ending in a vertical edge
+    // the prow (right end) stays level behind its rim: a sheer wall that stops at a vertical edge
     const e = aEdge(x), t = clamp(e[2] - z, 0, 2700), s = lerp(.2, .35, sstep(-420, 60, x)) * (1 - sstep(60, 300, x));
     return e[1] + s * t * (1 - t / 9000) + (fbm(x * .003, z * .003, 3, 6) - .5) * 30 * sstep(0, 300, t) + (fbm(x * .02, z * .02, 2, 7) - .5) * 4;
   } });
@@ -128,6 +133,8 @@
   mesa({ poly: B_E, warp: 30, seed: 26, w: 30, foot: 160, prof: ledges(2, .6), top(x, z) { return 258 + (fbm(x * .006, z * .006, 3, 27) - .5) * 24; } });
   mesa({ poly: B_R, warp: 30, seed: 24, w: 26, foot: 200, top(x, z) { return 300 + (fbm(x * .004, z * .004, 3, 14) - .5) * 40 + .2 * Math.max(0, x - OB[0] - 600); } });
   mesa({ poly: B_U, warp: 40, seed: 23, w: 50, wf: (t, x) => lerp(320, 40, sstep(-40, 260, x - OB[0])), foot: 420, prof: ledges(2, .45), top(x, z) { const rx = x - OB[0], rz = z - OB[1]; return 390 + .2 * Math.max(0, -rz - 980) + 60 * sstep(100, 500, rx) + (fbm(x * .003, z * .003, 3, 13) - .5) * 30; } });
+  // m: a high plateau (ground ~742 m like the real map under the Névoa) with stepped walls down to the sea
+  mesa({ cx: M_DISC[0], cz: M_DISC[1], r: 3000, warp: 120, seed: 71, w: 220, foot: 420, prof: ledges(4, .85), top(x, z, d) { return 742 + (fbm(x * .002, z * .002, 3, 72) - .5) * 40 + 40 * sstep(1500, 3000, d) + (fbm(x * .02, z * .02, 2, 73) - .5) * 3; } });
   for (const f of FAR) mesa({ cx: f[0], cz: f[1], r: f[2], warp: f[5], seed: f[6], w: f[4], foot: Math.max(200, f[4] * 1.2), top(x, z, d) { return f[3] + (fbm(x * .002, z * .002, 3, f[6]) - .5) * f[3] * .25 + (f[4] > 100 ? -f[3] * .25 * (1 - sstep(0, f[2] * .6, d)) : 0); } });
 
   function mesaH(o, x, z) {
@@ -213,6 +220,8 @@
     k: { pos: [9000, 9000], eye: 260, yaw: 0, pitch: 4, fov: 50, sunAz: 2.2, focus: null, size: [1400, 600], ref: null, test: 'clouds' },   // dev: cloud test bench
     // dev: the Névoa seen from the meadow of area c (?mist=in puts the camera inside it, ?mist=open opens the lit corridor)
     n: { pos: [OC[0] - 60, OC[1] + 60], eye: 3, yaw: -18, pitch: 4, fov: 50, sunAz: .9, focus: null, size: [1400, 600], ref: null, cloudY: 32, mist: [OC[0] - 420, OC[1] - 1050, 650] },
+    // dev: the Névoa on a 742 m plateau (the real map's ground under the disc); heights are relative to that ground
+    m: { pos: [OM[0] + 40, OM[1]], eye: 1.8, yaw: -2, pitch: 7, fov: 50, sunAz: .9, focus: null, size: [1400, 600], ref: null, mist: M_DISC },
   };
   const P = PRE[PRESET] || PRE.a;
   L.LAB = { preset: PRESET, P, PRE };
@@ -220,7 +229,8 @@
   // ================================================================ terrain mesh: warped grid centred on the camera
   function axis(N, S, k) { const a = new Float64Array(N + 1), ek = Math.exp(k) - 1; for (let i = 0; i <= N; i++) { const u = i / N * 2 - 1; a[i] = Math.sign(u) * S * (Math.exp(k * Math.abs(u)) - 1) / ek; } return a; }
   function buildTerrain(cx, cz) {
-    const N = L.quality === 'baixo' ? 420 : 560, S = 14000, k = 5.0;
+    const N = clamp(Number(QS.get('grid')) || (L.quality === 'baixo' ? 420 : 560), 64, 1024) | 0, S = 14000, k = 5.0;
+    L.LAB.terrainTris = N * N * 2;
     const ax = axis(N, S, k), n1 = N + 1, nv = n1 * n1;
     const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3), aT = new Float32Array(nv * 4), aU = new Float32Array(nv * 2);
     for (let j = 0; j < n1; j++) for (let i = 0; i < n1; i++) { const o = (j * n1 + i) * 3, x = cx + ax[i], z = cz + ax[j]; pos[o] = x; pos[o + 1] = labH(x, z); pos[o + 2] = z; }
@@ -254,7 +264,7 @@
     for (let j = 0; j < n1; j++) for (let i = 0; i < n1; i++) { const o = j * n1 + i, x = cx + ax[i], z = cz + ax[j]; pos[o * 3] = x; pos[o * 3 + 1] = 0; pos[o * 3 + 2] = z; dep[o] = clamp(-labH(x, z), -5, 60); }
     const idx = []; for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const a = j * n1 + i; idx.push(a, a + n1, a + 1, a + 1, a + n1, a + n1 + 1); }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aDepth', new THREE.BufferAttribute(dep, 1)); g.setIndex(idx);
-    const m = new THREE.Mesh(g, L.makeWaterMaterial({ ocean: true })); m.renderOrder = 2; m.frustumCulled = false; m.name = 'ocean'; L.scene.add(m); return m;
+    const m = new THREE.Mesh(g, L.makeWaterMaterial({ ocean: true })); m.renderOrder = L.RO.ocean; m.frustumCulled = false; m.name = 'ocean'; L.scene.add(m); return m;
   }
 
   // ================================================================ procedural buildings (vertex coloured, MAT.v5)
@@ -412,6 +422,10 @@
       // plateau: pines along the top and on the ledges
       for (let i = 0; i < 500; i++) { const x = X(-900 + r() * 1100), z = Z(-600 - r() * 700); const h = labH(x, z); if (h < 170 || L.slope(x, z) > .45 || fbm(x * .006, z * .006, 2, 41) < .5) continue; addTree('pine', x, z, lerp(14, 22, r()), r); }
     }
+    if (PRESET === 'm') {
+      // pines in loose stands over the plateau, near the camera and inside the disc (to see them fade in the mist)
+      for (let i = 0; i < 2600; i++) { const a = r() * TAU, d = Math.sqrt(r()) * 2600, x = M_DISC[0] + Math.cos(a) * d, z = M_DISC[1] + Math.sin(a) * d; const h = labH(x, z); if (h < 700 || L.slope(x, z) > .4 || fbm(x * .008, z * .008, 2, 74) < .52) continue; if (Math.hypot(x - OM[0], z - OM[1]) < 25) continue; addTree(r() < .85 ? 'pine' : 'oak', x, z, lerp(10, 20, r()), r); }
+    }
     // B: pine bands on the valley sides and the left hills, round trees in the meadows, trees on the town plateau and
     //    along the upper plateau's top; two big round trees framing the foreground
     if (PRESET === 'b') {
@@ -466,7 +480,7 @@
   function addFallAt(x, z, nx, nz, w, bot) {
     let lx = x - nx * 120, lz = z - nz * 120, top = labH(lx, lz);
     for (let k = 0; k < 200; k++) { const h = labH(lx + nx * 2, lz + nz * 2); if (h < top - 4) break; lx += nx * 2; lz += nz * 2; top = Math.max(top, h); }
-    const m = new THREE.Mesh(fallRibbon(lx, lz, nx, nz, top + .4, bot, w), flowMat()); m.renderOrder = 5; m.frustumCulled = false; L.scene.add(m);
+    const m = new THREE.Mesh(fallRibbon(lx, lz, nx, nz, top + .4, bot, w), flowMat()); m.renderOrder = L.RO.falls; m.frustumCulled = false; L.scene.add(m);
     L.addFallMist(lx + nx * 40, bot + 8, lz + nz * 40, w * 2.4);
     return { x: lx, z: lz, top };
   }
@@ -511,6 +525,8 @@
       cumulusAt(cam, 4, 8.5, 3400, 1900, 650, 31); cumulusAt(cam, 19, 3, 2600, 1100, 900, 32); cumulusAt(cam, -11, 9, 3400, 700, 260, 33); cumulusAt(cam, -18, 7, 3000, 500, 200, 34); cumulusAt(cam, -24, 11, 4200, 600, 220, 35); cumulusAt(cam, 26, 13, 4400, 500, 200, 36);
       const low = (x, y, z, w, h, seed) => L.clouds.addCumulus(OB[0] + x, y, OB[1] + z, w, h, seed, { low: true });
       low(20, 240, -380, 110, 46, 41); low(-300, 290, -620, 110, 40, 42); low(160, 212, -450, 60, 20, 43); low(-170, 300, -650, 70, 28, 44); low(90, 330, -900, 90, 34, 45);
+    } else if (PRESET === 'm') {
+      cumulusAt(cam, -40, 6, 4200, 1400, 600, 81); cumulusAt(cam, 35, 4, 4600, 1200, 500, 82); cumulusAt(cam, 70, 2, 3800, 900, 300, 83);
     } else {
       // low flat cumulus over the sea toward the horizon (right), a few in the sky, small ones at the plateau foot
       cumulusAt(cam, 28, 1.2, 1500, 300, 90, 51); cumulusAt(cam, 40, .6, 1100, 240, 70, 52); cumulusAt(cam, 52, 2.5, 1800, 420, 140, 53); cumulusAt(cam, 33, 3.5, 2600, 520, 200, 54);
@@ -521,6 +537,22 @@
       S.forEach((c, k) => clumpAt(OC[0] + c[0], c[1], OC[1] + c[2], c[3], c[4], 61 + k, c[5]));
     }
   }
+
+  // ================================================================ SYS clock replica (?tod=sys)
+  // Same output shape as SYS's L.clock.sky(ms, out): plain arrays for the directions, weights, hours and moon phase.
+  // The lab passes it to L.setTimeOfDay every frame, exactly as the game does, so that contract stays tested here.
+  const SYS_DAY = 1440000, TOD_SYS = QS.get('tod') === 'sys', SKY = {};
+  const sst = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+  function sysSky(ms, out) {
+    out = out || {}; const d = ms / SYS_DAY, ph = d - Math.floor(d), a = (ph - .25) * TAU, sh = Math.sin(a);
+    const sx = Math.cos(a), sy = sh, sz = .35, l = Math.hypot(sx, sy, sz); out.sunDir = [sx / l, sy / l, sz / l];
+    const mph = d / 8 - Math.floor(d / 8), ma = a + Math.PI + mph * TAU * .08, mx = Math.cos(ma), my = Math.sin(ma), ml = Math.hypot(mx, my, .3); out.moonDir = [mx / ml, my / ml, -.3 / ml];
+    const wd = sst(-.05, .35, sh), wn = sst(.05, -.25, sh), wk = Math.max(0, 1 - wd - wn), tot = wd + wn + wk;
+    out.dayW = wd / tot; out.nightW = wn / tot; out.duskW = wk / tot; out.hours = ph * 24; out.moon = mph; return out;
+  }
+  let sysMs = ((Number(QS.get('day')) || 0) + (QS.get('hour') != null ? Number(QS.get('hour')) : 9.5) / 24) * SYS_DAY;
+  const sysRate = QS.get('rate') != null ? Number(QS.get('rate')) : 1;   // game seconds per real second (SYS: 1)
+  L.LAB.sysSky = sysSky;
 
   // ================================================================ boot
   const hud = document.getElementById('hud');
@@ -533,13 +565,14 @@
   }
   async function bootCloudTest() {
     L.makeMaterials(); L.skyInit();
-    L.setTimeOfDay(sunFor(TODN));
+    L.setTimeOfDay(TOD_SYS ? sysSky(sysMs, SKY) : sunFor(TODN));
     const cam = L.camera; cam.fov = P.fov; cam.position.set(P.pos[0], P.eye, P.pos[1]);
     cam.rotation.order = 'YXZ'; cam.rotation.set(P.pitch * D2R, -P.yaw * D2R, 0); cam.updateProjectionMatrix(); cam.updateMatrixWorld();
-    const o = new THREE.Mesh(new THREE.PlaneGeometry(40000, 40000, 8, 8).rotateX(-Math.PI / 2), L.makeWaterMaterial({ depthAttr: false, depth: 40, ocean: true })); o.position.set(P.pos[0], 0, P.pos[1]); o.renderOrder = 2; L.scene.add(o);
+    const o = new THREE.Mesh(new THREE.PlaneGeometry(40000, 40000, 8, 8).rotateX(-Math.PI / 2), L.makeWaterMaterial({ depthAttr: false, depth: 40, ocean: true })); o.position.set(P.pos[0], 0, P.pos[1]); o.renderOrder = L.RO.ocean; L.scene.add(o);
     L.cloudSea.setClumpDensity(() => .55);
     const c = cam.position; const sd = Number(QS.get('seed') || 0);
     cumulusAt(c, -24, 9, 2600, 1300, 800, 11 + sd); cumulusAt(c, 6, 5, 3600, 1600, 900, 12 + sd); cumulusAt(c, 30, 7, 2400, 900, 500, 13 + sd); cumulusAt(c, -48, 3, 4200, 1000, 450, 14 + sd);
+    L.lookPrecompile(cam);
     step(3); window.ready = true;
   }
   async function boot() {
@@ -550,7 +583,7 @@
     L.makeMaterials();
     L.skyInit();
     if (P.cloudY) L.cloudSea.setY(P.cloudY);
-    L.setTimeOfDay(sunFor(TODN));
+    L.setTimeOfDay(TOD_SYS ? sysSky(sysMs, SKY) : sunFor(TODN));
     const cx = P.pos[0], cz = P.pos[1]; const cy = labH(cx, cz) + P.eye;
     const cam = L.camera; cam.fov = P.fov; cam.position.set(cx, cy, cz);
     cam.rotation.order = 'YXZ'; cam.rotation.set(P.pitch * D2R, -P.yaw * D2R, 0);
@@ -581,6 +614,7 @@
       house(OB[0] + 8, OB[1] - 200, -.2, 6, 5, 3.5, 3.5); house(OB[0] - 150, OB[1] - 330, -.3, 8, 6, 4, 4); house(OB[0] - 260, OB[1] - 480, .8, 9, 7, 4.5, 4);
       house(OB[0] - 30, OB[1] - 62, .35, 15, 9, 5.5, 5.5, { roof: K.roof2 }); tower(OB[0] - 21, OB[1] - 57, 1.6, 9, 3.5, { face: 2 });   // the round-door house (left)
     }
+    if (PRESET === 'm') { house(OM[0] - 30, OM[1] - 70, .3, 9, 7, 4.5, 4); house(OM[0] + 60, OM[1] - 140, -.2, 8, 6, 4, 3.5); }
     const hm = new THREE.Mesh(houses.geo(), L.MAT.v5); hm.castShadow = true; hm.receiveShadow = true; L.scene.add(hm);
     if (PRESET === 'a') fence([[-9, -50], [-1, -47.5], [8, -45.5]], 2.4);
     if (AREA === 'c') fence(rel(C_FENCE, OC), 2.6);
@@ -595,7 +629,7 @@
       const LX = 240, LZ = -560, lg = new THREE.PlaneGeometry(520, 800, 52, 80).rotateX(-Math.PI / 2); const lp = lg.attributes.position, dep = new Float32Array(lp.count);
       for (let i = 0; i < lp.count; i++) { const x = OB[0] + LX + lp.getX(i), z = OB[1] + LZ + lp.getZ(i); dep[i] = clamp(B_LAKE.y - labH(x, z), -5, 40); }
       lg.setAttribute('aDepth', new THREE.BufferAttribute(dep, 1));
-      const lm = new THREE.Mesh(lg, L.makeWaterMaterial({ depthAttr: true })); lm.position.set(OB[0] + LX, B_LAKE.y, OB[1] + LZ); lm.renderOrder = 2; L.scene.add(lm);
+      const lm = new THREE.Mesh(lg, L.makeWaterMaterial({ depthAttr: true })); lm.position.set(OB[0] + LX, B_LAKE.y, OB[1] + LZ); lm.renderOrder = L.RO.water; L.scene.add(lm);
     }
     if (PRESET === 'b') { addFallAt(OB[0] + 70, OB[1] - 520, 0, 1, 6, 205); addFallAt(OB[0] + 85, OB[1] - 1050, 0, 1, 9, 300); }
     // cloud sea: thick at cliff bases, open ocean south-east of the village terrace (preset c) and none in area B
@@ -615,27 +649,79 @@
     frameClouds(cam.position);
     if (P.mist) {
       const [mx, mz, mr] = P.mist, mode = QS.get('mist') || '';
-      L.mistVisual.setDisc(mx, mz, mr, { top: 900 });
-      if (mode === 'open') L.mistVisual.open(.7, [[OC[0] - 60, OC[1] + 20], [OC[0] - 150, OC[1] - 420], [mx + 60, mz + 260], [mx, mz]]);
-      if (mode === 'in') { const ix = mx + 60, iz = mz + 380; cam.position.set(ix, labH(ix, iz) + 14, iz); cam.rotation.set(-4 * D2R, 12 * D2R, 0); cam.updateMatrixWorld(); }
+      L.mistVisual.setDisc(mx, mz, mr);   // default: 900 m above the lowest ground under the disc
+      const path = PRESET === 'm' ? [[OM[0], OM[1]], [OM[0] - 60, OM[1] - 900], [mx + 60, mz + 700], [mx, mz]] : [[OC[0] - 60, OC[1] + 20], [OC[0] - 150, OC[1] - 420], [mx + 60, mz + 260], [mx, mz]];
+      if (mode === 'open') L.mistVisual.open(.7, path);
+      if (mode === 'in') { const ix = mx + 60, iz = mz + (PRESET === 'm' ? 700 : 380); cam.position.set(ix, labH(ix, iz) + 14, iz); cam.rotation.set(-4 * D2R, 12 * D2R, 0); cam.updateMatrixWorld(); }
     }
     // grass + character
     L.grassInit();
     if (P.hero) await addHero(P.hero[0], P.hero[1], Math.PI - 10 * D2R, 4.6, 1.3);
-    for (let i = 0; i < 400; i++) { L.grassUpdate(cx, cz, true); if (L.grassStats.buildMs < 55) break; }   // the lab shows a finished ring
+    for (let i = 0; i < 400; i++) { L.grassUpdate(cam.position.x, cam.position.z, true); if (L.grassStats.buildMs < 55) break; }   // the lab shows a finished ring
+    L.lookPrecompile(cam);   // rain, corridor motes and hidden fields compile now, not on first use
     const t3 = performance.now();
     L.LAB.times = { load: Math.round(t1 - t0), terrain: Math.round(t2 - t1), dress: Math.round(t3 - t2) };
     step(3);
     window.ready = true;
   }
   function step(n) {
-    for (let i = 0; i < (n || 1); i++) { T += 1 / 30; L.lookTick(1 / 30, 10 + T, L.camera); L.grassUpdate(L.camera.position.x, L.camera.position.z, false); }
+    for (let i = 0; i < (n || 1); i++) {
+      T += 1 / 30;
+      if (TOD_SYS) { sysMs += 1000 / 30 * sysRate; L.setTimeOfDay(sysSky(sysMs, SKY)); }
+      L.lookTick(1 / 30, 10 + T, L.camera); L.grassUpdate(L.camera.position.x, L.camera.position.z, false);
+    }
     L.render();
     const S = L.renderStats, G = L.grassStats;
     if (hud) hud.textContent = `${PRESET} ${TODN} ${L.quality}  calls ${S.calls}  tris ${S.triangles}  grass ${G.tris}`;
     return { calls: S.calls, triangles: S.triangles, grassTris: G.tris, clumps: G.clumps, flowers: G.flowers, tiles: G.tiles };
   }
   window.step = step;
-  window.labStats = () => Object.assign({ quality: L.quality, post: L.postOn, dpr: L.renderer.getPixelRatio() }, L.renderStats, { grass: L.grassStats, times: L.LAB.times });
+  window.labStats = () => Object.assign({ quality: L.quality, post: L.postOn, dpr: L.renderer.getPixelRatio() }, L.renderStats,
+    { trisNoTerrain: L.renderStats.triangles - (L.LAB.terrainTris || 0), terrainTris: L.LAB.terrainTris || 0, grass: L.grassStats, clouds: L.cloudStats(), times: L.LAB.times });
+
+  // ================================================================ contract checks (dev)
+  // window.lookAsserts({grass}) -> {ok, fails, info}: SYS sky() input, garbage input, programs of plain / wind / cloned
+  // materials, re-stylizing a clone, L.TEX vs L.T, the transparent order table, Névoa heights relative to the ground,
+  // and (with {grass: true}) the {d, pal} flower hint. Restores the lab's time of day afterwards.
+  window.lookAsserts = function (opt) {
+    opt = opt || {}; const fails = [], info = {};
+    const ok = (c, m) => { if (!c) fails.push(m); return !!c; };
+    const fin = a => Array.from(a).every(Number.isFinite);
+    const todOk = () => fin(L.TOD.sunDir.toArray()) && fin(L.TOD.lightDir.toArray()) && fin(L.TOD.moonDir.toArray()) && Number.isFinite(L.sun.intensity) && fin(L.HZ.A) && fin(L.HZ.D) && L.TOD.sunDir.lengthSq() > .9;
+    // 1. time of day: the SYS output shape over a day, then garbage
+    for (const hr of [0, 5.8, 6.2, 9, 12, 17.9, 18.3, 21]) { L.setTimeOfDay(sysSky((3 + hr / 24) * SYS_DAY, {})); ok(todOk(), 'tod sys ' + hr + 'h'); }
+    info.moonPhase = L.TOD.moonPhase;
+    L.setTimeOfDay({ sunDir: [NaN, 1, 0], moonDir: 'x', dayW: 'a', duskW: -3, nightW: 9, rain: NaN, haze: Infinity }); ok(todOk(), 'tod garbage');
+    L.setTimeOfDay({ sunDir: { x: 0, y: 0, z: 0 } }); ok(todOk(), 'tod zero vector');
+    L.setTimeOfDay(TOD_SYS ? sysSky(sysMs, SKY) : sunFor(TODN));
+    // 2. programs: plain v5, v5 + wind, a clone of MAT.v5, a re-stylized clone
+    const g = new THREE.BoxGeometry(2, 2, 2); g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 3).fill(.8), 3));
+    const plain = L.cloneMat(L.MAT.v5), wind = L.addWind(L.cloneMat(L.MAT.v5), .5, 1.3), clone = L.MAT.v5.clone();
+    let thrown = null; try { L.stylize(L.MAT.v5.clone(), { wrap: .3 }); L.addWind(wind, .6, 1.2); } catch (e) { thrown = e.message; }
+    ok(!thrown, 'restylize/rewind throws: ' + thrown);
+    const cam = L.camera, ms = [plain, wind, clone].map((m, i) => { const o = new THREE.Mesh(g, m); o.position.set(cam.position.x - 3 + i * 3, cam.position.y, cam.position.z - 14); o.frustumCulled = false; L.scene.add(o); return o; });
+    L.render();
+    const gl = L.renderer.getContext(), src = m => { const p = L.renderer.properties.get(m).currentProgram; return p ? gl.getAttachedShaders(p.program).map(s => gl.getShaderSource(s)).join('\n') : ''; };
+    const prog = m => L.renderer.properties.get(m).currentProgram;
+    const sp = src(plain), sw = src(wind), sc = src(clone);
+    ok(sp.includes('uV5m') && !sp.includes('uWindP'), 'plain program'); ok(sw.includes('uV5m') && sw.includes('uWindP'), 'wind program'); ok(sc.includes('uV5m'), 'clone keeps v5 lighting');
+    ok(prog(plain) && prog(plain) !== prog(wind), 'plain and wind share a program');
+    ok((sw.match(/uWindP/g) || []).length <= 3, 'wind applied twice');
+    for (const o of ms) L.scene.remove(o); g.dispose();
+    // 3. namespaces and order
+    ok(L.TEX && typeof L.TEX === 'object' && L.TEX.grass, 'L.TEX'); ok(typeof L.T !== 'function' || L.TEX !== L.T, 'L.T');
+    const R = L.RO; ok(R && R.sky < R.ocean && R.falls < R.mist && R.falls < R.cumulus && R.falls < R.sea && R.mist < R.particles && R.low < R.particles, 'L.RO order');
+    // 4. Névoa heights above the ground under the disc
+    if (P.mist) { const gy = labH(L.HZ.M[0], L.HZ.M[1]); info.mist = { ground: Math.round(gy), base: Math.round(L.HZ.Q[0] + 150), top: Math.round(L.HZ.M[3]) }; ok(L.HZ.M[3] > gy + 600 && L.HZ.Q[0] < gy, 'mist heights relative to the ground'); }
+    // 5. flower hint {d, pal} (rebuilds the grass ring three times)
+    if (opt.grass) {
+      const c = cam.position, keep = L.flowerHint, run = fh => { L.flowerHint = fh; L.grassClear(); for (let i = 0; i < 400; i++) { L.grassUpdate(c.x, c.z, true); if (L.grassStats.buildMs < 55) break; } return L.grassStats.flowers; };
+      const n1 = run(() => 1), o1 = run((x, z, out) => { out.d = 1; out.pal = null; return out; }), p6 = run((x, z, out) => { out.d = 1; out.pal = [0xe8463a, 0xf2c94c, 0x7a6cf0, 0xf5f0e6, 0xff9aa2, 0xffd166]; return out; }), z0 = run((x, z, out) => { out.d = 0; out.pal = [0xff0000]; return out; });
+      L.flowerHint = keep; run(keep);
+      info.flowers = { number1: n1, object1: o1, palette6: p6, zero: z0 };
+      ok(o1 === n1, 'flower hint object == number'); ok(z0 === 0, 'flower hint d=0'); ok(p6 > n1 * .6 && p6 < n1 * 1.4, 'palette density');
+    }
+    return { ok: fails.length === 0, fails, info };
+  };
   boot().catch(e => { console.error('lab boot', e && e.stack || e); window.ready = true; });
 })(window.L);

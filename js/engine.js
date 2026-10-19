@@ -19,13 +19,13 @@ window.L = window.L || {};
   const TIERS = {
     alto: { name: 'alto', dpr: 2, shadow: 2048, shadowDist: 60, shadowTaps: 5, post: true, bloom: .6, fxaa: true, far: 12000,
       grassR: 52, grassSp: .5, grassFull: 18, grassBlades: 12, grassMaxTris: 260000, flowerMul: 1, grassMul: 1.3, scatterMul: 1.3, lodMul: 1.25, impostorMul: 1.25,
-      cloudPuffs: 1, seaSteps: 5, mistPuffs: 1, rainDrops: 6000, pointLights: 6, lod: 130, grass: 3200 },
+      cloudPuffs: 1, lowCap: 6500, seaSteps: 5, mistPuffs: 1, rainDrops: 6000, pointLights: 6, lod: 130, grass: 3200 },
     medio: { name: 'medio', dpr: 1.5, shadow: 1536, shadowDist: 45, shadowTaps: 4, post: true, bloom: .4, fxaa: true, far: 12000,
       grassR: 36, grassSp: .58, grassFull: 13, grassBlades: 10, grassMaxTris: 120000, flowerMul: .8, grassMul: 1, scatterMul: 1, lodMul: 1, impostorMul: 1,
-      cloudPuffs: .7, seaSteps: 4, mistPuffs: .7, rainDrops: 3500, pointLights: 4, lod: 95, grass: 1800 },
+      cloudPuffs: .7, lowCap: 4000, seaSteps: 4, mistPuffs: .7, rainDrops: 3500, pointLights: 4, lod: 95, grass: 1800 },
     baixo: { name: 'baixo', dpr: 1, shadow: 1024, shadowDist: 32, shadowTaps: 1, post: false, bloom: 0, fxaa: false, far: 12000,
       grassR: 22, grassSp: .7, grassFull: 8, grassBlades: 7, grassMaxTris: 45000, flowerMul: .5, grassMul: .6, scatterMul: .65, lodMul: .75, impostorMul: .75,
-      cloudPuffs: .45, seaSteps: 0, mistPuffs: .45, rainDrops: 1500, pointLights: 2, lod: 70, grass: 800 },
+      cloudPuffs: .45, lowCap: 2600, seaSteps: 0, mistPuffs: .45, rainDrops: 1500, pointLights: 2, lod: 70, grass: 800 },
   };
   for (const k in TIERS) Object.freeze(TIERS[k]);
   L.TIERS = TIERS;
@@ -60,34 +60,28 @@ window.L = window.L || {};
   // Typed arrays survive THREE.UniformsUtils.clone by reference, so every program that receives these uniform
   // objects (built-in materials via ShaderLib, ShaderMaterials via UniformsLib.fog) reads the same live values.
   const v4 = () => new Float32Array(4);
-  const HZ = { A: v4(), B: v4(), C: v4(), D: v4(), E: v4(), M: v4(), N: v4(), P: v4() }; L.HZ = HZ;
-  // A: veil dark rgb, veil strength | B: veil light rgb, far-haze ratio | C: sun-side haze rgb, sun power
+  const HZ = { A: v4(), B: v4(), C: v4(), D: v4(), E: v4(), M: v4(), N: v4(), P: v4(), Q: v4() }; L.HZ = HZ;
+  // A: blue haze for shaded faces rgb, strength | B: blue haze for lit faces rgb, far-haze ratio | C: sun-side haze rgb, sun power
   // D: sun dir xyz, height scale (m) | E: base altitude, floor density, far fade start, far fade end
-  // M: mist centre x, z, radius (0 = off), top | N: mist colour rgb, visibility length (m)
+  // M: mist centre x, z, radius (0 = off), top y (absolute) | N: mist colour rgb, visibility length (m)
   // P: camera world position (three r128 only uploads cameraPosition to Standard/Phong/Toon/Shader materials)
+  // Q: mist base y (absolute), -, -, -
   HZ.A.set([.025, .115, .31, .8]); HZ.B.set([.25, .6, .84, .38]); HZ.C.set([.78, .85, .9, 6]); HZ.D.set([0, 1, 0, 520]);
-  HZ.E.set([60, .16, 9000, 11800]); HZ.M.set([0, 0, 0, 900]); HZ.N.set([.92, .94, .97, 60]);
-  const hzUniforms = () => ({ hzA: { value: HZ.A }, hzB: { value: HZ.B }, hzC: { value: HZ.C }, hzD: { value: HZ.D }, hzE: { value: HZ.E }, hzM: { value: HZ.M }, hzN: { value: HZ.N }, hzP: { value: HZ.P } });
+  HZ.E.set([60, .16, 9000, 11800]); HZ.M.set([0, 0, 0, 900]); HZ.N.set([.92, .94, .97, 60]); HZ.Q.set([-1000, 0, 0, 0]);
+  const hzUniforms = () => ({ hzA: { value: HZ.A }, hzB: { value: HZ.B }, hzC: { value: HZ.C }, hzD: { value: HZ.D }, hzE: { value: HZ.E }, hzM: { value: HZ.M }, hzN: { value: HZ.N }, hzP: { value: HZ.P }, hzQ: { value: HZ.Q } });
   L.hazeUniforms = hzUniforms;
   Object.assign(THREE.UniformsLib.fog, hzUniforms());
   for (const k in THREE.ShaderLib) { const S = THREE.ShaderLib[k]; if (S.uniforms && S.uniforms.fogColor) Object.assign(S.uniforms, hzUniforms()); }
 
   // ================================================================ aerial perspective (global fog chunk)
-  // Two stages, both distance x height weighted: (1) a blue veil that keeps the value structure (shadowed cliffs
+  // Two stages, both distance x height weighted: (1) a blue haze that keeps the value structure (shadowed cliffs
   // -> deep blue, lit ground -> light blue, like the paintings); (2) fade to the horizon colour, warmer toward the
-  // sun. fogDensity keeps v4 units (.0006 = ~40% veil at 1 km). Plus the Névoa: the path length through the mist
-  // cylinder whitens everything behind or inside it.
+  // sun. fogDensity keeps v4 units (.0006 = ~40% blue haze at 1 km). Plus the Névoa: the path length through the
+  // mist cylinder (between its base and top heights) whitens everything behind or inside it. Transparent layers
+  // (clouds, particles, sprites) use v5MistT() to fade out behind it instead.
   const outSRGB = !POST; // direct-to-screen: the fog chunk runs after sRGB encoding, so convert around it
-  THREE.ShaderChunk.fog_pars_vertex = '#ifdef USE_FOG\n varying vec3 vFogW;\n#endif\n';
-  THREE.ShaderChunk.fog_vertex = '#ifdef USE_FOG\n vFogW = vec3(dot(viewMatrix[0].xyz, mvPosition.xyz), dot(viewMatrix[1].xyz, mvPosition.xyz), dot(viewMatrix[2].xyz, mvPosition.xyz));\n#endif\n';
-  THREE.ShaderChunk.fog_pars_fragment = `#ifdef USE_FOG
- uniform vec3 fogColor; varying vec3 vFogW;
- uniform vec4 hzA, hzB, hzC, hzD, hzE, hzM, hzN, hzP;
- #ifdef FOG_EXP2
-  uniform float fogDensity;
- #else
-  uniform float fogNear; uniform float fogFar;
- #endif
+  // Névoa helpers (need uniforms hzM, hzN, hzP, hzQ; shared with the sky dome and the cloud shaders through L.MIST_GLSL)
+  const MIST_GLSL = `
  float v5MistPath(vec3 ro, vec3 rd, float len) {
    if (hzM.z <= 0.) return 0.;
    vec2 o = ro.xz - hzM.xy; vec2 d = rd.xz * len;
@@ -95,10 +89,27 @@ window.L = window.L || {};
    float disc = b * b - a * c; if (disc <= 0.) return 0.;
    float s = sqrt(disc); float t0 = clamp((-b - s) / a, 0., 1.), t1 = clamp((-b + s) / a, 0., 1.);
    float dy = rd.y * len;
-   if (abs(dy) > 1e-3) { float ty = (hzM.w - ro.y) / dy; if (dy > 0.) t1 = min(t1, ty); else t0 = max(t0, ty); }
-   else if (ro.y > hzM.w) return 0.;
+   if (abs(dy) > 1e-3) { float ta = (hzQ.x - ro.y) / dy, tb = (hzM.w - ro.y) / dy; t0 = max(t0, min(ta, tb)); t1 = min(t1, max(ta, tb)); }
+   else if (ro.y > hzM.w || ro.y < hzQ.x) return 0.;
    return max(t1 - t0, 0.) * len;
  }
+ // transmittance through the Névoa (1 = clear): transparent layers multiply their alpha by it
+ float v5MistT(vec3 ro, vec3 rd, float len) { return exp(-v5MistPath(ro, rd, len) / max(hzN.w, 1.)); }
+ // 1 while the camera is inside the mist column (fading over the outer 15% of the radius and the top 100 m)
+ float v5MistIn() { return hzM.z <= 0. ? 0. : (1. - smoothstep(hzM.z * .85, hzM.z, length(hzP.xz - hzM.xy))) * step(hzQ.x, hzP.y) * (1. - smoothstep(hzM.w - 100., hzM.w, hzP.y)); }
+`;
+  L.MIST_GLSL = MIST_GLSL;
+  THREE.ShaderChunk.fog_pars_vertex = '#ifdef USE_FOG\n varying vec3 vFogW;\n#endif\n';
+  THREE.ShaderChunk.fog_vertex = '#ifdef USE_FOG\n vFogW = vec3(dot(viewMatrix[0].xyz, mvPosition.xyz), dot(viewMatrix[1].xyz, mvPosition.xyz), dot(viewMatrix[2].xyz, mvPosition.xyz));\n#endif\n';
+  THREE.ShaderChunk.fog_pars_fragment = `#ifdef USE_FOG
+ uniform vec3 fogColor; varying vec3 vFogW;
+ uniform vec4 hzA, hzB, hzC, hzD, hzE, hzM, hzN, hzP, hzQ;
+ #ifdef FOG_EXP2
+  uniform float fogDensity;
+ #else
+  uniform float fogNear; uniform float fogFar;
+ #endif
+ ${MIST_GLSL}
 #endif
 `;
   THREE.ShaderChunk.fog_fragment = `#ifdef USE_FOG
@@ -123,8 +134,9 @@ window.L = window.L || {};
     float fogFactor = smoothstep(fogNear, fogFar, fogDist);
     fc = mix(fc, fogColor, fogFactor);
   #endif
-  float fMist = v5MistPath(hzP.xyz, fogRd, fogDist);
-  fc = mix(fc, hzN.rgb, 1. - exp(-fMist / max(hzN.w, 1.)));
+  // Névoa: fade to the mist colour; things within a few visibility lengths keep ~15% of their contrast
+  float fMist = v5MistPath(hzP.xyz, fogRd, fogDist), fVis = max(hzN.w, 1.);
+  fc = mix(fc, hzN.rgb, min(1. - exp(-fMist / fVis), mix(.85, 1., smoothstep(2. * fVis, 6. * fVis, fMist))));
   ${outSRGB ? 'fc = pow(fc, vec3(1. / 2.2));' : ''}
   gl_FragColor.rgb = fc;
 #endif
@@ -132,7 +144,7 @@ window.L = window.L || {};
 
   // ================================================================ tone curve + grade (per material, before haze)
   // Hue-preserving soft shoulder (no ACES desaturation), saturation boost, cool darks, warm highlights.
-  const GRADE = L.GRADE = { knee: .62, mixPerChannel: .3, sat: 1.08, cool: [.9, .97, 1.1], warm: [1.04, 1.0, .95] };
+  const GRADE = L.GRADE = { knee: .62, mixPerChannel: .3, sat: 1.02, cool: [.9, .97, 1.1], warm: [1.04, 1.0, .95] };
   const f3 = a => `vec3(${a.map(v => v.toFixed(3)).join(',')})`;
   THREE.ShaderChunk.tonemapping_pars_fragment = THREE.ShaderChunk.tonemapping_pars_fragment.replace(
     'vec3 CustomToneMapping( vec3 color ) { return color; }',
@@ -177,7 +189,7 @@ window.L = window.L || {};
   };
   const SHTAPS = Q0.shadowTaps;
   const LIGHT_PARS = `
-uniform vec4 uV5m; // per material: wrap, rim, translucency, specular
+uniform vec4 uV5m; uniform float uV5f; // per material: wrap, rim, translucency, specular | sky/ground fill scale
 uniform vec3 uV5ShadowTint, uV5Rim, uV5Lift; uniform vec4 uV5P;
 float v5Shadow() {
   float sh = 1.;
@@ -216,9 +228,9 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
   rl.directDiffuse += alb * Lc * (lit + back * sh * clamp(dot(V, -Ld) * .5 + .5, .2, 1.));
   float hw = dot(N, up) * .5 + .5, litK = clamp(lit * 1.25, 0., 1.);
   hw = mix(hw, 1., .6 * (1. - litK));                 // shade is lit by the sky dome more than by the ground bounce: blue
-  vec3 fill = mix(gndC, skyC, hw) * uV5P.z;
+  vec3 fill = mix(gndC, skyC, hw) * uV5P.z * uV5f;
   fill *= mix(uV5ShadowTint, vec3(1.), litK);
-  rl.indirectDiffuse += alb * (fill + uV5Lift);
+  rl.indirectDiffuse += alb * (fill + uV5Lift * uV5f);
   float fr = pow(1. - clamp(dot(N, V), 0., 1.), 3.);
   rl.indirectDiffuse += alb * uV5Rim * Lc * fr * uV5m.y * (.25 + .75 * sh);
   if (uV5m.w > 0.) { vec3 H = normalize(Ld + V); rl.directSpecular += Lc * pow(max(dot(N, H), 0.), 8. + uV5m.w * 90.) * uV5m.w * lit * .6; }
@@ -306,21 +318,53 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
   const baseOBC = THREE.Material.prototype.onBeforeCompile;
   const baseKey = THREE.Material.prototype.customProgramCacheKey;
   L.isBaseOBC = f => !f || f === baseOBC;
-  // opts: {wrap (0..1, soft terminator), rim (0..1.5), transl (0..1 back-light), spec (0..1)}
+  // Per-material look uniforms live in WeakMaps, not in userData (Material.copy JSON-clones userData), and the hooks
+  // read them through `this` at compile time, so a clone gets its own values on the same shared program.
+  const V5U = new WeakMap();      // material -> { m: {value: vec4 wrap, rim, transl, spec}, f: {value: fill scale} }
+  const WINDU = new WeakMap();    // material -> { value: vec2 amount, freq }
+  const OURS = new WeakSet();     // onBeforeCompile hooks installed by stylize / addWind
+  const PATCHED = new WeakSet(), WINDED = new WeakSet();   // materials whose shader carries the v5 light / the wind
+  // userData fields that hold live objects (shader, depth material, wind uniform) are stored non-enumerable so a
+  // clone does not try to JSON-serialise them; Material.copy below carries them over by reference.
+  const HIDDEN = ['shader', 'depth', 'wind'];
+  L.hideUD = function (mat, k, v) { Object.defineProperty(mat.userData, k, { value: v, writable: true, configurable: true, enumerable: false }); return v; };
+  // r128's Material.copy drops onBeforeCompile/customProgramCacheKey: a clone of a stylized material (ACTORS, STORY and
+  // WORLD clone L.MAT entries to tint them) would silently lose the v5 lighting. Carry our hooks and uniforms over.
+  const _mcopy = THREE.Material.prototype.copy;
+  THREE.Material.prototype.copy = function (src) {
+    _mcopy.call(this, src);
+    if (src && src.isMaterial) {
+      if (OURS.has(src.onBeforeCompile)) {
+        this.onBeforeCompile = src.onBeforeCompile; this.customProgramCacheKey = src.customProgramCacheKey;
+        if (PATCHED.has(src)) PATCHED.add(this); if (WINDED.has(src)) WINDED.add(this);
+      }
+      const P = V5U.get(src); if (P) V5U.set(this, { m: { value: P.m.value.clone() }, f: { value: P.f.value } });
+      const W = WINDU.get(src); if (W) WINDU.set(this, { value: W.value.clone() });
+      for (const k of HIDDEN) { const d = Object.getOwnPropertyDescriptor(src.userData, k); if (d && !d.enumerable) L.hideUD(this, k, d.value); }
+    }
+    return this;
+  };
+  L.cloneMat = m => m.clone();   // explicit alias: clones keep the v5 lighting, wind and their own look values
+  // opts: {wrap (0..1, soft terminator), rim (0..1.5), transl (0..1 back-light), spec (0..1), fill (sky/ground fill scale,
+  // default 1), tag (string: REQUIRED when the material already has an onBeforeCompile whose shader text depends on
+  // captured state; otherwise the program is shared by hook source + customProgramCacheKey; userData.v5tag also works)}
   L.stylize = function (mat, opts) {
     if (!mat) return mat;
     if (Array.isArray(mat)) { mat.forEach(m => L.stylize(m, opts)); return mat; }
     opts = opts || {};
-    const P = mat.userData.v5 || (mat.userData.v5 = { value: new THREE.Vector4() });
-    P.value.set(opts.wrap != null ? opts.wrap : .35, opts.rim != null ? opts.rim : .3, opts.transl || 0, opts.spec || 0);
-    if (mat.userData.v5done) return mat;
+    let P = V5U.get(mat); if (!P) { P = { m: { value: new THREE.Vector4() }, f: { value: 1 } }; V5U.set(mat, P); }
+    const o = { wrap: opts.wrap != null ? opts.wrap : .35, rim: opts.rim != null ? opts.rim : .3, transl: opts.transl || 0, spec: opts.spec || 0, fill: opts.fill != null ? opts.fill : 1, tag: String(opts.tag || opts.key || mat.userData.v5tag || mat.userData.v5key || '') };
+    P.m.value.set(o.wrap, o.rim, o.transl, o.spec); P.f.value = o.fill;
+    mat.userData.v5opts = o;                       // plain data, survives clones
+    if (PATCHED.has(mat)) return mat;               // patched already (or a clone that inherited the hook)
     const kind = mat.isMeshStandardMaterial ? 'std' : mat.isMeshLambertMaterial ? 'lam' : null;
     if (!kind) { mat.userData.v5done = true; return mat; } // basic/sprite/shader: haze only (global chunk)
     const prev = mat.onBeforeCompile !== baseOBC ? mat.onBeforeCompile : null;
     const prevKey = mat.customProgramCacheKey !== baseKey ? mat.customProgramCacheKey : null;
-    mat.onBeforeCompile = function (sh, r) {
+    const hook = function (sh, r) {
       if (prev) prev.call(this, sh, r);
-      sh.uniforms.uV5m = P; sh.uniforms.uV5ShadowTint = LOOK.shadowTint; sh.uniforms.uV5Rim = LOOK.rimCol; sh.uniforms.uV5P = LOOK.par; sh.uniforms.uV5Lift = LOOK.fillLift;
+      const U = V5U.get(this) || P;
+      sh.uniforms.uV5m = U.m; sh.uniforms.uV5f = U.f; sh.uniforms.uV5ShadowTint = LOOK.shadowTint; sh.uniforms.uV5Rim = LOOK.rimCol; sh.uniforms.uV5P = LOOK.par; sh.uniforms.uV5Lift = LOOK.fillLift;
       let f = sh.fragmentShader;
       if (kind === 'std') {
         f = f.replace('#include <lights_fragment_begin>', STD_LIGHT).replace('#include <lights_fragment_maps>', '').replace('#include <lights_fragment_end>', '');
@@ -333,11 +377,14 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
       }
       sh.fragmentShader = f;
     };
-    const k = 'v5|' + kind + '|' + (prev ? strHash(prev.toString()) : '-') + '|' + (prevKey ? prevKey.call(mat) : '-');
+    OURS.add(hook); PATCHED.add(mat); mat.onBeforeCompile = hook;
+    const k = 'v5|' + kind + '|' + o.tag + '|' + (prev ? strHash(prev.toString()) : '-') + '|' + (prevKey ? prevKey.call(mat) : '-');
     mat.customProgramCacheKey = () => k;
     mat.userData.v5done = true; mat.needsUpdate = true;
     return mat;
   };
+  L.v5Uniforms = mat => V5U.get(mat) || null;
+  L.windUniform = mat => WINDU.get(mat) || null;
 
   // ================================================================ post: bloom (fixed size) + grade/FXAA
   let composer = null, bloom = null, grade = null, renderPass = null;
@@ -426,7 +473,9 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
 
   // ================================================================ textures & loader
   const texLoader = new THREE.TextureLoader();
-  const T = {}; L.T = T;
+  // textures: L.TEX (L.T belongs to the text decoder of the story module). During the v4 transition L.T also points
+  // at the table unless something else already owns that name.
+  const T = {}; L.TEX = T; if (L.T === undefined) L.T = T;
   L.loaded = 0; L.total = 0;
   const texWait = [];
   function tex(name, srgb) {
@@ -462,11 +511,12 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
   // ================================================================ wind for plain materials (world space, shared clock)
   // amount = sway strength, freq = sway speed; per-material uniforms, shared shader text.
   function addWind(mat, amount, freq) {
-    const W = { value: new THREE.Vector2(amount, freq) };
+    if (WINDED.has(mat)) { WINDU.get(mat).value.set(amount, freq); return mat; }   // idempotent: a second call only retunes
+    const W = { value: new THREE.Vector2(amount, freq) }; WINDU.set(mat, W);
     const prev = mat.onBeforeCompile !== baseOBC ? mat.onBeforeCompile : null;
-    mat.onBeforeCompile = (sh, r) => {
-      if (prev) prev(sh, r);
-      sh.uniforms.uTime = L.uTime; sh.uniforms.uWindP = W;
+    const hook = function (sh, r) {
+      if (prev) prev.call(this, sh, r);
+      sh.uniforms.uTime = L.uTime; sh.uniforms.uWindP = WINDU.get(this) || W;
       sh.vertexShader = 'uniform float uTime; uniform vec2 uWindP; varying float vViewZ;\n' + sh.vertexShader.replace('#include <project_vertex>', `
         vec4 mvPosition = vec4( transformed, 1.0 );
         #ifdef USE_INSTANCING
@@ -480,9 +530,14 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
         wpos.xz += vec2(sway, sway * .6);
         mvPosition = viewMatrix * wpos; gl_Position = projectionMatrix * mvPosition; vViewZ = -mvPosition.z;`);
       sh.fragmentShader = 'varying float vViewZ;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n if(vViewZ<2.8){float dn=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453);if(dn>vViewZ/2.8)discard;}');
-      mat.userData.shader = sh;
+      L.hideUD(this, 'shader', sh);
     };
-    mat.userData.wind = W;
+    OURS.add(hook); WINDED.add(mat); mat.onBeforeCompile = hook;
+    // the wind changes the shader text: it must change the program cache id too, or a stylized material and a stylized +
+    // wind material would share whichever program compiled first
+    const pk = mat.customProgramCacheKey;
+    mat.customProgramCacheKey = function () { return pk.call(this) + '|wind'; };
+    L.hideUD(mat, 'wind', W); mat.needsUpdate = true;
     return mat;
   }
   L.addWind = addWind;
@@ -514,18 +569,18 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
     g.traverse(o => { if (!o.isMesh) return; o.castShadow = true; o.receiveShadow = true; o.material = (matFor && matFor(o.name, o)) || MAT.plain; });
     return g;
   };
-  // Merge a legacy model's meshes into world-baked geometry grouped by material key (srcObj: any Object3D instead)
+  // Merge a legacy model's meshes into world-baked geometry grouped by material id (srcObj: any Object3D instead)
   L.flatten = function (name, matFor, srcObj) {
     const src = srcObj || M[name]; const groups = {};
     src.updateMatrixWorld(true);
     src.traverse(o => {
       if (!o.isMesh) return;
-      const key = (matFor && matFor(o.name)) || 'plain';
+      const mid = (matFor && matFor(o.name)) || 'plain';
       const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld);
       if (!g.attributes.color) { const n = g.attributes.position.count; g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(n * 3).fill(1), 3)); }
       if (!g.attributes.uv) { const n = g.attributes.position.count; g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(n * 2), 2)); }
       if (g.attributes.color.itemSize === 4 || g.attributes.color.normalized) { const a = g.attributes.color, b = new Float32Array(a.count * 3); const s = a.normalized ? (a.array instanceof Uint8Array ? 1 / 255 : a.array instanceof Uint16Array ? 1 / 65535 : 1) : 1; for (let i = 0; i < a.count; i++) { b[i * 3] = a.getX(i) * s; b[i * 3 + 1] = a.getY(i) * s; b[i * 3 + 2] = a.getZ(i) * s; } g.setAttribute('color', new THREE.BufferAttribute(b, 3)); }
-      (groups[key] = groups[key] || []).push(g);
+      (groups[mid] = groups[mid] || []).push(g);
     });
     const out = {};
     for (const k in groups) {
@@ -539,11 +594,11 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
   // Palettes (sRGB hex in, linear out). L.TOD holds the blended state that sky/terramat/grass read.
   const PAL = {
     day: { zen: 0x2f7fdc, mid: 0x3f8fe2, hor: 0x80b9e8, low: 0xdfe6ee, sun: 0xfff1d8, sunI: 1.32, sky: 0x9ac8f6, skyI: .6, gnd: 0xc4bf7a, gndI: .36,
-      veilD: 0x2c5f98, veilL: 0x7cc2e6, hazeA: 0x8ec2ea, hazeS: 0xe4ecf0, cLit: 0xf4f6f8, cBody: 0xd9dde2, cShade: 0xb6c3d3, cDeep: 0x95a9c4, tint: [.42, .6, 1.04], exp: 1 },
+      hazeD: 0x2c5f98, hazeL: 0x7cc2e6, hazeA: 0x8ec2ea, hazeS: 0xe4ecf0, cLit: 0xf4f6f8, cBody: 0xd9dde2, cShade: 0xb6c3d3, cDeep: 0x95a9c4, tint: [.42, .6, 1.04], exp: 1 },
     dusk: { zen: 0x2f5aa8, mid: 0x6d86c4, hor: 0xf0b48a, low: 0xffd4a0, sun: 0xffa45c, sunI: 1.25, sky: 0x8c95cc, skyI: .5, gnd: 0xa4805a, gndI: .28,
-      veilD: 0x3b4e8c, veilL: 0xc9a2a0, hazeA: 0xb9a5c4, hazeS: 0xffc58e, cLit: 0xffd8b0, cBody: 0xe9b9a6, cShade: 0x8f8db5, cDeep: 0x6c6996, tint: [.66, .62, 1.0], exp: 1 },
+      hazeD: 0x3b4e8c, hazeL: 0xc9a2a0, hazeA: 0xb9a5c4, hazeS: 0xffc58e, cLit: 0xffd8b0, cBody: 0xe9b9a6, cShade: 0x8f8db5, cDeep: 0x6c6996, tint: [.66, .62, 1.0], exp: 1 },
     night: { zen: 0x0a1838, mid: 0x112552, hor: 0x24406f, low: 0x2e4b7c, sun: 0xa8c0ff, sunI: .3, sky: 0x4a66aa, skyI: .5, gnd: 0x22304e, gndI: .22,
-      veilD: 0x0e2148, veilL: 0x2c4a7c, hazeA: 0x24406f, hazeS: 0x2f4d80, cLit: 0x6577a4, cBody: 0x4a5a86, cShade: 0x2c3a62, cDeep: 0x1c2846, tint: [.75, .85, 1.1], exp: 1.12 },
+      hazeD: 0x0e2148, hazeL: 0x2c4a7c, hazeA: 0x24406f, hazeS: 0x2f4d80, cLit: 0x6577a4, cBody: 0x4a5a86, cShade: 0x2c3a62, cDeep: 0x1c2846, tint: [.75, .85, 1.1], exp: 1.12 },
   };
   const P3 = {}; for (const k in PAL) { P3[k] = {}; for (const f in PAL[k]) { const v = PAL[k][f]; P3[k][f] = typeof v === 'number' && v > 2 ? C(v) : Array.isArray(v) ? new THREE.Color(v[0], v[1], v[2]) : v; } }
   L.PAL5 = P3;
@@ -553,15 +608,27 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
   function mix3(f, out) { const a = P3.day[f], b = P3.dusk[f], n = P3.night[f]; out.setRGB(a.r * TOD.day + b.r * TOD.dusk + n.r * TOD.night, a.g * TOD.day + b.g * TOD.dusk + n.g * TOD.night, a.b * TOD.day + b.b * TOD.dusk + n.b * TOD.night); return out; }
   function mixN(f) { return P3.day[f] * TOD.day + P3.dusk[f] * TOD.dusk + P3.night[f] * TOD.night; }
   const GREY = C(0x9aa4ae);
-  // o: {sunDir, moonDir, dayW, duskW, nightW, rain, haze}. Missing weights are derived from the sun height; haze scales
-  // the aerial perspective (1 = default, kept until changed: a region or a preset can ask for a hazier valley).
+  // o: {sunDir, moonDir, dayW, duskW, nightW, rain, haze, moon}. Directions may be THREE.Vector3, [x,y,z] arrays (what
+  // L.clock.sky() returns) or {x,y,z}; invalid or zero vectors keep the previous direction. Missing or invalid weights are
+  // derived from the sun height. haze scales the aerial perspective for this call (1 when omitted: a region that wants a
+  // hazier valley passes it every frame). moon = phase 0..1 (0 new, .5 full; L.clock.sky().moon).
+  const _dv = new THREE.Vector3();
+  function readDir(src, out) {
+    if (!src) return false;
+    if (src.isVector3) _dv.copy(src); else if (src.length >= 3) _dv.set(+src[0], +src[1], +src[2]); else _dv.set(+src.x, +src.y, +src.z);
+    if (!isFinite(_dv.x + _dv.y + _dv.z) || _dv.lengthSq() < 1e-8) return false;
+    out.copy(_dv).normalize(); return true;
+  }
+  const w01 = v => (v == null || !isFinite(v)) ? null : clamp(+v, 0, 1);
+  TOD.moonPhase = .5; TOD.haze = 1;
   L.setTimeOfDay = function (o) {
     o = o || {};
-    if (o.sunDir) TOD.sunDir.copy(o.sunDir).normalize();
-    if (o.moonDir) TOD.moonDir.copy(o.moonDir).normalize(); else TOD.moonDir.set(-TOD.sunDir.x, Math.max(.3, -TOD.sunDir.y), -TOD.sunDir.z).normalize();
-    let d = o.dayW, k = o.duskW, n = o.nightW;
-    if (d == null || k == null || n == null) { const sh = TOD.sunDir.y; d = sstep(.0, .3, sh); n = sstep(.0, -.2, sh); k = Math.max(0, 1 - d - n); }
-    const tot = d + k + n || 1; TOD.day = d / tot; TOD.dusk = k / tot; TOD.night = n / tot; TOD.rain = clamp(o.rain || 0, 0, 1); TOD.set = true;
+    readDir(o.sunDir, TOD.sunDir);
+    if (!readDir(o.moonDir, TOD.moonDir)) TOD.moonDir.set(-TOD.sunDir.x, Math.max(.3, -TOD.sunDir.y), -TOD.sunDir.z).normalize();
+    let d = w01(o.dayW), k = w01(o.duskW), n = w01(o.nightW);
+    if (d == null || k == null || n == null || d + k + n < 1e-4) { const sh = TOD.sunDir.y; d = sstep(.0, .3, sh); n = sstep(.0, -.2, sh); k = Math.max(0, 1 - d - n); }
+    const tot = d + k + n || 1; TOD.day = d / tot; TOD.dusk = k / tot; TOD.night = n / tot; TOD.rain = w01(o.rain) || 0; TOD.set = true;
+    if (o.moon != null && isFinite(o.moon)) TOD.moonPhase = o.moon - Math.floor(o.moon);
     const R = TOD.rain;
     mix3('zen', TOD.zen); mix3('mid', TOD.mid); mix3('hor', TOD.hor); mix3('low', TOD.low); mix3('cLit', TOD.cLit); mix3('cBody', TOD.cBody); mix3('cShade', TOD.cShade); mix3('cDeep', TOD.cDeep);
     if (R > 0) {
@@ -586,14 +653,14 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
     mix3('hazeA', TOD.hazeA); mix3('hazeS', TOD.hazeS);
     if (R > 0) { TOD.hazeA.lerp(_c.copy(GREY).multiplyScalar(1 - TOD.night * .7), R * .8); TOD.hazeS.lerp(TOD.hazeA, R * .8); }
     scene.fog.color.copy(TOD.hazeA); scene.background.copy(TOD.hor);
-    TOD.haze = o.haze != null ? o.haze : (TOD.haze || 1);
+    TOD.haze = o.haze != null && isFinite(o.haze) ? clamp(+o.haze, .2, 6) : 1;
     scene.fog.density = .0006 * TOD.haze * (1 + R * 2.2 + TOD.dusk * .15);
-    HZ.B[3] = .38 / Math.sqrt(TOD.haze);   // extra haze mostly thickens the blue veil, the fade to the horizon colour grows slower
-    mix3('veilD', _c); HZ.A[0] = _c.r; HZ.A[1] = _c.g; HZ.A[2] = _c.b;
-    mix3('veilL', _c); if (R > 0) _c.lerp(_c2.copy(GREY).multiplyScalar(1 - TOD.night * .7), R * .7); HZ.B[0] = _c.r; HZ.B[1] = _c.g; HZ.B[2] = _c.b;
+    HZ.B[3] = .38 / Math.sqrt(TOD.haze);   // extra haze mostly thickens the blue haze, the fade to the horizon colour grows slower
+    mix3('hazeD', _c); HZ.A[0] = _c.r; HZ.A[1] = _c.g; HZ.A[2] = _c.b;
+    mix3('hazeL', _c); if (R > 0) _c.lerp(_c2.copy(GREY).multiplyScalar(1 - TOD.night * .7), R * .7); HZ.B[0] = _c.r; HZ.B[1] = _c.g; HZ.B[2] = _c.b;
     HZ.C[0] = TOD.hazeS.r; HZ.C[1] = TOD.hazeS.g; HZ.C[2] = TOD.hazeS.b; HZ.C[3] = 6 - TOD.dusk * 3;
     HZ.D[0] = TOD.sunDir.x; HZ.D[1] = TOD.sunDir.y; HZ.D[2] = TOD.sunDir.z;
-    _c.copy(TOD.cLit).lerp(_c2.setRGB(1, 1, 1), .1); HZ.N[0] = _c.r * .96; HZ.N[1] = _c.g * .97; HZ.N[2] = _c.b;
+    _c.copy(TOD.cBody).lerp(TOD.cLit, .45); HZ.N[0] = _c.r; HZ.N[1] = _c.g; HZ.N[2] = _c.b;   // mist colour: the puffs' mid value, under the bloom threshold
     renderer.toneMappingExposure = mixN('exp') * (1 - R * .08);
     if (grade) grade.uniforms.uNight.value = TOD.night;
     if (bloom) bloom.strength = .26 + TOD.night * .25 + TOD.dusk * .1;
@@ -607,7 +674,7 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
   L.onTimeOfDay = f => { todHooks.push(f); if (TOD.set) f(TOD); };
   // convenience: named presets used by the lab and tools ('day', 'golden', 'night', 'rain')
   L.todPreset = function (name, az) {
-    az = az == null ? -.9 : az; const el = { day: .78, golden: .07, night: -.5, rain: .7, dawn: .03 }[name] ?? .78;
+    az = az == null ? -.9 : az; const E = { day: .78, golden: .07, night: -.5, rain: .7, dawn: .03 }; const el = E[name] != null ? E[name] : .78;
     const s = new THREE.Vector3(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el));
     return { sunDir: s, rain: name === 'rain' ? 1 : 0 };
   };
@@ -642,7 +709,14 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
   function heartTex() { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); g.fillStyle = '#ff5f8f'; g.beginPath(); g.moveTo(32, 54); g.bezierCurveTo(4, 34, 10, 8, 32, 22); g.bezierCurveTo(54, 8, 60, 34, 32, 54); g.fill(); g.fillStyle = 'rgba(255,255,255,.6)'; g.beginPath(); g.arc(22, 24, 5, 0, 7); g.fill(); return new THREE.CanvasTexture(c); }
   function leafTex() { const c = document.createElement('canvas'); c.width = c.height = 32; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.beginPath(); g.ellipse(16, 16, 6, 13, .6, 0, 7); g.fill(); return new THREE.CanvasTexture(c); }
   L.GLOW = glowTex(); L.HEART = heartTex(); L.LEAF = leafTex();
-  L.glowSprite = function (color, size, op) { const m = new THREE.SpriteMaterial({ map: L.GLOW, color, transparent: true, opacity: op == null ? 1 : op, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }); const s = new THREE.Sprite(m); s.scale.set(size, size, 1); return s; };
+  // Transparent draw order (renderOrder). Clouds write no depth, so whatever must sit BEHIND them draws first and writes
+  // depth (water, waterfall cores); things drawn after them (particles, sprites) fade out inside/behind the Névoa.
+  L.RO = { sky: -10, stars: -9, ocean: 1, water: 2, falls: 3, mist: 4, cumulus: 5, sea: 6, low: 7, particles: 8, sprites: 8, rain: 9, labels: 10 };
+  // Sprites / points / particles: fade with the transmittance through the Névoa instead of the colour fog (additive
+  // glows would turn white). Works on SpriteMaterial and PointsMaterial (built-in chunks); one program per type.
+  const fadeHook = function (sh) { sh.fragmentShader = sh.fragmentShader.replace('#include <fog_fragment>', '#ifdef USE_FOG\n { float fdl = length(vFogW); gl_FragColor.a *= v5MistT(hzP.xyz, vFogW / max(fdl, 1e-3), fdl); }\n#endif'); };
+  L.mistFade = function (mat) { mat.fog = true; mat.onBeforeCompile = fadeHook; mat.customProgramCacheKey = () => 'v5fade'; mat.needsUpdate = true; return mat; };
+  L.glowSprite = function (color, size, op) { const m = L.mistFade(new THREE.SpriteMaterial({ map: L.GLOW, color, transparent: true, opacity: op == null ? 1 : op, blending: THREE.AdditiveBlending, depthWrite: false })); const s = new THREE.Sprite(m); s.scale.set(size, size, 1); s.renderOrder = L.RO.sprites; return s; };
 
   // CPU particle pool: structure-of-arrays, swap-remove, no allocation per frame; v4 API ({mat, list, emit, update}).
   L.makeParticles = function (max, map, additive) {
@@ -650,10 +724,22 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
     const aP = new THREE.BufferAttribute(P, 3), aC = new THREE.BufferAttribute(Col, 4), aS = new THREE.BufferAttribute(Sz, 1), aR = new THREE.BufferAttribute(Rot, 1);
     for (const a of [aP, aC, aS, aR]) a.setUsage(THREE.DynamicDrawUsage);
     g.setAttribute('position', aP); g.setAttribute('aColor', aC); g.setAttribute('aSize', aS); g.setAttribute('aRot', aR); g.setDrawRange(0, 0);
-    const mat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending, uniforms: { uTex: { value: map }, uScale: { value: 400 } },
-      vertexShader: `attribute vec4 aColor;attribute float aSize,aRot;uniform float uScale;varying vec4 vC;varying float vR;void main(){vC=aColor;vR=aRot;vec4 mv=modelViewMatrix*vec4(position,1.);gl_PointSize=aSize*uScale/-mv.z;gl_Position=projectionMatrix*mv;}`,
-      fragmentShader: `uniform sampler2D uTex;varying vec4 vC;varying float vR;void main(){vec2 p=gl_PointCoord-.5;float c=cos(vR),s=sin(vR);p=vec2(c*p.x-s*p.y,s*p.x+c*p.y)+.5;vec4 t=texture2D(uTex,p);gl_FragColor=t*vC;if(gl_FragColor.a<.01)discard;}` });
-    const pts = new THREE.Points(g, mat); pts.frustumCulled = false; pts.renderOrder = 5; scene.add(pts);
+    const mat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, fog: true, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTex: { value: map }, uScale: { value: 400 } }]),
+      vertexShader: `attribute vec4 aColor;attribute float aSize,aRot;uniform float uScale;varying vec4 vC;varying float vR;
+#include <fog_pars_vertex>
+void main(){vC=aColor;vR=aRot;vec4 mvPosition=modelViewMatrix*vec4(position,1.);gl_PointSize=aSize*uScale/-mvPosition.z;gl_Position=projectionMatrix*mvPosition;
+#include <fog_vertex>
+}`,
+      fragmentShader: `uniform sampler2D uTex;varying vec4 vC;varying float vR;
+#include <fog_pars_fragment>
+void main(){vec2 p=gl_PointCoord-.5;float c=cos(vR),s=sin(vR);p=vec2(c*p.x-s*p.y,s*p.x+c*p.y)+.5;vec4 t=texture2D(uTex,p);gl_FragColor=t*vC;
+#ifdef USE_FOG
+{ float fdl = length(vFogW); gl_FragColor.a *= v5MistT(hzP.xyz, vFogW / max(fdl, 1e-3), fdl); }
+#endif
+if(gl_FragColor.a<.01)discard;}` });
+    mat.uniforms.uTex.value = map;   // UniformsUtils.merge clones values: keep the shared texture
+    const pts = new THREE.Points(g, mat); pts.frustumCulled = false; pts.renderOrder = L.RO.particles; scene.add(pts);
     const F = 18, S = new Float32Array(max * F); // x y z vx vy vz g life age s0 s1 r g b a drag rot rv
     let n = 0; const lst = { length: 0 };
     return {
@@ -684,7 +770,7 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
   L.textSprite = function (txt, size, color) {
     const c = document.createElement('canvas'); c.width = 256; c.height = 64; const g = c.getContext('2d'); g.font = '600 32px Fredoka, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineWidth = 7; g.strokeStyle = 'rgba(10,12,30,.75)'; g.strokeText(txt, 128, 32); g.fillStyle = color || '#fff7e6'; g.fillText(txt, 128, 32);
     const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding;
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false, fog: false })); s.scale.set(size * 4, size, 1); s.renderOrder = 6; return s;
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false, fog: false })); s.scale.set(size * 4, size, 1); s.renderOrder = L.RO.labels; return s;
   };
 
   L.render = function () {

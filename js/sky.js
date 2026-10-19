@@ -14,16 +14,19 @@
   const skyU = L.skyU = {
     top: { value: C(0x4b9fe6) }, mid: { value: C(0x5aa8ea) }, hor: { value: C(0x9cc6ec) }, low: { value: C(0xdfe6ee) },
     sunDir: { value: new THREE.Vector3(0, 1, 0) }, moonDir: { value: new THREE.Vector3(0, -1, 0) }, sunCol: { value: C(0xfff1d8) },
-    night: { value: 0 }, dusk: { value: 0 }, rain: { value: 0 }, uTime: L.uTime, tClouds: { value: null }, tNoise: { value: L.noiseTex },
+    night: { value: 0 }, dusk: { value: 0 }, rain: { value: 0 }, moonPh: { value: .5 }, uTime: L.uTime, tClouds: { value: null }, tNoise: { value: L.noiseTex },
     cloudCol: { value: C(0xf4f6f8) }, cloudShade: { value: C(0xa9bbd0) },
   };
   const DOME_R = Q.far * .9;
   L.makeSky = function () {
     if (L.sky) return;
+    const H = L.hazeUniforms(); for (const k of ['hzM', 'hzN', 'hzP', 'hzQ']) skyU[k] = H[k];
     const sky = new THREE.Mesh(new THREE.SphereGeometry(DOME_R, 48, 24), new THREE.ShaderMaterial({
       side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false, uniforms: skyU,
       vertexShader: `varying vec3 vD; void main(){ vD = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.); gl_Position = p.xyww; }`,
-      fragmentShader: `uniform vec3 top, mid, hor, low, sunDir, moonDir, sunCol, cloudCol, cloudShade; uniform float night, dusk, rain, uTime; uniform sampler2D tNoise; varying vec3 vD;
+      fragmentShader: `uniform vec3 top, mid, hor, low, sunDir, moonDir, sunCol, cloudCol, cloudShade; uniform float night, dusk, rain, moonPh, uTime; uniform sampler2D tNoise; varying vec3 vD;
+      uniform vec4 hzM, hzN, hzP, hzQ;
+      ${L.MIST_GLSL}
       void main(){
         vec3 d = normalize(vD); float y = d.y;
         // stylized gradient: low band (pale, near the cloud-sea tops) -> horizon -> mid -> zenith
@@ -40,14 +43,23 @@
         // high thin streaks (cirrus), very subtle, they give the sky a painted feel
         if (y > .03) { vec2 p = d.xz / (y + .2); float n = texture2D(tNoise, p * .07 + vec2(uTime * .0008, 0.)).r * .6 + texture2D(tNoise, vec2(p.x * .05, p.y * .22) + .3).g * .4;
           float ci = smoothstep(.55, .85, n) * smoothstep(.03, .35, y) * .28 * (1. - rain); c = mix(c, mix(cloudShade, cloudCol, .7 + .3 * s), ci); }
-        // moon
+        // moon with its phase (moonPh 0 new .. .5 full .. 1 new): a lit sphere cap, the dark side faintly visible
         vec3 md = normalize(moonDir); float m = max(dot(d, md), 0.);
-        c += vec3(.9, .93, 1.) * (smoothstep(.99955, .9997, m) * 1.4 + pow(m, 60.) * .12) * night;
+        if (m > .999) {
+          vec3 mr = normalize(cross(md, vec3(0., 1., 0.)) + vec3(1e-4, 0., 0.)), mu = cross(mr, md);
+          vec2 mq = vec2(dot(d, mr), dot(d, mu)) / .0285; float q2 = dot(mq, mq);
+          float ph = moonPh * 6.2832; vec3 mn = vec3(mq, sqrt(max(1. - q2, 0.)));
+          float lit = smoothstep(-.06, .06, dot(mn, vec3(sin(ph), 0., -cos(ph))));
+          c += vec3(.9, .93, 1.) * (1. - smoothstep(.82, 1., q2)) * (.035 + 1.36 * lit) * night;
+        }
+        c += vec3(.9, .93, 1.) * pow(m, 60.) * .12 * (.25 + .75 * (.5 - .5 * cos(moonPh * 6.2832))) * night;
+        // inside the Névoa the sky is the mist (only from inside: seen from outside the puffs draw its shape)
+        float mi = v5MistIn(); if (mi > 0.) c = mix(c, hzN.rgb, (1. - v5MistT(hzP.xyz, d, 30000.)) * mi);
         gl_FragColor = vec4(c, 1.);
         #include <encodings_fragment>
       }`
     }));
-    sky.renderOrder = -10; sky.frustumCulled = false; L.scene.add(sky); L.sky = sky;
+    sky.renderOrder = L.RO.sky; sky.frustumCulled = false; L.scene.add(sky); L.sky = sky;
     // stars
     const n = 1600, p = new Float32Array(n * 3), sz = new Float32Array(n); const r = rnd(5);
     const R = DOME_R * .95;
@@ -60,7 +72,7 @@
 #include <encodings_fragment>
 }`
     }));
-    stars.frustumCulled = false; stars.renderOrder = -9; L.scene.add(stars); L.stars = stars;
+    stars.frustumCulled = false; stars.renderOrder = L.RO.stars; L.scene.add(stars); L.stars = stars;
     stars.material.uniforms.uPx.value = L.renderer.getPixelRatio();
   };
 
@@ -103,8 +115,12 @@
   const cloudU = {
     tPuff: { value: null }, uSunV: { value: new THREE.Vector3() }, uUpV: { value: new THREE.Vector3(0, 1, 0) }, uSunW: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color(1, 1, 1) },
     uLit: { value: C(0xf4f6f8) }, uBody: { value: C(0xd9dde2) }, uShade: { value: C(0xb6c3d3) }, uDeep: { value: C(0x9cb0c9) }, uTime: L.uTime,
-    uDrift: { value: new THREE.Vector2(1.2, .5) }, uWrap: { value: 24000 }, uNight: { value: 0 },
+    uDrift: { value: new THREE.Vector2(1.2, .5) }, uWrap: { value: 24000 }, uNight: { value: 0 }, uSeaDrift: { value: new THREE.Vector2() },
   };
+  // the cloud sea (far layer AND its islands) sways slowly back and forth instead of drifting away, so the islands keep
+  // matching the coverage field they were placed on and never wander over land; the same offset in JS and GLSL
+  const seaDrift = cloudU.uSeaDrift.value;
+  const seaDriftAt = (t, out) => out.set(Math.sin(t * .0045) * 60, Math.sin(t * .0031 + 1) * 35);
   L.cloudU = cloudU;
   // aP: half size (m), horizontal stretch, sun occlusion, seed | aQ: cluster centre xyz, flag | aB: base y, top y, base softness (m),
   // sprite tilt range | aL: offset from the puff to its lobe centre xyz, lobe radius | aS: style (0 cumulus, 1 flat sea
@@ -114,7 +130,7 @@
   // Sea islands get the painted two-tone (lit top band over blue-grey sides).
   const PUFF_VS = `
     attribute vec2 aCorner; attribute vec4 aP; attribute vec4 aQ; attribute vec4 aB; attribute vec4 aL; attribute vec2 aS; attribute float aFade;
-    uniform vec2 uDrift; uniform float uWrap, uTime;
+    uniform vec2 uDrift, uSeaDrift; uniform float uWrap, uTime;
     varying vec2 vUv; varying vec3 vCn; varying vec4 vP; varying float vFade; varying vec2 vRot; varying vec3 vW; varying vec4 vB;
     #include <fog_pars_vertex>
     void main(){
@@ -126,7 +142,7 @@
       } else if (fl > 1.5 && fl < 2.5) {
         float a = uTime * (.004 + aP.w * .003) * (fract(aP.w * 7.) > .5 ? 1. : -1.); vec2 r = p.xz - cc.xz; float ca = cos(a), sa = sin(a);
         p.xz = cc.xz + vec2(ca * r.x - sa * r.y, sa * r.x + ca * r.y); p.y += sin(uTime * .05 + aP.w * 40.) * aP.x * .08;
-      } else if (fl > 2.5) { float b = sin(uTime * .12 + aP.w * 30.) * aP.x * .03; p.y += b; vec2 d = uDrift * uTime * .15; p.xz += d; cc.xz += d; }
+      } else if (fl > 2.5) { float b = sin(uTime * .12 + aP.w * 30.) * aP.x * .03; p.y += b; p.xz += uSeaDrift; cc.xz += uSeaDrift; }
       float s = aP.x; float rot = (fract(aP.w * 13.) - .5) * aB.w; float cr = cos(rot), sr = sin(rot);
       vec2 cn = vec2(cr * aCorner.x - sr * aCorner.y, sr * aCorner.x + cr * aCorner.y);
       float asp = max(aP.y, 1.);  // horizontal stretch (flat sea islands)
@@ -181,9 +197,14 @@
       vec3 col = cloudRamp(l);
       vec3 V = normalize(vW - cameraPosition);
       float fwd = pow(max(dot(V, uSunW), 0.), 6.) * (1. - uNight);
-      col += uSunCol * fwd * (1. - tx.b) * smoothstep(.55, 1.05, dl) * 1.1;          // silver lining on the lobe rims
+      col += uSunCol * fwd * (1. - tx.b) * smoothstep(.55, 1.05, dl) * .8;           // silver lining on the lobe rims
+      col = min(col, vec3(1.)) * .94;                // keep the lit tops under the bloom threshold: they model instead of clipping
       gl_FragColor = vec4(col, a);
       #ifdef USE_FOG
+        // any cloud that is not the Névoa itself fades out inside / behind the Névoa (the Névoa field draws first)
+        { vec3 mv = vW - hzP.xyz; float ml = length(mv), mt = v5MistT(hzP.xyz, mv / max(ml, 1e-3), ml);
+          if (style < 1.5 || style > 2.5) gl_FragColor.a *= mt;
+          else gl_FragColor.rgb = mix(gl_FragColor.rgb, hzN.rgb, (1. - mt) * v5MistIn()); }   // seen from inside, the Névoa's own puffs melt into its colour
         float fogDist = length(vFogW);
         float hH = hzD.w; float fe = vFogW.y / hH; float fInt = abs(fe) > 1e-3 ? (1. - exp(-fe)) / fe : 1. - fe * .5;
         // clouds keep their whites: a third of the ground haze, faded into the horizon only at the far ring
@@ -195,7 +216,7 @@
     }`;
   let puffTex = null;
   function PuffField(cap, renderOrder, name) {
-    this.cap = cap; this.n = 0; this.clusters = []; this.dirty = true; this.sortT = 0;
+    this.cap = cap; this.n = 0; this.req = 0; this.clusters = []; this.dirty = true; this.sortT = 0; this.rx = 1e9; this.rz = 1e9; this.lo = 1e9; this.hi = -1; this.flo = 1e9; this.fhi = -1;
     const g = new THREE.BufferGeometry(); const V = cap * 4;
     this.pos = new Float32Array(V * 3); this.ap = new Float32Array(V * 4); this.aq = new Float32Array(V * 4); this.ab = new Float32Array(V * 4); this.al = new Float32Array(V * 4); this.as = new Float32Array(V * 2); this.fade = new Float32Array(V);
     const corner = new Float32Array(V * 2); for (let i = 0; i < cap; i++) { corner.set([-1, -1, 1, -1, 1, 1, -1, 1], i * 8); }
@@ -203,21 +224,38 @@
     this.aPos = new THREE.BufferAttribute(this.pos, 3); this.aPP = new THREE.BufferAttribute(this.ap, 4); this.aQQ = new THREE.BufferAttribute(this.aq, 4); this.aBB = new THREE.BufferAttribute(this.ab, 4); this.aLL = new THREE.BufferAttribute(this.al, 4); this.aSS = new THREE.BufferAttribute(this.as, 2); this.aF = new THREE.BufferAttribute(this.fade, 1);
     g.setAttribute('position', this.aPos); g.setAttribute('aCorner', new THREE.BufferAttribute(corner, 2)); g.setAttribute('aP', this.aPP); g.setAttribute('aQ', this.aQQ); g.setAttribute('aB', this.aBB); g.setAttribute('aL', this.aLL); g.setAttribute('aS', this.aSS); g.setAttribute('aFade', this.aF);
     this.aIdx = new THREE.BufferAttribute(this.idx, 1); this.aIdx.setUsage(THREE.DynamicDrawUsage); g.setIndex(this.aIdx); g.setDrawRange(0, 0);
-    this.geo = g; this.keys = new Float64Array(cap);
+    this.geo = g; this.skeys = new Float64Array(cap); this.ord = [];
     const mat = new THREE.ShaderMaterial({ uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]), vertexShader: PUFF_VS, fragmentShader: PUFF_FS, transparent: true, depthWrite: false, fog: true });
     for (const k in cloudU) mat.uniforms[k] = cloudU[k];
     this.mesh = new THREE.Mesh(g, mat); this.mesh.frustumCulled = false; this.mesh.renderOrder = renderOrder; this.mesh.name = name;
     L.scene.add(this.mesh);
   }
   // cluster: {puffs:[[x,y,z,size,stretch,occ,seed,fade,lobeX,lobeY,lobeZ]...], cx,cy,cz, flag, style, base, top, soft, tilt, fade, lobes}
-  PuffField.prototype.add = function (cl) {   // placed clusters go before the wrapping filler, so a full field drops filler first
-    cl.fade = cl.fade == null ? 1 : cl.fade; if (cl.flag === 1) this.clusters.push(cl); else { let i = 0; while (i < this.clusters.length && this.clusters[i].flag !== 1) i++; this.clusters.splice(i, 0, cl); }
-    this.dirty = true; return cl;
+  PuffField.prototype.add = function (cl) {
+    cl.fade = cl.fade == null ? 1 : cl.fade; cl._o = -1; cl._n = 0; this.clusters.push(cl); this.dirty = true; return cl;
   };
-  PuffField.prototype.remove = function (cl) { const i = this.clusters.indexOf(cl); if (i >= 0) { this.clusters.splice(i, 1); this.dirty = true; } };
-  PuffField.prototype.rebuild = function () {
+  PuffField.prototype.remove = function (cl) { const i = this.clusters.indexOf(cl); if (i >= 0) { this.clusters.splice(i, 1); cl._o = -1; this.dirty = true; } };
+  // distance used to rank clusters when the field is over its cap (sky clusters measured on the drifting torus)
+  function clusterDist(cl, cx, cz) {
+    let px = cl.cx, pz = cl.cz;
+    if (cl.flag === 1) { const W = cloudU.uWrap.value, t = L.uTime.value; px += cloudU.uDrift.value.x * t; pz += cloudU.uDrift.value.y * t; px = cx + (((px - cx + W * .5) % W + W) % W - W * .5); pz = cz + (((pz - cz + W * .5) % W + W) % W - W * .5); }
+    else if (cl.flag === 3) { px += seaDrift.x; pz += seaDrift.y; }
+    return Math.max(0, Math.hypot(px - cx, pz - cz) - (cl.R || (cl.top - cl.base)));
+  }
+  const byD = (a, b) => a._d - b._d;
+  // Fill the buffers. Under the cap, clusters go in insertion order; over it, nearest first so the far tail is what
+  // gets dropped (the field is re-ranked when the camera has moved far enough, see tick).
+  PuffField.prototype.rebuild = function (cam) {
+    let req = 0; for (const cl of this.clusters) req += cl.puffs.length; this.req = req;
+    let list = this.clusters;
+    if (req > this.cap) {
+      const cx = cam ? cam.position.x : 0, cz = cam ? cam.position.z : 0; this.rx = cx; this.rz = cz;
+      const o = this.ord; o.length = 0; for (const cl of this.clusters) { cl._d = clusterDist(cl, cx, cz); o.push(cl); } o.sort(byD); list = o;
+      if (!this.warned) { this.warned = true; console.warn('[look] cloud field "' + this.mesh.name + '" over its cap: ' + req + ' puffs requested, ' + this.cap + ' drawn (nearest first)'); }
+    }
     let n = 0;
-    for (const cl of this.clusters) {
+    for (const cl of list) {
+      cl._o = n < this.cap ? n : -1; cl._n = 0;
       for (const p of cl.puffs) {
         if (n >= this.cap) break;
         for (let k = 0; k < 4; k++) {
@@ -232,19 +270,38 @@
           this.as[v * 2] = cl.style || 0;
           this.fade[v] = cl.fade * (p[7] == null ? 1 : p[7]);
         }
-        n++;
+        n++; cl._n++;
       }
     }
-    this.n = n; this.aPos.needsUpdate = this.aPP.needsUpdate = this.aQQ.needsUpdate = this.aBB.needsUpdate = this.aLL.needsUpdate = this.aSS.needsUpdate = this.aF.needsUpdate = true; this.dirty = false; this.sortT = 0;
+    this.n = n;
+    for (const a of [this.aPos, this.aPP, this.aQQ, this.aBB, this.aLL, this.aSS, this.aF]) { a.updateRange.offset = 0; a.updateRange.count = -1; a.needsUpdate = true; }
+    this.dirty = false; this.sortT = 0; this.lo = this.flo = 1e9; this.hi = this.fhi = -1;
+  };
+  // partial updates: write one cluster's sun occlusion (aP.z) or fade into the buffers and widen the upload range
+  PuffField.prototype.writeOcc = function (cl) {
+    if (this.dirty || cl._o < 0) return;
+    for (let k = 0; k < cl._n; k++) { const p = cl.puffs[k], b = (cl._o + k) * 16 + 2; this.ap[b] = this.ap[b + 4] = this.ap[b + 8] = this.ap[b + 12] = p[5]; }
+    this.lo = Math.min(this.lo, cl._o); this.hi = Math.max(this.hi, cl._o + cl._n);
+  };
+  PuffField.prototype.writeFade = function (cl) {
+    if (this.dirty || cl._o < 0) return;
+    for (let k = 0; k < cl._n; k++) { const p = cl.puffs[k], f = cl.fade * (p[7] == null ? 1 : p[7]), b = (cl._o + k) * 4; this.fade[b] = this.fade[b + 1] = this.fade[b + 2] = this.fade[b + 3] = f; }
+    this.flo = Math.min(this.flo, cl._o); this.fhi = Math.max(this.fhi, cl._o + cl._n);
+  };
+  PuffField.prototype.flush = function () {
+    if (this.hi > this.lo) { const a = this.aPP; a.updateRange.offset = this.lo * 16; a.updateRange.count = (this.hi - this.lo) * 16; a.needsUpdate = true; }
+    if (this.fhi > this.flo) { const a = this.aF; a.updateRange.offset = this.flo * 4; a.updateRange.count = (this.fhi - this.flo) * 4; a.needsUpdate = true; }
+    this.lo = this.flo = 1e9; this.hi = this.fhi = -1;
   };
   // back-to-front sort by view depth (replicates the shader's drift/wrap so the order matches)
   PuffField.prototype.sort = function (cam, t) {
     const cx = cam.position.x, cy = cam.position.y, cz = cam.position.z; const e = cam.matrixWorld.elements; const fx = -e[8], fy = -e[9], fz = -e[10];
     const W = cloudU.uWrap.value, dx0 = cloudU.uDrift.value.x * t, dz0 = cloudU.uDrift.value.y * t;
-    const keys = this.keys; const n = this.n;
+    const keys = this.skeys; const n = this.n;
     for (let i = 0; i < n; i++) {
       const v = i * 4; let px = this.pos[v * 3], py = this.pos[v * 3 + 1], pz = this.pos[v * 3 + 2]; const fl = this.aq[v * 4 + 3];
       if (fl === 1) { const ccx = this.aq[v * 4] + dx0, ccz = this.aq[v * 4 + 2] + dz0; px += dx0; pz += dz0; const rx = ((ccx - cx + W * .5) % W + W) % W - W * .5, rz = ((ccz - cz + W * .5) % W + W) % W - W * .5; px += cx + rx - ccx; pz += cz + rz - ccz; }
+      else if (fl === 3) { px += seaDrift.x; pz += seaDrift.y; }
       const d = (px - cx) * fx + (py - cy) * fy + (pz - cz) * fz - this.ap[v * 4] * .3;
       keys[i] = Math.floor(clamp(1e5 - d, 0, 4e6) * 8) * 65536 + i; // larger depth first
     }
@@ -351,35 +408,48 @@
   }
 
   // ================================================================ cumulus (sky)
-  let FA = null, FB = null; // FA: sky cumulus (drawn first), FB: low clouds (sea clumps, mist, lab clusters)
+  // FA: sky cumulus, FB: low clouds (sea islands, fall spray, lab clusters), FM: the Névoa. Created on first use, so
+  // L.clouds / L.addFallMist / L.mistVisual work before L.skyInit (the fields are shared afterwards).
+  let FA = null, FB = null, FM = null;
+  const FIELDS = [];
+  function ensureFields() {
+    if (FA) return;
+    puffTex = puffTex || makePuffAtlas(); cloudU.tPuff.value = puffTex;
+    FA = new PuffField(Math.round(5200 * Math.max(.45, Q.cloudPuffs)), L.RO.cumulus, 'cumulus');
+    FB = new PuffField(Q.lowCap || Math.round(5200 * Math.max(.5, Q.cloudPuffs)), L.RO.low, 'lowclouds');
+    FM = new PuffField(Math.ceil(520 * Q.mistPuffs) + 32, L.RO.mist, 'mist');
+    FIELDS.push(FA, FB, FM);
+    L.cloudGroup = FA.mesh;
+  }
   L.clouds = {
     // add one cumulus with its flat base at world (x, y, z); w = width, h = height; opts.wrap: follow the camera torus, opts.low: low field
     addCumulus(x, y, z, w, h, seed, opts) {
+      ensureFields();
       const r = rnd(seed || 1); const cl = placeCluster(cumulusPuffs(r, w, h, 0, opts && opts.nMul), x, y, z, w, h, opts && opts.wrap ? 1 : 0, .6, 0);
       shadeCluster(cl, L.TOD.lightDir.x, L.TOD.lightDir.y, L.TOD.lightDir.z);
       return (opts && opts.low ? FB : FA).add(cl);
     },
     // low, wide cloud (cloud sea clump, mist bank, waterfall spray): base at y; style 1 = flat island (default), 3 = thin mist
     addClump(x, y, z, w, h, seed, flag, nMul, style) {
+      ensureFields();
       const r = rnd(seed || 1); const cl = placeCluster(islandPuffs(r, w, h, nMul || 1), x, y, z, w, h, flag == null ? 3 : flag, .5, style || 1);
       shadeCluster(cl, L.TOD.lightDir.x, L.TOD.lightDir.y, L.TOD.lightDir.z); return FB.add(cl);
     },
-    remove(cl) { (FA.clusters.includes(cl) ? FA : FB).remove(cl); },
-    get fieldSky() { return FA; }, get fieldLow() { return FB; },
+    remove(cl) { if (!FA) return; for (const F of FIELDS) if (F.clusters.includes(cl)) { F.remove(cl); return; } },
+    get fieldSky() { ensureFields(); return FA; }, get fieldLow() { ensureFields(); return FB; }, get fieldMist() { ensureFields(); return FM; },
   };
   // a random field of cumulus wrapping around the camera (24 km torus), altitude band [y0, y1]
+  let cumulusBuilt = false;
   L.buildClouds = function (opts) {
-    if (FA) return;
+    ensureFields();
+    if (cumulusBuilt) return; cumulusBuilt = true;
     opts = opts || {};
-    puffTex = puffTex || makePuffAtlas(); cloudU.tPuff.value = puffTex;
-    FA = new PuffField(Math.round(5200 * Math.max(.45, Q.cloudPuffs)), 1, 'cumulus');
-    FB = new PuffField(Math.round(5200 * Math.max(.5, Q.cloudPuffs)), 4, 'lowclouds');
     const r = rnd(opts.seed || 77); const n = Math.round((opts.count || 30) * Q.cloudPuffs); const W = cloudU.uWrap.value;
     for (let i = 0; i < n; i++) {
       const a = r() * TAU, d = 1800 + Math.sqrt(r()) * (W * .5 - 1800); const w = 500 + r() * 1000;
       L.clouds.addCumulus(Math.cos(a) * d, (opts.y0 || 950) + r() * ((opts.y1 || 1500) - (opts.y0 || 950)), Math.sin(a) * d, w, w * (.4 + r() * .4), 1000 + i, { wrap: true, nMul: .7 });
     }
-    L.cloudMats = []; L.cloudGroup = FA.mesh;
+    L.cloudMats = [];
   };
 
   // ================================================================ cloud sea: far relief layer (puffy domes) + near islands
@@ -389,7 +459,7 @@
   const seaU = {
     uTime: L.uTime, tNoise: { value: L.noiseTex }, tDens: { value: null }, uDensXf: { value: new THREE.Vector4(0, 0, 1e-9, 0) }, // x0, z0, 1/size, enabled
     uSunW: cloudU.uSunW, uLit: cloudU.uLit, uBody: cloudU.uBody, uShade: cloudU.uShade, uDeep: cloudU.uDeep, uSunCol: cloudU.uSunCol, uNight: cloudU.uNight,
-    uCov: { value: .5 }, uSeaY: { value: L.CLOUD_Y }, uSlab: { value: new THREE.Vector2(50, 42) }, uFar: { value: new THREE.Vector2(1100, 2600) },   // depth below / height above CLOUD_Y
+    uSeaDrift: cloudU.uSeaDrift, uCov: { value: .5 }, uSeaY: { value: L.CLOUD_Y }, uSlab: { value: new THREE.Vector2(50, 42) }, uFar: { value: new THREE.Vector2(1100, 2600) },   // depth below / height above CLOUD_Y
   };
   L.seaU = seaU;
   // tileable dome heightfield: R = big cumulus heads, G = small cauliflower bumps (union of sphere caps)
@@ -415,26 +485,28 @@
   const SEA_FS = `
     #define STEPS ${SEA_STEPS}
     uniform mat4 projectionMatrix;
-    uniform sampler2D tNoise, tDens, tDome; uniform vec4 uDensXf; uniform vec3 uSunW, uLit, uBody, uShade, uDeep, uSunCol; uniform float uTime, uCov, uSeaY, uNight; uniform vec2 uSlab, uFar;
+    uniform sampler2D tNoise, tDens, tDome; uniform vec4 uDensXf; uniform vec3 uSunW, uLit, uBody, uShade, uDeep, uSunCol; uniform float uTime, uCov, uSeaY, uNight; uniform vec2 uSlab, uFar, uSeaDrift;
     varying vec3 vW;
     #include <fog_pars_fragment>
     vec3 cloudRamp(float l) {   // deep blue-grey -> shade -> body -> lit (GDD cloud palette)
       vec3 c = mix(uDeep, uShade, smoothstep(.0, .32, l)); c = mix(c, uBody, smoothstep(.28, .6, l)); return mix(c, uLit, smoothstep(.56, .9, l));
     }
-    vec2 gDrift;
-    // fraction (0..1) of the slab filled by cloud at p; det = 0..1 detail level
+    vec2 gChurn;
+    // fraction (0..1) of the slab filled by cloud at p; det = 0..1 detail level (0 far: softer edges, no small bumps,
+    // which keeps the far horizon from breaking into shimmering bands)
     float seaH(vec2 p, float det) {
       float d = uDensXf.w > 0. ? texture2D(tDens, (p - uDensXf.xy) * uDensXf.z).r : .5;
-      vec4 n = texture2D(tNoise, (p + gDrift) / 3000.);
+      vec4 n = texture2D(tNoise, (p - uSeaDrift) / 3000.);              // coverage moves with the islands (CPU twin: coverageAt)
       float c = d * 1.3 - .65 + (n.r - .5) * .8 + (n.a - .5) * .45 + (uCov - .5);
-      float cov = smoothstep(-.02, .12, c);                               // cloud islands with steep, soft sides
-      float m = texture2D(tDome, (p - gDrift * .6) / 1500.).r;          // lumpy tops: 100-250 m heads
+      float fe = 1. - det;
+      float cov = smoothstep(-.02 - fe * .1, .12 + fe * .16, c);         // cloud islands with steep, soft sides
+      float m = texture2D(tDome, (p - uSeaDrift + gChurn) / 1500.).r;   // lumpy tops: 100-250 m heads, slowly churning
       float dome = cov * (.3 + .45 * m + .25 * smoothstep(.1, .5, c));
-      if (det > 0.) { float k = texture2D(tDome, (p + gDrift * .4) / 520. + .37).g; dome += (k - .55) * .14 * det * smoothstep(.0, .2, dome); }
+      if (det > 0.) { float k = texture2D(tDome, (p - uSeaDrift - gChurn * .7) / 520. + .37).g; dome += (k - .55) * .14 * det * smoothstep(.0, .2, dome); }
       return dome;
     }
     void main(){
-      gDrift = vec2(uTime * 1.1, uTime * .45);
+      gChurn = vec2(uTime * .35, uTime * .14);
       float base = uSeaY - uSlab.x, T = uSlab.x + uSlab.y;
       vec3 ro = cameraPosition, rd = normalize(vW - ro);
       float dist0 = length(vW - ro);
@@ -470,6 +542,7 @@
       col += uSunCol * pow(max(dot(V, uSunW), 0.), 8.) * (1. - smoothstep(.0, .3, hf)) * .8 * (1. - uNight);
       float a = hit * smoothstep(.0, .12, hf + hgt * .3) * smoothstep(uFar.x, uFar.y, length(hp - ro));
       if (above) a *= smoothstep(.006, .03, -rd.y);           // edge-on from just above the slab it would be a hard line: leave the horizon to the islands
+      col = min(col, vec3(1.)) * .95;
       gl_FragColor = vec4(col, a);
       // depth of the relief hit, not of the slab plane: land between the plane and a far hit stays in front
       { vec4 cp = projectionMatrix * viewMatrix * vec4(hp, 1.); gl_FragDepthEXT = clamp(cp.z / cp.w * .5 + .5, 0., 1.); }
@@ -480,6 +553,7 @@
         vec3 fHor = mix(fogColor, hzC.rgb, pow(max(dot(fw / max(fogDist, 1.), hzD.xyz), 0.), hzC.w));
         gl_FragColor.rgb = mix(gl_FragColor.rgb, mix(hzA.rgb, hzB.rgb, .9), (1. - exp(-tA)) * .25);
         gl_FragColor.rgb = mix(gl_FragColor.rgb, fHor, max(1. - exp(-tA * hzB.w), smoothstep(hzE.z, hzE.w, fogDist)));
+        gl_FragColor.a *= v5MistT(ro, fw / max(fogDist, 1e-3), fogDist);
       #endif
       #include <encodings_fragment>
     }`;
@@ -494,7 +568,7 @@
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
     const mat = new THREE.ShaderMaterial({ uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]), vertexShader: SEA_VS, fragmentShader: SEA_FS, transparent: true, depthWrite: false, fog: true, side: THREE.DoubleSide, extensions: { fragDepth: true } });
     for (const k in seaU) mat.uniforms[k] = seaU[k];
-    seaMesh = new THREE.Mesh(g, mat); seaMesh.frustumCulled = false; seaMesh.renderOrder = 3; seaMesh.name = 'cloudsea'; L.scene.add(seaMesh);
+    seaMesh = new THREE.Mesh(g, mat); seaMesh.frustumCulled = false; seaMesh.renderOrder = L.RO.sea; seaMesh.name = 'cloudsea'; L.scene.add(seaMesh);
   }
   // density map: 0..1 texture over a square; 1 = thick cloud (cliff bases), 0 = clear (open ocean holes)
   const seaClumps = new Map(); let densFn = null, clumpR = 3200;
@@ -536,11 +610,13 @@
   // Cloud-sea islands: flattened puff clusters ("pancakes") in 500 m tiles around the camera, placed where the same
   // coverage field as the far raymarched layer says there is cloud. Deterministic per tile; fewer, bigger islands far.
   const CT = 500; let lastCI = 1e9, lastCJ = 1e9;
-  function islandCov(x, z) {   // CPU twin of seaH()'s coverage term
-    const d = densFn ? densFn(x, z) : .5, u = x / 3000, v = z / 3000;
+  // CPU twin of seaH()'s coverage term. now = true: the field as drawn this frame (it sways with seaDrift); false: in the
+  // islands' own frame (an island placed at X is drawn at X + seaDrift, over the same coverage)
+  function islandCov(x, z, now) {
+    const d = densFn ? densFn(x, z) : .5, u = (now ? x - seaDrift.x : x) / 3000, v = (now ? z - seaDrift.y : z) / 3000;
     return d * 1.3 - .65 + (L.noise2(u, v, 0) - .5) * .8 + (L.noise2(u, v, 3) - .5) * .45 + (seaU.uCov.value - .5);
   }
-  L.cloudSea.coverageAt = islandCov;
+  L.cloudSea.coverageAt = (x, z) => islandCov(x, z, true);   // > 0 where the cloud sea has cloud
   function updateClumps(cam) {
     if (!densFn) return;
     const px = cam.position.x, pz = cam.position.z;
@@ -549,60 +625,78 @@
     const base0 = L.CLOUD_Y - seaU.uSlab.value.x * .55;
     for (let j = cj - R; j <= cj + R; j++) for (let i = ci - R; i <= ci + R; i++) {
       const cx = (i + .5) * CT, cz = (j + .5) * CT, D = Math.hypot(cx - px, cz - pz); if (D > clumpR + CT * .7) continue;
-      const lod = D < 1500 ? 0 : 1, key = i + ',' + j + ',' + lod; want.add(key); if (seaClumps.has(key)) continue;
+      const lod = D < 1500 ? 0 : 1, tk = i + ',' + j + ',' + lod; want.add(tk); if (seaClumps.has(tk)) continue;
       const list = []; const g = lod ? 2 : 4, cs = CT / g;
       for (let b = 0; b < g; b++) for (let a = 0; a < g; a++) {
         const k = b * g + a, x = i * CT + (a + .15 + h2(i, j, k * 5 + lod) * .7) * cs, z = j * CT + (b + .15 + h2(i, j, k * 5 + 1 + lod) * .7) * cs;
-        const c = islandCov(x, z); if (c < .0 || h2(i, j, k * 5 + 2) > sstep(.0, .14, c) * .9) continue;
+        const c = islandCov(x, z, false); if (c < .0 || h2(i, j, k * 5 + 2) > sstep(.0, .14, c) * .9) continue;
         let w = (lod ? 300 + h2(i, j, k + 50) * 260 : 120 + h2(i, j, k + 50) * 170) * (.75 + .5 * sstep(0, .3, c)); const hh = w * (.11 + h2(i, j, k + 60) * .08);
         const by = base0 + h2(i, j, k + 70) * 12;
         if (hfn && hfn(x, z) > by + hh * .4) continue;   // not inside land
         list.push(L.clouds.addClump(x, by, z, w, hh, i * 7919 + j * 104729 + k, 3, lod ? .22 : .38));
       }
-      seaClumps.set(key, list);
+      seaClumps.set(tk, list);
     }
     for (const [k, list] of seaClumps) if (!want.has(k)) { for (const cl of list) FB.remove(cl); seaClumps.delete(k); }
   }
 
   // ================================================================ the Névoa (mist) visual
+  // Heights are ABOVE THE LOCAL GROUND: the mass rises from the lowest ground around the disc (base) to base + height,
+  // and every puff starts on the ground under it. Call setDisc after the world heights (L.ground) are available.
   let mist = null;
   L.mistVisual = {
-    // a gigantic, slowly churning, permanent cloud mass from the ground up to `top`
+    // opts: {height = 900 (m above the ground at the centre), base (absolute y; default: lowest of L.ground at the centre
+    //        and on a ring at .9 r), top (absolute y, honoured only when >= base + 200), seed, ground (height fn, default L.ground)}
     setDisc(x, z, r, opts) {
-      opts = opts || {}; const top = opts.top || 900, base = opts.base != null ? opts.base : 0;
-      if (mist) { for (const cl of mist.cls) FB.remove(cl); }
+      opts = opts || {}; ensureFields();
+      const gh = opts.ground || L.ground;
+      const gAt = (px, pz) => { const h = gh ? +gh(px, pz) : NaN; return isFinite(h) ? h : null; };
+      let base = opts.base;
+      if (base == null || !isFinite(base)) {
+        base = gAt(x, z); for (let k = 0; k < 24; k++) { const a = k / 24 * TAU, h = gAt(x + Math.cos(a) * r * .9, z + Math.sin(a) * r * .9); if (h != null) base = base == null ? h : Math.min(base, h); }
+        if (base == null) base = 0;
+      }
+      const height = opts.height || 900, gc = gAt(x, z);
+      const top = opts.top != null && isFinite(opts.top) && opts.top >= base + 200 ? opts.top : Math.max(gc != null ? gc : base, base) + Math.max(height, 200);
+      if (mist) { for (const cl of mist.cls) FM.remove(cl); }
       mist = { x, z, r, top, base, amount: 0, path: null, cls: [] };
-      L.HZ.M[0] = x; L.HZ.M[1] = z; L.HZ.M[2] = r; L.HZ.M[3] = top;
-      const rr = rnd(opts.seed || 9); const nP = Math.round(520 * Q.mistPuffs);
+      L.HZ.M[0] = x; L.HZ.M[1] = z; L.HZ.M[2] = r; L.HZ.M[3] = top; L.HZ.Q[0] = base - 150;
+      const rr = rnd(opts.seed || 9); const nP = Math.round(520 * Q.mistPuffs), H = top - base;
       // several clusters around the ring so the churn reads as slow, separate motions
       const nC = 10; for (let c = 0; c < nC; c++) {
         const a0 = c / nC * TAU; const P = [];
-        for (let i = 0; i < nP / nC; i++) {
-          const a = a0 + (rr() - .5) * TAU / nC * 1.2; const u = rr();
-          const rad = r * (u < .62 ? (.82 + rr() * .3) : Math.sqrt(rr()) * .9); // most puffs on the outer wall, some inside/top
-          const hdome = top * (1 - Math.pow(rad / (r * 1.12), 2.6) * .45);
-          const y = base + Math.pow(rr(), .75) * (hdome - base);
-          const s = 160 + rr() * 220 + (y > top * .8 ? 60 : 0);
-          P.push([x + Math.cos(a) * rad, y, z + Math.sin(a) * rad, s, 0, 0, rr()]);
+        // most puffs on the outer wall, stratified in angle and height (no see-through holes), the rest inside / on top
+        const per = Math.round(nP / nC), nOut = Math.round(per * .62);
+        for (let i = 0; i < per; i++) {
+          const outer = i < nOut;
+          const a = outer ? a0 + ((i + rr()) / nOut - .5) * TAU / nC * 1.1 : a0 + (rr() - .5) * TAU / nC * 1.2;
+          const rad = r * (outer ? (.82 + rr() * .3) : Math.sqrt(rr()) * .9);
+          const px = x + Math.cos(a) * rad, pz = z + Math.sin(a) * rad;
+          const hdome = base + H * (1 - Math.pow(rad / (r * 1.12), 2.6) * .45);
+          const g0 = Math.min(gAt(px, pz) != null ? gAt(px, pz) : base, hdome - 120);
+          const hu = outer ? (i * .618034 + c * .37 + rr() * .18) % 1 : rr();
+          const y = g0 + Math.pow(hu, .75) * (hdome - g0);
+          const s = (160 + rr() * 220 + (y > base + H * .8 ? 60 : 0)) * clamp(Math.sqrt(r / 1250), .7, 1.2);   // the puff wall keeps its coverage on smaller or larger discs (the map has r 1250)
+          P.push([px, y, pz, s, 0, 0, rr()]);
         }
-        const cl = { puffs: P, cx: x, cy: base + top * .5, cz: z, flag: 2, style: 2, R: r * 1.1, base: base - 60, top, soft: 40, tilt: TAU };
+        const cl = { puffs: P, cx: x, cy: base + H * .5, cz: z, flag: 2, style: 2, R: r * 1.1, base: base - 160, top, soft: 40, tilt: TAU };
         shadeCluster(cl, L.TOD.lightDir.x, L.TOD.lightDir.y, L.TOD.lightDir.z);
-        mist.cls.push(FB.add(cl));
+        mist.cls.push(FM.add(cl));
       }
+      if (!lights) makeCorridorLights();
       this.open(0, null);
     },
-    // open a lit corridor: amount 0..1, pathPts [[x,z],...] from the edge to the centre
+    // open a lit corridor: amount 0..1, pathPts [[x,z],...] from the edge to the centre (fades only the puffs' alpha)
     open(amount, pathPts) {
-      if (!mist) return; mist.amount = clamp(amount || 0, 0, 1); if (pathPts) mist.path = pathPts;
+      if (!mist) return; mist.amount = clamp(amount || 0, 0, 1);
+      if (pathPts && pathPts !== mist.path) { mist.path = pathPts; fillCorridorLights(); }
       const W = 50 + mist.amount * 120;
-      for (const cl of mist.cls) for (const p of cl.puffs) {
+      for (const cl of mist.cls) { for (const p of cl.puffs) {
         let f = 1;
         if (mist.path && mist.amount > 0) { const d = distPath(p[0], p[2], mist.path); f = 1 - mist.amount * (1 - sstep(W * .6, W + p[3], d)); if (mist.amount >= 1) f *= .15; }
         p[7] = f;
-      }
-      FB.dirty = true;
-      if (!lights && mist.path && mist.amount > 0) makeCorridorLights();
-      if (lights) { lights.visible = mist.amount > 0; lights.material.opacity = mist.amount * .9; }
+      } FM.writeFade(cl); }
+      if (lights) { lights.visible = mist.amount > 0 && !!mist.path; lights.material.opacity = mist.amount * .9; }
     },
     get state() { return mist; },
   };
@@ -611,14 +705,18 @@
     for (let i = 0; i < P.length - 1; i++) { const ax = P[i][0], az = P[i][1], bx = P[i + 1][0], bz = P[i + 1][1]; const dx = bx - ax, dz = bz - az; const t = clamp(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1), 0, 1); best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t)); }
     return best;
   }
-  // golden motes along the corridor (one Points draw)
+  // golden motes along the corridor (one Points draw; the material exists from setDisc on, so it can be precompiled)
   let lights = null;
   function makeCorridorLights() {
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute([0, -1e4, 0], 3));
+    const m = L.mistFade(new THREE.PointsMaterial({ map: L.GLOW, size: 1.6, color: 0xffd98a, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+    lights = new THREE.Points(g, m); lights.renderOrder = L.RO.sprites; lights.frustumCulled = false; lights.visible = false; L.scene.add(lights);
+  }
+  function fillCorridorLights() {
+    if (!lights || !mist.path) return;
     const P = mist.path; const pts = []; const r = rnd(3);
     for (let i = 0; i < P.length - 1; i++) { const ax = P[i][0], az = P[i][1], bx = P[i + 1][0], bz = P[i + 1][1]; const L2 = Math.hypot(bx - ax, bz - az); for (let s = 0; s < L2; s += 6) { const t = s / L2; const x = lerp(ax, bx, t) + (r() - .5) * 30, z = lerp(az, bz, t) + (r() - .5) * 30; const gy = L.ground ? L.ground(x, z) : 0; pts.push(x, gy + 1 + r() * 9, z); } }
-    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    const m = new THREE.PointsMaterial({ map: L.GLOW, size: 1.6, color: 0xffd98a, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, fog: false });
-    lights = new THREE.Points(g, m); lights.renderOrder = 6; L.scene.add(lights);
+    lights.geometry.dispose(); const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); lights.geometry = g;
   }
 
   // ================================================================ rain (light drizzle streaks in a box around the camera)
@@ -630,23 +728,29 @@
     const m = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, uniforms: { uT: L.uTime, uA: { value: 0 }, uCol: { value: new THREE.Color(.8, .85, .95) } },
       vertexShader: `attribute vec2 aC; uniform float uT; varying float vA; varying float vX;
         void main(){ vec3 p = position; p.y = mod(p.y - uT * 9. , 24.) - 8.; p.x = mod(p.x + uT * 1.2 - cameraPosition.x + 20., 40.) - 20.; p.z = mod(p.z - cameraPosition.z + 20., 40.) - 20.;
-          vec3 w = cameraPosition + p; vec3 dir = normalize(vec3(.12, -1., 0.)); vec4 a = viewMatrix * vec4(w, 1.); vec4 b = viewMatrix * vec4(w + dir * .7, 1.);
+          vec3 w = cameraPosition + p; vec3 dir = normalize(vec3(.12, -1., 0.)); vec4 a = viewMatrix * vec4(w, 1.);
+          vec4 b = viewMatrix * vec4(w + dir * mix(.22, .75, smoothstep(1.5, 6., length(p))), 1.);   // short streaks close to the camera
           vec2 sd = normalize(b.xy - a.xy + 1e-5); vec2 nn = vec2(-sd.y, sd.x); vec4 mv = mix(a, b, aC.y); mv.xy += nn * aC.x * .014;
           gl_Position = projectionMatrix * mv; vA = smoothstep(1., 4., -mv.z) * (1. - smoothstep(18., 22., length(p.xz))); vX = aC.x; }`,
       fragmentShader: `uniform float uA; uniform vec3 uCol; varying float vA; varying float vX; void main(){ gl_FragColor = vec4(uCol, uA * vA * (1. - abs(vX)) * .32);
 #include <encodings_fragment>
 }` });
-    rain = new THREE.Mesh(g, m); rain.frustumCulled = false; rain.renderOrder = 7; rain.visible = false; L.scene.add(rain);
+    rain = new THREE.Mesh(g, m); rain.frustumCulled = false; rain.renderOrder = L.RO.rain; rain.visible = false; L.scene.add(rain);
   }
 
   // ================================================================ init + time of day + tick
   L.skyInit = function (opts) {
-    L.makeSky(); L.buildClouds(opts && opts.clouds); buildSea(); buildRain();
+    L.makeSky(); L.buildClouds(opts && opts.clouds); if (!seaMesh) buildSea(); if (!rain) buildRain();
+  };
+  // compile the programs that are hidden at boot (rain, corridor motes, cloud fields) so their first use does not hitch
+  L.lookPrecompile = function (cam) {
+    const hidden = []; L.scene.traverse(o => { if (!o.visible && (o === rain || o === lights || (o.isPoints || o.isMesh) && o.material && o.material.transparent)) { hidden.push(o); o.visible = true; } });
+    try { L.renderer.compile(L.scene, cam || L.camera); } finally { for (const o of hidden) o.visible = false; }
   };
   const _v = new THREE.Vector3();
   L.onTimeOfDay(T => {
     skyU.top.value.copy(T.zen); skyU.mid.value.copy(T.mid); skyU.hor.value.copy(T.hor); skyU.low.value.copy(T.low);
-    skyU.sunDir.value.copy(T.sunDir); skyU.moonDir.value.copy(T.moonDir); skyU.night.value = T.night; skyU.dusk.value = T.dusk; skyU.rain.value = T.rain;
+    skyU.sunDir.value.copy(T.sunDir); skyU.moonDir.value.copy(T.moonDir); skyU.night.value = T.night; skyU.dusk.value = T.dusk; skyU.rain.value = T.rain; skyU.moonPh.value = T.moonPhase;
     skyU.sunCol.value.copy(T.sunCol).multiplyScalar(1 - T.night);
     skyU.cloudCol.value.copy(T.cLit); skyU.cloudShade.value.copy(T.cShade);
     cloudU.uLit.value.copy(T.cLit); cloudU.uBody.value.copy(T.cBody); cloudU.uShade.value.copy(T.cShade); cloudU.uDeep.value.copy(T.cDeep);
@@ -655,10 +759,22 @@
     if (L.stars) L.stars.material.uniforms.uA.value = T.night * (1 - T.rain) * .95;
     if (rain) { rain.visible = T.rain > .02; rain.material.uniforms.uA.value = T.rain; rain.material.uniforms.uCol.value.copy(T.hor).lerp(_c.setRGB(1, 1, 1), .65); }
     seaU.uCov.value = .5 + T.rain * .12;
-    // re-shade clusters when the light moved enough
-    const ld = T.lightDir; if (!lastShade || lastShade.distanceTo(ld) > .08) { lastShade = (lastShade || new THREE.Vector3()).copy(ld); reshade = true; }
+    // re-shade clusters when the light moved enough (spread over the next frames, see the tick)
+    const ld = T.lightDir; if (!lastShade) lastShade = new THREE.Vector3(9, 9, 9);
+    if (lastShade.distanceTo(ld) > .08) { lastShade.copy(ld); queueReshade(); }
   });
-  const _c = new THREE.Color(); let lastShade = null, reshade = false;
+  const _c = new THREE.Color(); let lastShade = null;
+  // Amortised re-shading: the sun-occlusion of every cluster is recomputed a few clusters per frame (about 1 ms) and
+  // only that cluster's slice of the occlusion attribute is uploaded. A light change costs no single-frame spike.
+  const RQ = []; let rqi = 0;
+  function queueReshade() { if (!FA) return; RQ.length = 0; rqi = 0; for (const F of FIELDS) for (const cl of F.clusters) RQ.push(F, cl); }
+  function runReshade(budgetMs) {
+    if (rqi >= RQ.length) return;
+    const t0 = performance.now(), s = cloudU.uSunW.value;
+    while (rqi < RQ.length) { const F = RQ[rqi], cl = RQ[rqi + 1]; rqi += 2; if (cl._o !== undefined) { shadeCluster(cl, s.x, s.y, s.z); F.writeOcc(cl); } if (performance.now() - t0 > budgetMs) break; }
+    if (rqi >= RQ.length) { RQ.length = 0; rqi = 0; }
+  }
+  L.cloudStats = () => ({ sky: [FA ? FA.n : 0, FA ? FA.req : 0, FA ? FA.cap : 0], low: [FB ? FB.n : 0, FB ? FB.req : 0, FB ? FB.cap : 0], mist: [FM ? FM.n : 0, FM ? FM.req : 0, FM ? FM.cap : 0], reshadeLeft: (RQ.length - rqi) / 2 });
   let sortFrame = 0;
   L.onLookTick((dt, t, cam) => {
     if (L.sky) { L.sky.position.copy(cam.position); L.stars.position.copy(cam.position); }
@@ -666,15 +782,22 @@
       skyU.mid.value.copy(skyU.hor.value).lerp(skyU.top.value, .45); skyU.low.value.copy(skyU.hor.value).lerp(_c.setRGB(1, 1, 1), .35 * (1 - skyU.night.value));
       cloudU.uSunW.value.copy(skyU.sunDir.value); if (cloudU.uSunW.value.y < .05) cloudU.uSunW.value.y = .05; cloudU.uSunW.value.normalize();
     }
+    seaDriftAt(t, seaDrift);
     if (!FA) return;
     cam.updateMatrixWorld(); _v.copy(cloudU.uSunW.value).transformDirection(cam.matrixWorldInverse); cloudU.uSunV.value.copy(_v);
     _v.set(0, 1, 0).transformDirection(cam.matrixWorldInverse); cloudU.uUpV.value.copy(_v);
-    if (reshade) { reshade = false; const s = cloudU.uSunW.value; for (const F of [FA, FB]) { for (const cl of F.clusters) shadeCluster(cl, s.x, s.y, s.z); F.dirty = true; } }
     updateClumps(cam);
-    for (const F of [FA, FB]) if (F.dirty) F.rebuild();
+    const cx = cam.position.x, cz = cam.position.z;
+    for (let i = 0; i < FIELDS.length; i++) {
+      const F = FIELDS[i];
+      if (!F.dirty && F.req > F.cap && Math.abs(cx - F.rx) + Math.abs(cz - F.rz) > 400) F.dirty = true;   // re-rank an over-full field
+      if (F.dirty) F.rebuild(cam);
+    }
+    runReshade(1.0);
+    for (let i = 0; i < FIELDS.length; i++) FIELDS[i].flush();
     // corridor visibility: inside an opened corridor the mist thins
-    if (mist) { const inside = Math.hypot(cam.position.x - mist.x, cam.position.z - mist.z) < mist.r; let vis = 55; if (mist.path && mist.amount > 0) { const d = distPath(cam.position.x, cam.position.z, mist.path); vis = lerp(55, 260 + 900 * mist.amount * mist.amount, mist.amount * (1 - sstep(40, 160, d))); } if (mist.amount >= 1) vis = 1e5; L.HZ.N[3] = inside ? vis : Math.max(vis, 70); }
-    if ((sortFrame++ % 6) === 0) { FA.sort(cam, t); FB.sort(cam, t); }
+    if (mist) { const inside = Math.hypot(cx - mist.x, cz - mist.z) < mist.r; let vis = 55; if (mist.path && mist.amount > 0) { const d = distPath(cx, cz, mist.path); vis = lerp(55, 260 + 900 * mist.amount * mist.amount, mist.amount * (1 - sstep(40, 160, d))); } if (mist.amount >= 1) vis = 1e5; L.HZ.N[3] = inside ? vis : Math.max(vis, 70); }
+    if ((sortFrame++ % 6) === 0) { for (let i = 0; i < FIELDS.length; i++) FIELDS[i].sort(cam, t); }
   });
   // v4 compatibility: the v4 game calls L.tickClouds(cam, t) once per frame and never L.lookTick
   let lastTick = -1;

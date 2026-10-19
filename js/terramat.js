@@ -15,13 +15,13 @@
     uPatch: { value: .85 },                         // strength of the palette patches (landscape slide)
     uPal: { value: [v3(0xa9b950), v3(0xbcc361), v3(0x59784a), v3(0xd8cf55), v3(0xbdb544), v3(0x9a9132), v3(0x8b9551)] },
     uPalMean: { value: v3(0xaab052) },
-    uRockA: { value: v3(0x95928b) }, uRockB: { value: v3(0xa59f92) }, uRockC: { value: v3(0x6f6a62) },
+    uRockA: { value: v3(0x9a958b) }, uRockB: { value: v3(0xb4ac9b) }, uRockC: { value: v3(0x6c675f) },
     uPathA: { value: v3(0xebda8d) }, uPathB: { value: v3(0xc4b559) }, uPathC: { value: v3(0xa88f5a) },
     uSand: { value: v3(0xead9a3) }, uSandWet: { value: v3(0xb9a77c) }, uSnow: { value: v3(0xf2f5fa) },
     uForest: { value: v3(0x4a6b3a) }, uMoss: { value: v3(0x5f7d35) },
     uStrata: { value: new THREE.Vector4(120, .55, 13, .06) },  // layer group height (m, 3 layers each), dark-layer amount, fine band height, fine contrast
     uDetail: { value: new THREE.Vector3(1, 45, .22) },          // enabled, near-detail fade distance (m), strength
-    uGrass: { value: new THREE.Vector4(13, 36, .55, 0) },       // grass full-density radius, ring radius, soil darkening, on (set by grassInit)
+    uGrass: { value: new THREE.Vector4(13, 36, .7, 0) },       // grass full-density radius, ring radius, soil darkening, on (set by grassInit)
   };
 
   // GLSL: palette + layers. Expects vWp (world pos), vWn (world normal), vT (aT), vU (aU), vCol (ground tint).
@@ -32,24 +32,31 @@ vec3 v5Meadow(vec3 base, vec4 n1, vec4 n2) {
   vec3 palA = mix(uPal[2], uPal[0], smoothstep(.2, .62, n1.g)); palA = mix(palA, uPal[1], smoothstep(.5, .85, n2.r));
   vec3 palB = mix(uPal[6], uPal[3], smoothstep(.25, .7, n1.g)); palB = mix(palB, uPal[4], smoothstep(.45, .8, n2.r)); palB = mix(palB, uPal[5], smoothstep(.62, .9, n2.g) * .6);
   vec3 pal = mix(palA, palB, smoothstep(.36, .64, n1.r));
-  return mix(base, base * pal / uPalMean, uPatch);
+  // lerp toward the palette patch at the ground's own value (multiplying stacked saturation on WORLD's tint)
+  const vec3 LW = vec3(.2126, .7152, .0722);
+  return mix(base, pal * (dot(base, LW) / max(dot(pal, LW), 1e-3)), uPatch);
 }
-vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack) {
-  // painterly sediment: a few broad warped layers with their own shade, a soft undercut below each lip and
-  // large soft blotches; no fine noise (the references paint cliffs as smooth, big shapes). World space, no seams.
-  vec3 an = abs(wn); float hz = mix(wp.x, wp.z, an.x / (an.x + an.z + 1e-4));
-  vec4 rn = texture2D(tNoise, vec2(hz / 260., wp.y / 160.));
-  float yy = wp.y / uStrata.x * 3. + n1.r * 3. + rn.r * .9;
+vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack, out float lip) {
+  // Painterly sediment on sheer walls: broad layers of world height (+ low-frequency noise, no normal-dependent
+  // coordinates, so faceted faces do not saw-tooth), each with a dark undercut in its lower quarter and a lit lip on top
+  // that catches moss; 35-60 degree slopes get broken, blotchy rock instead of bands. World space, no seams.
+  float steep = smoothstep(.45, .8, 1. - wn.y);
+  vec4 rn = texture2D(tNoise, vec2((wp.x + wp.z * .71) / 260., wp.y / 160.));
+  float yy = wp.y / uStrata.x * 3. + n1.r * 3. + (rn.r - .5) * .7;
   float li = floor(yy), lf = yy - li;
   float shade = fract(sin(li * 12.9898) * 43758.5453);
-  vec3 r = mix(uRockA, uRockB, smoothstep(.25, .75, shade));
-  r = mix(r, uRockC, smoothstep(.75, 1., shade) * uStrata.y * .7);
-  r *= 1. - smoothstep(.22, .0, lf) * .2;                  // soft undercut below each lip
-  r *= 1. + smoothstep(.8, 1., lf) * .08;                  // lit lip
+  vec3 r = mix(uRockA, uRockB, smoothstep(.3, .7, shade));
+  r = mix(r, uRockC, smoothstep(.72, 1., shade) * uStrata.y);
+  float under = smoothstep(.26, .02, lf);
+  lip = smoothstep(.84, .96, lf) * steep;
+  r *= mix(vec3(1.), vec3(.56, .6, .72), under);            // undercut: darker and cooler
+  r *= 1. + smoothstep(.8, .95, lf) * .16;                  // lit lip
   r *= 1. + (texture2D(tNoise, vec2(wp.y / uStrata.z + n1.r * 4., .71)).a - .5) * uStrata.w;
   r *= .9 + rn.b * .2;
-  crack = smoothstep(.12, .03, rn.a) * .6;
-  r *= 1. - crack * .25;
+  vec3 broken = mix(uRockA, uRockB, smoothstep(.3, .7, rn.g)) * (.8 + rn.b * .32);
+  r = mix(broken, r, steep);
+  crack = smoothstep(.12, .03, rn.a) * .6 * steep;
+  r *= 1. - crack * .3;
   return r;
 }
 `;
@@ -77,7 +84,7 @@ vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack) {
           g *= 1. + (n2.a - .5) * .12;
           // soil under the grass carpet: deep green near the camera so gaps between blades never flash bright ground
           float gc = uGrass.w * (1. - smoothstep(uGrass.x, uGrass.y * .95, camd)) * clamp(1. - vT.x * 1.6 - vT.y * 1.5 - vT.z - vT.w, 0., 1.);
-          gc *= 1. - smoothstep(.3, .62, (cameraPosition.y - vWp.y) / max(camd, .1));   // seen from above, the lit tops and soil show
+          gc *= 1. - smoothstep(.65, 1.4, (cameraPosition.y - vWp.y) / max(camd, .1));   // steep top-down views: the lit tops and soil show (same gate as the blades)
           g = mix(g, mix(g * vec3(.42, .55, .3), vec3(.03, .056, .008), 1. - smoothstep(3., uGrass.x, camd)), gc * uGrass.z);
           // forest floor + wet/moss
           g = mix(g, g * uForest / max(uPalMean, vec3(.05)) * .8, clamp(vU.x, 0., 1.) * .8);
@@ -90,14 +97,15 @@ vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack) {
           float snd = smoothstep(.3, .6, vT.z + (n2.a - .5) * .2);
           g = mix(g, mix(uSandWet, uSand, smoothstep(.4, .9, vT.z)) * uAlbedo * (.92 + n2.r * .16), snd);
           // stratified rock
-          float crack;
+          float crack, lip;
           float rk = smoothstep(.28, .62, vT.x + (n2.r - .5) * .22);
           if (rk > .001) {
             // where aT.x is high, WORLD's vertex colour is the rock tint (relative to the default grey); saturated meadow colours are ignored
             float mx = max(vColor.r, max(vColor.g, vColor.b)), sat = (mx - min(vColor.r, min(vColor.g, vColor.b))) / max(mx, 1e-3);
             vec3 tint = mix(vColor / uRockA, vec3(1.), smoothstep(.62, .78, sat));
-            vec3 rc = v5Rock(vWp, wn, n1, crack) * clamp(tint, 0., 2.6) * uAlbedo;
-            rc = mix(rc, uMoss * uAlbedo * .85, smoothstep(.42, .72, wn.y) * .7);       // grassy ledges on the steps
+            vec3 rc = v5Rock(vWp, wn, n1, crack, lip) * clamp(tint, 0., 2.6) * uAlbedo;
+            // moss and grass on the layer lips and on flat ledges (not on every facet that happens to face up a bit)
+            rc = mix(rc, uMoss * uAlbedo * .85, max(lip * .85 * smoothstep(.04, .3, wn.y + (n2.g - .5) * .3), smoothstep(.62, .82, wn.y) * .7));
             g = mix(g, rc, rk);
           }
           // modest snow caps (white on top only; the blue comes from the light)
@@ -124,7 +132,7 @@ vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack) {
           vWp = (modelMatrix * vec4(position, 1.)).xyz; vWn = normalize(mat3(modelMatrix) * normal);
         #endif`);
       sh.fragmentShader = 'varying vec3 vWp; varying vec3 vWn;\n' + TERRAIN_FN + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
-        { float crack; vec4 n1 = texture2D(tNoise, vWp.xz / 900.); vec3 rc = v5Rock(vWp * 3., normalize(vWn), n1, crack);
+        { float crack, lip; vec4 n1 = texture2D(tNoise, vWp.xz / 900.); vec3 rc = v5Rock(vWp * 3., normalize(vWn), n1, crack, lip);
           float lum = dot(diffuseColor.rgb, vec3(.333)); diffuseColor.rgb = mix(diffuseColor.rgb, rc * uAlbedo * clamp(lum * 1.6, .55, 1.25), .75);
           diffuseColor.rgb = mix(diffuseColor.rgb, uMoss * uAlbedo * .8, smoothstep(.7, .95, normalize(vWn).y) * .45); }`);
     };
@@ -237,9 +245,12 @@ vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack) {
 
   // ================================================================ waterfalls (ribbons: uv.x across, uv.y along in metres; aSteep 0..1)
   const FU = L.flowU5 = { uTime: L.uTime, tNoise: { value: L.noiseTex }, uSky: WU.uSky, uDay: WU.uDay, uLit: { value: C(0xf2f8ff) }, uBlue: { value: C(0x9fd0ef) }, uDeepB: { value: C(0x5aa6d8) }, uSunDir: WU.uSunDir };
+  // The ribbon WRITES DEPTH (fragments under alpha .1 are discarded): clouds, the cloud sea and the Névoa draw after it
+  // (L.RO.falls < L.RO.mist/cumulus/sea/low) and are hidden where they lie behind the falling water, while the parts of
+  // a fall that drop behind or into the cloud sea are covered by it. Give fall meshes renderOrder L.RO.falls.
   L.makeFlowMaterial = function () {
     const mat = new THREE.ShaderMaterial({
-      transparent: true, fog: true, depthWrite: false, side: THREE.DoubleSide, uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]),
+      transparent: true, fog: true, depthWrite: true, side: THREE.DoubleSide, uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]),
       vertexShader: `attribute float aSteep; varying vec2 vUv; varying float vS; varying vec3 vW; varying vec3 vN;
         #include <fog_pars_vertex>
         void main(){ vUv = uv; vS = aSteep; vec4 wp = modelMatrix * vec4(position, 1.); vW = wp.xyz; vN = normalize(mat3(modelMatrix) * normal); vec4 mvPosition = viewMatrix * wp; gl_Position = projectionMatrix * mvPosition;
@@ -258,6 +269,10 @@ vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack) {
           float lit = clamp(dot(normalize(vN), normalize(uSunDir)) * .35 + .75, .55, 1.1);
           c *= lit * mix(.25, 1., uDay);
           float a = edge * mix(.55, .92, max(streak, vS * .7)) * (.75 + s2 * .35);
+          #ifdef USE_FOG
+            { vec3 mv = vW - hzP.xyz; float ml = length(mv); a *= v5MistT(hzP.xyz, mv / max(ml, 1e-3), ml); }   // a fall inside the Névoa melts into it (and stops occluding its puffs)
+          #endif
+          if (a < .1) discard;
           gl_FragColor = vec4(c, clamp(a, 0., 1.));
           #include <tonemapping_fragment>
           #include <encodings_fragment>
@@ -268,7 +283,8 @@ vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack) {
     return mat;
   };
   // white mist where a waterfall hits the ground or the cloud sea (a few low cloud puffs)
-  L.addFallMist = function (x, y, z, w) { if (!L.clouds) return null; return L.clouds.addClump(x, y - w * .15, z, w * 1.6, w * .7, Math.floor(x * 13 + z * 7), 3, 1, 3); };
+  // (safe before L.skyInit: the cloud fields are created on first use)
+  L.addFallMist = function (x, y, z, w) { if (!L.clouds || !isFinite(x + y + z + w)) return null; return L.clouds.addClump(x, y - w * .15, z, w * 1.6, w * .7, Math.floor(x * 13 + z * 7), 3, 1, 3); };
 
   // ================================================================ time of day hook (runs every frame: no allocation)
   const WC = { sh: C(0x63b2d4), shN: C(0x1a3a6a), dp: C(0x2a7fc4), dpN: C(0x0b1d44) };
