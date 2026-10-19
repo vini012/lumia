@@ -34,7 +34,7 @@
     golem: { nome: 'Golem de Musgo', ic: '🗿', m: 'golem', s: 1, walk: .9, run: 2.2, turn: 1.8, R: .8, food: 'pedra', cost: 8, grp: [1, 1], temper: 'calm', anim: 'biped', pow: { id: 'construtor', nome: 'Mestre Construtor', desc: 'construções custam 30% menos' } },
   };
   for (const k in SP) { SP[k].k = k; SP[k].anim = SP[k].anim || 'quad'; SP[k].time = SP[k].time || 'any'; }
-  L.SPECIES = SP;
+  L.CR_SPECIES = SP;   // (L.SPECIES is the scatter table)
   // landmark spawns (always there when the player is near)
   const SPECIALS = [
     { sp: 'dragao', poi: 'ninho', n: 1, HR: 26 },

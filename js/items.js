@@ -1,6 +1,6 @@
 /* Lumiar v5 items (B-game owns this file): item table, tools, recipes, inventory over the saved player record.
    Phase A: working inventory (L.inv) and display data (L.itemInfo) so story, survival and the HUD can run;
-   B-game adds harvesting tables, stations, chests and the full recipe list here. Contract: v5docs/INTEG.md §4. */
+   B-game adds harvesting tables, stations, chests and the full recipe list here. Contract: v5docs/INTEG.md §5.1. */
 'use strict';
 (function (L) {
   // ------------------------------------------------------------------ item table (+ L.ITEMS5 from survival / farm)

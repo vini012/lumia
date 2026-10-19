@@ -1,7 +1,7 @@
 /* Lumiar v5 game (B-game owns this file after phase A): boot + loading, start screen, save/session, player spawn,
    the main loop (fixed system order, per-system timing), action button, presence, debug hooks.
    The v4 game (harvesting, crafting, building UI, taming, chests, audio) is in git history for B-game to port.
-   Contract: v5docs/INTEG.md. Main loop order (INTEG §2): input → player → camera → clock → time of day → look →
+   Contract: v5docs/INTEG.md. Main loop order (INTEG §3.2): input → player → camera → clock → time of day → look →
    streaming → scatter/grass → creatures → build → story → survival → farm → presence/explored → UI → render. */
 'use strict';
 (function (L) {
@@ -155,7 +155,7 @@
     const s = JSON.stringify(v); if (s === presLast && presT > -2) return; presLast = s; L.save.room.presence(v).catch(() => { });
   }
 
-  // ================================================================ phase-B hooks (stubs; owners replace them, INTEG §3)
+  // ================================================================ phase-B hooks (stubs; owners replace them, INTEG §4)
   // each stub is installed only when nothing defined the hook first (B-* files load before game.js)
   const hook = (name, fn) => { if (typeof L[name] !== 'function') L[name] = fn; };
   // B-world: named pieces of the authored keep (story animates doors, lock, vines), restoration, story anchors
