@@ -52,7 +52,7 @@
     sem_trigo: { n: 'Sementes de trigo', ic: '🌱', seed: 'trigo' }, sem_cenoura: { n: 'Sementes de cenoura', ic: '🌱', seed: 'cenoura' },
     sem_abobora: { n: 'Sementes de abóbora', ic: '🌱', seed: 'abobora' }, sem_morango: { n: 'Mudas de morango', ic: '🌱', seed: 'morango' },
     sem_ervas: { n: 'Sementes de ervas', ic: '🌱', seed: 'ervas' }, sem_lotus: { n: 'Muda de lótus', ic: '🌱', seed: 'lotus' },
-    sem_lua: { n: 'Semente da Flor da Lua', ic: '✨', seed: 'lua' },
+    sem_lua: { get n() { return (L.T && L.T('ui.moonseed_name', '')) || 'Semente rara'; }, ic: '✨', seed: 'lua' },
     trigo: { n: 'Trigo', ic: '🌾' }, abobora: { n: 'Abóbora', ic: '🎃' }, ervas: { n: 'Ervas', ic: '🌿' }, lotus: { n: 'Lótus', ic: '🪷' },
     flor_lua: { n: 'Flor da Lua', ic: '🌙' },
   });

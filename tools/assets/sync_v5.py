@@ -21,6 +21,7 @@ RENAME = {
     _d('a2luZw=='): ('figure5', [(_d('a2luZ19yb290'), 'figure5_root'), (_d('a2luZ18='), 'c_')]),
     _d('Y2FzdGxlNQ=='): ('keep5', [(_d('Y2FzdGxlNV9yb290'), 'keep5_root')]),
     _d('Y2FzdGxlNV9mYXI='): ('keep5_far', [(_d('Y2FzdGxlNV9mYXI='), 'keep5_far')]),
+    _d('aXRlbXM1'): ('items5', [(_d('a2V5X3N0YXI='), 'star_bow')]),
 }
 
 

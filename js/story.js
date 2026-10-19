@@ -20,7 +20,7 @@ window.L = window.L || {};
   const FORGE_TASK = TX('vSewND2aHA==', 'k_forge');
   // a few lore path segments and authored-model names are kept masked in the sources (see tools/lore/encode.py --word)
   const LP = { end: TX('sxa3NTKL', 'e'), starName: 'ui.' + TX('vR2qAzKNFG8=', 'x') };
-  const MODEL = { figure: TX('vRG9Ow==', ''), bow: TX('vR2qAy+YGHg=', ''), vines: TX('oBG9OS+zDWJnhAJy', '') };
+  const MODEL = { figure: TX('sBG0KS6JTA==', ''), bow: TX('pQyyLgOOFn0=', ''), vines: TX('oBG9OS+zDWJnhAJy', '') };
   const IT = { star: 'estrela', frag: 'fragmento', feather: 'pena_dourada', moonSeed: 'sem_lua', moonFlower: 'flor_lua', soup: 'sopa_quente', lotusSeed: 'sem_lotus', lotus: 'lotus', gold: 'ouro', crystal: 'cristal', wood: 'madeira', rope: 'corda' };
   S.IT = IT;
   // display data for story items (names live in the encoded data)

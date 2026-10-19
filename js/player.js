@@ -1,12 +1,13 @@
-/* Lumiar v4 player: rigged mage (Blender), tinted robe/hat, tools in the right hand, physics on terrain + building
-   colliders (jump, swim, slopes, gliding), riding mounts, third-person camera, remote players. */
+/* Lumiar player: rigged hero (hero_f / hero_m, v5 tint zones), controller on terrain + building colliders
+   (jump, swim in lakes/rivers/sea, slopes, gliding), riding mounts, third-person camera, remote players.
+   Integration A adapters: hero models + palettes (L.HERO_PALETTES), water surface from L.waterAt. B-actors owns this file. */
 'use strict';
 (function (L) {
   const { clamp, lerp, sstep } = L;
   const TAU = Math.PI * 2;
   const wrapA = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
 
-  // robe / hat colour pairs (multiplied over the greyscale robe vertex colours)
+  // v4 colour pairs (kept for old presence records; v5 uses L.HERO_PALETTES)
   L.MAGE_COLORS = [
     { n: 'Safira', robe: 0x3f63c9, hat: 0x2c3f8f, orb: 0x9fd0ff },
     { n: 'Rubi', robe: 0xb8384a, hat: 0x7a1f30, orb: 0xffa0a8 },
@@ -17,19 +18,59 @@
     { n: 'Neve', robe: 0xe8e8ee, hat: 0x9aa4b8, orb: 0xffffff },
     { n: 'Noite', robe: 0x30344a, hat: 0x1c1f2c, orb: 0xa8b8ff },
   ];
+  // v5 hero outfits: 3 palettes per look (sRGB). Zones per the chars manifest: top A/B, bottom A, cape A, hat A.
+  L.HERO_PALETTES = {
+    f: [
+      { n: 'Céu', top: ['#f8f5ef', '#b2dafc'], bottom: '#fbf8f2', cape: '#34508e', hat: '#3a4f86' },
+      { n: 'Campo', top: ['#fbf3df', '#e7a6a0'], bottom: '#6f8f5a', cape: '#a8463f', hat: '#7a4a35' },
+      { n: 'Lavanda', top: ['#f6f1fa', '#b9a3e3'], bottom: '#4f5d8c', cape: '#5b4a8f', hat: '#3f3566' },
+    ],
+    m: [
+      { n: 'Terra', top: ['#f8f4ec', '#93603a'], bottom: '#5f4c3e', cape: '#34508e', hat: '#3a4f86' },
+      { n: 'Musgo', top: ['#f3efe2', '#5f7f4a'], bottom: '#4a4038', cape: '#8f5a2e', hat: '#5a4a32' },
+      { n: 'Mar', top: ['#eef3f6', '#3f6f9a'], bottom: '#3d4656', cape: '#a8463f', hat: '#2f3c5c' },
+    ],
+  };
+  // three r128 tint-zone shader hook from the chars manifest (COLOR_0.a = zone id)
+  function tintZones(mat, tintA, tintB) {
+    mat.vertexColors = true;
+    const u = { tintA: { value: tintA.clone() }, tintB: { value: tintB.clone() } };
+    mat.userData.tint = u;
+    const prev = mat.onBeforeCompile;
+    mat.onBeforeCompile = function (s, r) {
+      if (prev) prev.call(this, s, r);
+      s.uniforms.tintA = u.tintA; s.uniforms.tintB = u.tintB;
+      s.fragmentShader = 'uniform vec3 tintA;\nuniform vec3 tintB;\n' + s.fragmentShader.replace('#include <color_fragment>',
+        '#if defined( USE_COLOR_ALPHA )\n  float lzone = floor(vColor.a * 3.0 + 0.5);\n  vec3 ltint = abs(lzone - 2.0) < 0.5 ? tintA : (abs(lzone - 1.0) < 0.5 ? tintB : vec3(1.0));\n  diffuseColor.rgb *= vColor.rgb * ltint;\n#elif defined( USE_COLOR )\n  diffuseColor.rgb *= vColor;\n#endif');
+    };
+    const key = mat.customProgramCacheKey ? mat.customProgramCacheKey.bind(mat) : () => '';
+    mat.customProgramCacheKey = () => key() + '|lumiarTint';
+    mat.needsUpdate = true; return mat;
+  }
+  const lin = h => new THREE.Color(h).convertSRGBToLinear(), WHITE = new THREE.Color(1, 1, 1);
+  L.heroTint = tintZones;
+
   // tools (objects of tools.json): which tool the hand shows for each action
   const TOOL_FOR = { chop: 'axe', mine: 'pickaxe', build: 'hammer', hoe: 'hoe', cast: 'staff' };
   L.TOOL_FOR = TOOL_FOR;
   let TOOLS = null; const toolsP = () => L.loadModel('tools').then(sc => { if (!sc) return null; if (!TOOLS) { TOOLS = {}; sc.traverse(o => { if (o.parent === sc && o.name) TOOLS[o.name] = o; }); } return TOOLS; });
 
   // ------------------------------------------------------------------ mage model
+  // o: { gender 'f'|'m', pal 0..2 (v5) | ci (v4 colour index, mapped onto a palette) }
   L.makeMage4 = async function (o) {
-    o = o || {}; const g = o.gender === 'f' ? 'f' : 'm'; let src = await L.loadModel('mage_' + g); if (!src && g === 'f') src = await L.loadModel('mage_m'); if (!src) return null;
-    const I = L.instRigged(src); const C = L.MAGE_COLORS[(o.ci | 0) % L.MAGE_COLORS.length];
-    const robe = L.MAT.v4skin.clone(); robe.color.setHex(C.robe); robe.color.convertSRGBToLinear(); robe.color.multiplyScalar(1.25);
-    const hat = L.MAT.v4skin.clone(); hat.color.setHex(C.hat); hat.color.convertSRGBToLinear(); hat.color.multiplyScalar(1.25);
-    I.root.traverse(m => { if (!m.isMesh) return; if (/_robe/.test(m.name)) m.material = robe; else if (/_hat/.test(m.name)) m.material = hat; });
-    const M = { I, root: I.root, rig: I.rig, grip: I.grip, C, st: { t: 0, dt: 0, speed: 0 }, tool: null, toolName: '', mats: [robe, hat] };
+    o = o || {}; const g = o.gender === 'f' ? 'f' : 'm';
+    const src = await L.loadModel('hero_' + g); if (!src) return null;
+    const I = L.instRigged(src); const PAL = L.HERO_PALETTES[g]; const pi = ((o.pal != null ? o.pal : o.ci) | 0) % PAL.length; const C = PAL[pi];
+    const zone = { top: [C.top[0], C.top[1]], bottom: [C.bottom, '#ffffff'], cape: [C.cape, '#ffffff'], hat: [C.hat, '#ffffff'] };
+    const mats = [];
+    I.root.traverse(m => {
+      if (!m.isMesh) return; const z = /_(top|bottom|cape|hat)$/.exec(m.name); if (!z) return;
+      const mt = tintZones(L.cloneMat ? L.cloneMat(m.material) : m.material.clone(), lin(zone[z[1]][0]), lin(zone[z[1]][1])); m.material = mt; mats.push(mt);
+      if (z[1] === 'cape' || z[1] === 'hat') m.visible = !!o[z[1]];   // cape / hat: hidden unless asked for
+    });
+    C.orb = C.orb || 0x9fd0ff;
+    const M = { I, root: I.root, rig: I.rig, grip: I.grip, C, g, pal: pi, st: { t: 0, dt: 0, speed: 0 }, tool: null, toolName: '', mats };
+    M.part = (name, on) => I.root.traverse(m => { if (m.isMesh && m.name === 'hero_' + g + '_' + name) m.visible = !!on; });
     // tools are attached to grip.R with identity transform: handle along bone +Y, blade along bone +Z
     M.setTool = function (name) {
       if (name === M.toolName) return; M.toolName = name; if (M.tool) { M.tool.parent && M.tool.parent.remove(M.tool); M.tool = null; }
@@ -41,7 +82,7 @@
         M.grip.add(t); M.tool = t;
       });
     };
-    M.dispose = function () { L.scene.remove(M.root); M.root.traverse(m => { if (m.isSkinnedMesh && m.skeleton) m.skeleton.dispose(); }); robe.dispose(); hat.dispose(); };
+    M.dispose = function () { L.scene.remove(M.root); M.root.traverse(m => { if (m.isSkinnedMesh && m.skeleton) m.skeleton.dispose(); }); mats.forEach(m => m.dispose()); };
     return M;
   };
   // animate a mage: s = { speed, air, swim, ride, act, now, turn, wave, hold, fist }
@@ -61,9 +102,9 @@
     if (P.mount) return; // riding: the mount moves, the player sits
     const ml = Math.min(1, Math.hypot(inp.mx, inp.mz)); const run = inp.run || ml > .86;
     let top = ml < .08 ? 0 : (run ? 7.8 : lerp(2.2, 5.2, clamp((ml - .08) / .78, 0, 1))) * (mods.speedMul || 1);
-    const gy0 = L.ground(P.x, P.z); const water = -gy0; // water depth at y=0 surface
-    P.waterWalk = !!mods.waterWalk && gy0 < -.25 && P.y > -.4;
-    const swimming = !P.waterWalk && water > 1.15 && P.y < .2; P.swim = lerp(P.swim, swimming ? 1 : 0, Math.min(1, dt * 6)); P.wade = clamp(water / 1.15, 0, 1) * (P.waterWalk ? 0 : 1);
+    const gy0 = L.ground(P.x, P.z); const ws = L.waterAt ? L.waterAt(P.x, P.z) : 0; const surf = ws > -1e9 ? ws : -1e9; const water = surf - gy0; // water depth (lakes, rivers, sea)
+    P.surf = surf; P.waterWalk = !!mods.waterWalk && water > .25 && P.y > surf - .4;
+    const swimming = !P.waterWalk && water > 1.15 && P.y < surf + .2; P.swim = lerp(P.swim, swimming ? 1 : 0, Math.min(1, dt * 6)); P.wade = clamp(water / 1.15, 0, 1) * (P.waterWalk ? 0 : 1);
     if (swimming) top *= .55 * (mods.swimMul || 1); else if (P.wade > .2 && P.onGround) top *= 1 - P.wade * .35;
     // horizontal velocity: accelerate toward the stick direction
     const dx = ml > .02 ? inp.mx / Math.max(ml, 1e-3) : 0, dz = ml > .02 ? inp.mz / Math.max(ml, 1e-3) : 0;
@@ -79,8 +120,8 @@
     _p.set(P.x, P.y, P.z); if (L.collideXZ(_p, .34, 1.7, .55)) { P.x = _p.x; P.z = _p.z; }
     // vertical
     const G = L.groundAt(P.x, P.z, P.y, P.onGround ? .6 : .25); let gy = G.y; P.onCol = G.col;
-    if (P.waterWalk) gy = Math.max(gy, .02);
-    const floatY = -1.18; // hips under the surface when swimming
+    if (P.waterWalk) gy = Math.max(gy, surf + .02);
+    const floatY = surf - 1.18; // hips under the surface when swimming
     if (swimming) { P.vy = lerp(P.vy, (floatY + Math.sin(t * 2.2) * .05 - P.y) * 4, Math.min(1, dt * 5)); if (inp.jump && P.y > floatY - .3) P.vy = 4.2; }
     else { P.vy -= 22 * dt; if (mods.glide && P.vy < -3.2 && inp.jumpHeld) { P.vy = -3.2; P.glide = true; } else P.glide = false; }
     if (inp.jump && (P.onGround || t - P.lastGround < .14) && !swimming) { P.vy = 7.6 * (mods.jumpMul || 1); P.onGround = false; P.jumped = t; L.sfx && L.sfx('jump'); }
@@ -120,11 +161,11 @@
     const seen = new Set();
     for (const p of peers) {
       const pr = p.presence || {}; if (typeof pr.x !== 'number') continue; seen.add(p.peer); let r = REM.get(p.peer);
-      const nm = String(pr.n || 'Mago').slice(0, 14), ci = (pr.c | 0) % L.MAGE_COLORS.length, g = pr.g === 'f' ? 'f' : 'm';
+      const nm = String(pr.n || 'Viajante').slice(0, 16), ci = (pr.c | 0) % 3, g = pr.g === 'f' ? 'f' : 'm';
       if (!r || r.nm !== nm || r.ci !== ci || r.g !== g) {
         if (r && r.M) r.M.dispose(); if (r && r.tag) L.scene.remove(r.tag);
         r = { peer: p.peer, nm, ci, g, x: pr.x, y: pr.y || L.ground(pr.x, pr.z), z: pr.z, ry: pr.ry || 0, M: null, emo: pr.e || 0, act: pr.a || 0, v: 0 }; REM.set(p.peer, r);
-        L.makeMage4({ gender: g, ci }).then(M => { if (REM.get(p.peer) !== r || !M) { M && M.dispose(); return; } r.M = M; L.scene.add(M.root); });
+        L.makeMage4({ gender: g, pal: ci }).then(M => { if (REM.get(p.peer) !== r || !M) { M && M.dispose(); return; } r.M = M; L.scene.add(M.root); });
         r.tag = L.textSprite(nm, .5, '#fff3c4'); r.tag.material.depthTest = false; L.scene.add(r.tag); if (onJoin) onJoin(r);
       }
       r.pr = pr; r.pid = pr.pid; r.tx = pr.x; r.ty = pr.y; r.tz = pr.z; r.try = pr.ry || 0; r.tv = pr.v || 0; r.sw = pr.sw || 0; r.rd = pr.rd || null; r.fl = pr.fl || 0;

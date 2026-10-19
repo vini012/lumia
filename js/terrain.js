@@ -47,7 +47,7 @@
     const getBin = () => fetch(base + 'world5.bin').then(r => { if (!r.ok) throw new Error('bin ' + r.status); return r.arrayBuffer(); })
       .then(b => { if (b.byteLength < 16 || new Uint8Array(b, 0, 4)[0] !== 76) throw new Error('bad bin'); return b; })
       .catch(() => getJ(base + 'world5.b64.json').then(j => b64ToBuf(j.b64)));
-    loadP = Promise.all([getJ(base + 'world5.json'), getBin()]).then(([meta, buf]) => { L.worldParse(meta, buf); loadMap(base); return W; });
+    loadP = Promise.all([getJ(base + 'world5.json'), getBin()]).then(([meta, buf]) => { L.worldParse(meta, buf); mapBase = base; if (!L.MAP_LAZY) loadMap(base); return W; });
     return loadP;
   };
 
@@ -961,9 +961,11 @@
   L.terrainReady = () => pending.length === 0 && want.length > 0;
 
   // ---------------------------------------------------------------- world map (baked PNG)
-  L.MAPRES = 2048; L.mapImage = null; L.mapCanvas = null; let mapOK = false;
+  L.MAPRES = 2048; L.mapImage = null; L.mapCanvas = null; let mapOK = false, mapBase = null, mapAsked = false;
+  // L.MAP_LAZY = true before L.worldLoad(): the 2 MB map image waits for L.mapLoad() (the game asks after entering)
+  L.mapLoad = () => { if (mapBase) loadMap(mapBase); return L.mapDone(); };
   function loadMap(base) {
-    if (typeof Image === 'undefined') return;
+    if (typeof Image === 'undefined' || mapAsked) return; mapAsked = true;
     const img = new Image(); img.decoding = 'async';
     img.onload = () => { L.MAPRES = img.naturalWidth || 2048; mapOK = true; };
     img.onerror = () => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); g.fillStyle = '#9cc6ec'; g.fillRect(0, 0, 64, 64); L.mapCanvas = c; L.MAPRES = 64; mapOK = true; };

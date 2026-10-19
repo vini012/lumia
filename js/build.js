@@ -1,4 +1,4 @@
-/* Lumiar v4 building (ARK style): structural pieces in 4 material tiers snapped on a 3 m grid (foundations, floors,
+/* Lumiar building (v4 system on the v5 kits madeira / enxaimel / pedra / real; B-actors owns it): structural pieces in 4 material tiers snapped on a 3 m grid (foundations, floors,
    walls, doorways, windows, roofs, stairs, pillars, fences, doors, gates), stations (fire, workbench, forge, anvil,
    cauldron, chest), furniture and farm pieces. Instanced rendering, colliders for every piece. */
 'use strict';
@@ -8,8 +8,8 @@
   const wrapA = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
 
   const TIERS = {
-    palha: { nome: 'Palha', ic: '🌾', per: { fibra: 3, madeira: 1 }, file: 'build_palha' },
     madeira: { nome: 'Madeira', ic: '🪵', per: { madeira: 3 }, file: 'build_madeira' },
+    enxaimel: { nome: 'Enxaimel', ic: '🏡', per: { madeira: 2, pedra: 1, fibra: 1 }, file: 'build_enxaimel' },
     pedra: { nome: 'Pedra', ic: '🪨', per: { pedra: 3, madeira: 1 }, file: 'build_pedra' },
     real: { nome: 'Real', ic: '👑', per: { pedra: 2, ferro: 1 }, file: 'build_real' },
   };

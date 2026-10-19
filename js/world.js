@@ -144,13 +144,14 @@
     const w = _lb.max.x - _lb.min.x, d = _lb.max.z - _lb.min.z, h = _lb.max.y - _lb.min.y;
     if (h > 2.5 && w > 1.5 && d > 1.5) CUR.userData.lod.push({ x: (_lb.min.x + _lb.max.x) / 2, z: (_lb.min.z + _lb.max.z) / 2, y: _lb.min.y, w, d, h, ry, ox: o.position.x, oz: o.position.z });
   }
+  const ni = g => g.index ? g.toNonIndexed() : g;
   function lodMesh(boxes) {
     const parts = [];
     for (const b of boxes) {
       const tall = b.h > Math.max(b.w, b.d) * 1.6, wallH = b.h * (tall ? .78 : .5), roofH = b.h - wallH;
-      const wall = tint(tall ? new THREE.CylinderGeometry(Math.min(b.w, b.d) * .46, Math.min(b.w, b.d) * .5, wallH, 8) : new THREE.BoxGeometry(b.w * .92, wallH, b.d * .92), WALL).toNonIndexed();
+      const wall0 = tint(tall ? new THREE.CylinderGeometry(Math.min(b.w, b.d) * .46, Math.min(b.w, b.d) * .5, wallH, 8) : new THREE.BoxGeometry(b.w * .92, wallH, b.d * .92), WALL); const wall = ni(wall0);
       wall.translate(0, wallH / 2, 0);
-      const roof = tint(new THREE.ConeGeometry(tall ? Math.min(b.w, b.d) * .62 : Math.hypot(b.w, b.d) * .6, roofH, tall ? 8 : 4), 0xb8432e).toNonIndexed();
+      const roof = ni(tint(new THREE.ConeGeometry(tall ? Math.min(b.w, b.d) * .62 : Math.hypot(b.w, b.d) * .6, roofH, tall ? 8 : 4), 0xb8432e)); // CylinderGeometry / ConeGeometry may come non-indexed already
       if (!tall) { roof.rotateY(Math.PI / 4); roof.scale(1, 1, b.d / b.w); }
       roof.translate(0, wallH + roofH / 2, 0);
       for (const g of [wall, roof]) {

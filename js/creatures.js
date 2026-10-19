@@ -113,7 +113,7 @@
       for (let k = 0; k < n; k++) {
         const id = sp + '_' + i + '_' + j + '_' + g + '_' + k; if (L.crTamed && L.crTamed(id)) continue; if (BYID.has(id)) continue;
         let x = px + Math.cos(k * 2.4 + r3 * 6) * (1.5 + k * 1.6), z = pz + Math.sin(k * 2.4 + r3 * 6) * (1.5 + k * 1.6);
-        if (!landOK(S, x, z)) { const p = L.findLand(x, z, S.beach ? .3 : .6, S.beach ? 3 : 260, S.climber ? 1.2 : .6); x = p[0]; z = p[1]; if (!landOK(S, x, z)) continue; }
+        if (!landOK(S, x, z)) { const p = L.findLand(x, z, S.beach ? .3 : .6, S.beach ? 3 : 4000, S.climber ? 1.2 : .6); x = p[0]; z = p[1]; if (!landOK(S, x, z)) continue; }
         const c = new Cr(sp, x, z, { id, grp, HR: S.beach ? 30 : 55, cell: cellKey(i, j) }); if (grp && !grp.lead) grp.lead = c; list.push(c);
       }
     }
@@ -127,7 +127,7 @@
     for (let k = 0; k < X.n; k++) {
       const id = 's' + si + '_' + X.sp + '_' + k; if (L.crTamed && L.crTamed(id)) continue; if (BYID.has(id)) { out.push(BYID.get(id)); continue; }
       const a = k * 2.3 + si, r = (X.off || 0) + k * 3; let x = px + Math.cos(a) * r, z = pz + Math.sin(a) * r;
-      if (!perch && !landOK(S, x, z)) { const p = L.findLand(x, z, S.beach ? .3 : .6, S.beach ? 3 : 300, 1); x = p[0]; z = p[1]; }
+      if (!perch && !landOK(S, x, z)) { const p = L.findLand(x, z, S.beach ? .3 : .6, S.beach ? 3 : 4000, 1); x = p[0]; z = p[1]; }
       const c = new Cr(X.sp, x, z, { id, HR: X.HR, special: si, perch: k === 0 ? perch : null }); c.home = perch ? [px, pz] : [x, z]; out.push(c);
     }
     return out;

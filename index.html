@@ -6,330 +6,75 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#0b1020">
+<meta name="theme-color" content="#9cc6ec">
 <title>Lumiar</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Fredoka:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-:root{
-  --ink:#0b1020;--ink2:#141b33;--paper:#fff7e6;--gold:#ffd27a;--gold2:#f6b24b;--mint:#9fffd8;--teal:#49c5b1;--rose:#ff8fb0;--mute:#b7bfd8;
-  --glass:rgba(12,16,34,.6);--glass2:rgba(12,16,34,.84);--line:rgba(255,230,180,.22);
-  --sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px);--sal:env(safe-area-inset-left,0px);--sar:env(safe-area-inset-right,0px);
-}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;overflow:hidden;background:var(--ink);color:var(--paper);font-family:Fredoka,system-ui,sans-serif;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none}
-[hidden]{display:none!important}
-#game{position:fixed;inset:0}
-#game canvas{display:block;width:100%;height:100%}
-button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
-button:disabled{opacity:.45;cursor:default}
-.glass{background:var(--glass);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
-h1,h2,h3{font-family:Cinzel,serif;margin:0;letter-spacing:.04em}
-
-/* loading */
-#loading{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:radial-gradient(120% 90% at 50% 20%,#1a2a52 0%,#0b1020 60%,#05070f 100%);z-index:30}
-#loading h1{font-size:clamp(34px,7vw,64px);color:var(--gold);text-shadow:0 0 24px rgba(255,210,122,.45),0 4px 0 #6b4a12}
-#loading .sub{color:var(--mute);font-size:15px}
-#lwrap{width:min(62vw,360px);height:10px;border-radius:999px;background:rgba(255,255,255,.1);overflow:hidden;border:1px solid var(--line)}
-#lbar{height:100%;width:0;background:linear-gradient(90deg,var(--teal),var(--gold));transition:width .25s;box-shadow:0 0 14px var(--gold)}
-#ltxt{font-size:13px;color:var(--mute);min-height:1.2em}
-
-/* start */
-#start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:14px;z-index:25;background:radial-gradient(120% 90% at 50% 10%,rgba(26,42,82,.35) 0%,rgba(11,16,32,.75) 70%)}
-#start .card{width:min(92vw,480px);padding:16px 20px;max-height:94vh;overflow:auto}
-#start h1{font-size:clamp(28px,6vw,44px);color:var(--gold);text-align:center;text-shadow:0 0 20px rgba(255,210,122,.4)}
-#start .tag{text-align:center;color:var(--mute);margin:2px 0 8px;font-size:14px}
-label{display:block;font-size:12px;color:var(--mute);margin:10px 0 4px;letter-spacing:.06em;text-transform:uppercase}
-input{width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.07);color:var(--paper);font:inherit;font-size:16px;outline:none}
-input:focus{border-color:var(--gold)}
-.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-#gsel{display:flex;gap:8px}
-#gsel button{flex:1;padding:9px 6px;border-radius:12px;background:rgba(255,255,255,.07);border:2px solid var(--line);font-size:15px}
-#gsel button[aria-pressed="true"]{border-color:var(--gold);background:rgba(255,210,122,.2);color:var(--gold)}
-#sws{display:flex;gap:8px;flex-wrap:wrap}
-.sw{width:36px;height:36px;border-radius:50%;border:3px solid transparent;box-shadow:0 2px 8px rgba(0,0,0,.4)}
-.sw[aria-pressed="true"]{border-color:var(--gold);transform:scale(1.12)}
-.big{display:block;width:100%;margin-top:14px;padding:13px;border-radius:14px;background:linear-gradient(180deg,var(--gold),var(--gold2));color:#3a2606;font-weight:600;font-size:18px;box-shadow:0 6px 0 #7a5218,0 10px 24px rgba(0,0,0,.4);transition:transform .08s}
-.big:active{transform:translateY(3px)}
-.tip{font-size:12px;color:var(--mute);margin-top:10px;line-height:1.4;text-align:center}
-
-/* hud */
-#hud{position:fixed;inset:0;pointer-events:none;z-index:10}
-#hud>*{pointer-events:auto}
-#toast,#hint{pointer-events:none!important}
-.tl{position:absolute;left:calc(10px + var(--sal));top:calc(8px + var(--sat));display:flex;flex-direction:column;gap:6px;max-width:52vw}
-.tr{position:absolute;right:calc(10px + var(--sar));top:calc(8px + var(--sat));display:flex;gap:8px;align-items:flex-start}
-.tr .col{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
-.tr .icons{display:flex;gap:6px}
-#inv,#powers{display:flex;gap:5px;flex-wrap:wrap}
-.chip{display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border-radius:999px;background:var(--glass);border:1px solid var(--line);font-size:13px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
-.chip b{font-weight:600;color:var(--gold)}
-.chip.pw{background:rgba(73,197,177,.22);border-color:rgba(159,255,216,.4);font-size:12px}
-.chip.pot{background:rgba(160,120,255,.25);border-color:rgba(200,170,255,.45)}
-.chip.bump{animation:bump .45s ease}
-@keyframes bump{30%{transform:scale(1.22);background:rgba(255,210,122,.35)}}
-.ico{width:38px;height:38px;border-radius:12px;background:var(--glass);border:1px solid var(--line);font-size:18px;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
-.ico:active{transform:scale(.94)}
-.pill{height:30px;padding:0 10px;border-radius:999px;background:var(--glass);border:1px solid var(--line);display:flex;align-items:center;gap:5px;font-size:13px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-variant-numeric:tabular-nums}
-#mini{position:relative;width:132px;height:132px;border-radius:50%;padding:0;box-shadow:0 6px 18px rgba(0,0,0,.45)}
-#miniCv{width:100%;height:100%;border-radius:50%;display:block}
-#mini .mlab{position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);font-size:10px;padding:1px 7px;border-radius:999px;background:var(--glass2);border:1px solid var(--line);color:var(--mute);white-space:nowrap}
-#toast{position:absolute;left:50%;top:calc(52px + var(--sat));transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;align-items:center;width:min(70vw,520px)}
-.toast{padding:7px 16px;font-size:15px;border-radius:999px;text-align:center;animation:tin .35s ease;transition:opacity .5s,transform .5s}
-.toast.out{opacity:0;transform:translateY(-8px)}
-@keyframes tin{from{opacity:0;transform:translateY(10px) scale(.96)}}
-#hint{position:absolute;left:50%;bottom:calc(14px + var(--sab));transform:translateX(-50%);padding:7px 14px;font-size:13px;color:var(--paper);border-radius:999px;white-space:nowrap;max-width:56vw;overflow:hidden;text-overflow:ellipsis}
-body.placing #hint{bottom:calc(84px + var(--sab))}
-
-/* joystick */
-#joy{position:absolute;left:0;bottom:0;width:44vw;height:64vh;touch-action:none}
-#joyHint{position:absolute;left:calc(26px + var(--sal));bottom:calc(26px + var(--sab));width:110px;height:110px;border-radius:50%;border:2px dashed rgba(255,247,230,.35);display:flex;align-items:center;justify-content:center;font-size:12px;color:rgba(255,247,230,.65);text-align:center;pointer-events:none}
-#joyBase{position:absolute;display:none;width:124px;height:124px;margin:-62px 0 0 -62px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.05),rgba(255,255,255,.14));border:2px solid rgba(255,247,230,.4);pointer-events:none}
-#joyKnob{position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#fff7e6,var(--gold2));box-shadow:0 4px 14px rgba(0,0,0,.45)}
-
-/* action cluster */
-#btns{position:absolute;right:calc(14px + var(--sar));bottom:calc(14px + var(--sab));width:236px;height:214px;pointer-events:none}
-#btns>*{position:absolute;pointer-events:auto}
-.rb{width:54px;height:54px;border-radius:50%;background:var(--glass2);border:2px solid var(--line);font-size:23px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px rgba(0,0,0,.4)}
-.rb:active,.rb.down{transform:scale(.92);border-color:var(--gold)}
-.rb small{position:absolute;right:-6px;bottom:-4px;padding:0 5px;border-radius:999px;background:var(--glass2);border:1px solid var(--line);color:var(--mute);font-size:9px;line-height:15px}
-#act{right:0;bottom:0;width:110px;height:110px;border-radius:50%;background:conic-gradient(var(--gold) var(--p,0%),rgba(255,255,255,.08) 0);padding:5px;--p:0%;transition:transform .08s}
-#act>span{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;border-radius:50%;background:radial-gradient(circle at 40% 30%,#2a3660,#0f1530);border:2px solid var(--line);box-shadow:inset 0 0 20px rgba(0,0,0,.4),0 8px 22px rgba(0,0,0,.45)}
-#act:active{transform:scale(.95)}
-#act:disabled{opacity:.6}
-#aic{font-size:30px;line-height:1}
-#alb{font-size:12px;font-weight:600;margin-top:3px;max-width:94px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#asb{font-size:10px;color:var(--mute);max-width:94px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#jump{right:118px;bottom:2px;width:62px;height:62px;font-size:26px}
-#alt{right:126px;bottom:74px}
-#bld{right:6px;bottom:120px}
-#bagBtn{right:66px;bottom:150px}
-#emo{right:128px;bottom:140px;width:46px;height:46px;font-size:20px}
-#flyUp{right:186px;bottom:96px;width:50px;height:50px}
-#flyDn{right:186px;bottom:36px;width:50px;height:50px}
-body.placing #act,body.placing #alt,body.placing #emo,body.placing #bagBtn{display:none}
-
-/* panels */
-.panel{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(94vw,720px);max-height:88vh;display:flex;flex-direction:column;overflow:hidden;z-index:12}
-.ph{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px 6px}
-.ph h2{font-size:19px;color:var(--gold)}
-.pbody{overflow:auto;padding:0 14px 14px}
-.sect{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.08em;margin:10px 0 6px}
-.tab{padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.07);border:1px solid var(--line);font-size:14px;white-space:nowrap}
-.tab.on{background:rgba(255,210,122,.25);border-color:var(--gold);color:var(--gold)}
-#bTabs,#bTiers{display:flex;gap:6px;padding:2px 14px 8px;overflow-x:auto}
-.tier{padding:6px 11px;border-radius:12px;background:rgba(255,255,255,.06);border:1px solid var(--line);font-size:13px;white-space:nowrap}
-.tier.on{background:rgba(159,255,216,.18);border-color:var(--mint);color:var(--mint)}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
-#bGrid{padding:0 14px 14px;overflow:auto}
-.bitem{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:9px 11px;border-radius:12px;background:rgba(255,255,255,.06);border:1px solid var(--line);text-align:left}
-.bitem:active{background:rgba(255,210,122,.2)}
-.bitem.poor{border-style:dashed}
-.bitem.poor .bc{color:#ff9fb6}
-.bn{font-weight:600;font-size:15px}
-.bd{font-size:12px;color:var(--mute);line-height:1.3}
-.bc{font-size:12px;color:var(--gold);margin-top:2px}
-.note{grid-column:1/-1;font-size:12px;color:var(--mute);padding:6px 2px;line-height:1.4}
-.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:6px}
-.slot{display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 4px;border-radius:12px;background:rgba(255,255,255,.06);border:1px solid var(--line);min-height:68px}
-.slot .si{font-size:22px;line-height:1.1}
-.slot b{font-size:14px;color:var(--gold);font-weight:600}
-.slot small{font-size:10px;color:var(--mute);text-align:center;line-height:1.1}
-.slot.empty{opacity:.4}
-.slot.pot:not(.empty){border-color:rgba(200,170,255,.5);background:rgba(160,120,255,.14)}
-button.slot:active{background:rgba(255,210,122,.2)}
-.btnrow{display:flex;gap:8px;margin-top:10px}
-.sbtn{padding:8px 14px;border-radius:12px;background:rgba(255,210,122,.2);border:1px solid var(--gold);color:var(--gold);font-size:14px}
-#chest .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-
-/* map */
-#map{position:absolute;inset:calc(8px + var(--sat)) calc(8px + var(--sar)) calc(8px + var(--sab)) calc(8px + var(--sal));display:flex;z-index:13;overflow:hidden;padding:0}
-#mapWrap{position:relative;flex:1;min-width:0}
-#mapCv{width:100%;height:100%;display:block;touch-action:none;border-radius:16px 0 0 16px}
-#mapWrap .mtitle{position:absolute;left:12px;top:10px;font-family:Cinzel,serif;color:var(--gold);font-size:18px;text-shadow:0 2px 6px rgba(0,0,0,.6);pointer-events:none}
-#mapWrap .mhelp{position:absolute;left:12px;bottom:10px;font-size:11px;color:var(--paper);opacity:.85;text-shadow:0 1px 4px rgba(0,0,0,.8);pointer-events:none}
-#mapSide{width:min(32vw,230px);display:flex;flex-direction:column;border-left:1px solid var(--line)}
-#mapSide .ph{padding:8px 10px}
-#travel{overflow:auto;padding:0 10px 10px;display:flex;flex-direction:column;gap:5px}
-.tt{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.08em;margin:4px 0 2px}
-.trv{text-align:left;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.06);border:1px solid var(--line);font-size:13px}
-.trv:active{background:rgba(255,210,122,.2)}
-
-/* placement bar */
-#place{position:absolute;left:50%;bottom:calc(12px + var(--sab));transform:translateX(-50%);display:flex;align-items:center;gap:7px;padding:7px 9px;max-width:calc(100vw - 280px);z-index:11}
-#pName{font-size:13px;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:26vw}
-.pb{width:44px;height:44px;flex:none;border-radius:12px;background:rgba(255,255,255,.08);border:1px solid var(--line);font-size:19px;display:flex;align-items:center;justify-content:center}
-.pb:active{transform:scale(.94)}
-#pOk{background:linear-gradient(180deg,#8dffc8,#3fcf9a);color:#063a24;width:56px}
-#pNo{background:rgba(255,120,150,.3)}
-
-/* overlays */
-#rotate{position:fixed;inset:0;z-index:40;display:none;align-items:center;justify-content:center;flex-direction:column;gap:10px;background:var(--ink);text-align:center;padding:30px;font-size:18px}
-#rotate .ph2{font-size:52px;animation:rot 1.6s ease-in-out infinite}
-@keyframes rot{0%,100%{transform:rotate(0)}50%{transform:rotate(90deg)}}
-@media (orientation:portrait) and (max-width:900px){#rotate{display:flex}}
-#help{position:fixed;inset:0;z-index:35;display:flex;align-items:center;justify-content:center;padding:14px;background:rgba(5,7,15,.6)}
-#help .card{width:min(94vw,640px);max-height:92vh;overflow:auto;padding:16px 20px}
-#help h2{color:var(--gold);font-size:22px;margin-bottom:6px}
-#help ul{margin:0;padding-left:18px;line-height:1.5;font-size:14px}
-#help li{margin:3px 0}
-#help b{color:var(--gold)}
-@media (max-height:430px){
-  .rb{width:48px;height:48px;font-size:20px}
-  #act{width:96px;height:96px}
-  #btns{width:212px;height:188px}
-  #jump{right:104px;width:54px;height:54px}
-  #alt{right:110px;bottom:64px}
-  #bld{bottom:104px}
-  #bagBtn{right:58px;bottom:132px}
-  #emo{right:112px;bottom:122px;width:42px;height:42px}
-  #flyUp{right:164px;bottom:84px}#flyDn{right:164px;bottom:30px}
-  #mini{width:112px;height:112px}
-  #joyHint{width:90px;height:90px}
-  .panel{max-height:92vh}
-}
-</style>
+<link rel="preload" href="assets/fonts/grandstander.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/caveat.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/ui.css">
 </head>
 <body>
 <div id="game"></div>
 
+<!-- carregamento (dicas neutras em js/ui.js) -->
 <div id="loading">
-  <h1>Lumiar</h1>
-  <div class="sub">Uma ilha enorme para dois magos</div>
-  <div id="lwrap"><div id="lbar"></div></div>
-  <div id="ltxt">Preparando a ilha…</div>
+  <div class="logo">Lumiar</div>
+  <div class="card paper"><div class="tape"></div>
+    <div id="lbarW"><div id="lbar"></div></div>
+    <div id="ltxt">Preparando o mundo…</div>
+    <div id="ltip"></div>
+  </div>
 </div>
 
+<!-- tela inicial -->
 <div id="start" hidden>
-  <div class="card glass">
+  <div class="card paper"><div class="tape"></div><div class="tape b" style="left:auto;right:18px;top:-9px"></div>
     <h1>Lumiar</h1>
-    <div class="tag">Explorem, domem criaturas e construam juntos</div>
-    <div class="row2">
-      <div><label for="nm">Seu nome</label><input id="nm" maxlength="14" placeholder="Mago" autocomplete="off"></div>
-      <div><label for="wc">Código do mundo</label><input id="wc" maxlength="24" placeholder="nosso-mundo" autocomplete="off" autocapitalize="none"></div>
+    <div class="sub">um mundo acima das nuvens, para dois</div>
+    <div class="cols">
+      <div>
+        <label for="nm">Seu nome</label>
+        <input id="nm" maxlength="16" placeholder="Seu nome" autocomplete="off" spellcheck="false">
+        <label for="wc" style="margin-top:8px">Código do mundo</label>
+        <input id="wc" maxlength="24" placeholder="nosso-mundo" autocomplete="off" autocapitalize="none" spellcheck="false">
+      </div>
+      <div>
+        <label>Personagem</label>
+        <div id="who">
+          <button class="btn" data-g="f" type="button"><svg viewBox="0 0 40 40"><circle cx="20" cy="9" r="5.5" fill="#6b4630"/><circle cx="20" cy="18" r="8" fill="#f1d3b5" stroke="#5a3f2e" stroke-width="1.6"/><path d="M12 17c0-6 4-9 8-9s8 3 8 9c-2-3-5-4-8-4s-6 1-8 4z" fill="#6b4630"/><path d="M9 39c1-8 5-12 11-12s10 4 11 12z" fill="#b2dafc" stroke="#5a3f2e" stroke-width="1.6"/></svg>Ela</button>
+          <button class="btn" data-g="m" type="button"><svg viewBox="0 0 40 40"><circle cx="20" cy="17" r="8" fill="#f1d3b5" stroke="#5a3f2e" stroke-width="1.6"/><path d="M12 16c0-6 4-8 8-8s8 2 8 8c-3-2-5-3-8-3s-5 1-8 3z" fill="#5a3f2e"/><path d="M9 39c1-8 5-12 11-12s10 4 11 12z" fill="#8b5a3c" stroke="#5a3f2e" stroke-width="1.6"/><path d="M14 27h12l-2 3h-8z" fill="#4a7fc0"/></svg>Ele</button>
+        </div>
+        <label style="margin-top:8px">Cores da roupa</label>
+        <div id="sws"></div>
+      </div>
     </div>
-    <label>Personagem</label>
-    <div id="gsel"><button data-g="m">🧙‍♂️ Mago</button><button data-g="f">🧙‍♀️ Maga</button></div>
-    <label>Cor da roupa</label>
-    <div id="sws"></div>
-    <button id="enter" class="big">Entrar em Lumiar</button>
+    <div class="go"><button id="enter" class="btn big" type="button">Entrar</button></div>
     <div class="tip">Usem o mesmo código de mundo nos dois celulares para jogarem juntos. Melhor na horizontal.</div>
   </div>
 </div>
 
+<!-- HUD (fase A: só o essencial; B-ui faz o layout completo) -->
 <div id="hud" hidden>
-  <div class="tl">
-    <div id="inv"></div>
-    <div id="powers"></div>
+  <div id="joy"><div id="joyBase"><div id="joyKnob"></div></div></div>
+  <div id="topR">
+    <button id="bJournal" class="ico" type="button" title="Diário" aria-label="Diário"><svg viewBox="0 0 24 24"><path d="M5 4.5h10.5a3 3 0 0 1 3 3V20H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h10.5"/><path d="M9 8h6"/></svg></button>
+    <button id="bMap" class="ico" type="button" title="Mapa" aria-label="Mapa"><svg viewBox="0 0 24 24"><path d="M3.5 6.5 9 4l6 2.5L20.5 4v13.5L15 20l-6-2.5-5.5 2.5z"/><path d="M9 4v13.5M15 6.5V20"/></svg></button>
+    <button id="mini" type="button" title="Mapa" aria-label="Mapa"><canvas id="miniCv" width="236" height="236"></canvas><span id="clock">--:--</span></button>
   </div>
-  <div class="tr">
-    <div class="col">
-      <div class="icons">
-        <div class="pill" title="Magos no mundo">🧙 <span id="pc">1</span></div>
-        <div class="pill"><span id="ci">☀️</span><span id="ct">08:00</span></div>
-      </div>
-      <div class="icons">
-        <button id="qual" class="ico" title="Qualidade gráfica">✨</button>
-        <button id="snd" class="ico" title="Som">🔊</button>
-        <button id="hlp" class="ico" title="Ajuda">?</button>
-      </div>
-    </div>
-    <button id="mini" class="glass" title="Abrir mapa"><canvas id="miniCv" width="264" height="264"></canvas><span class="mlab">🗺️ mapa</span></button>
-  </div>
-  <div id="toast"></div>
-  <div id="hint" class="glass" hidden></div>
-
-  <div id="joy">
-    <div id="joyHint">arraste<br>para andar</div>
-    <div id="joyBase"><div id="joyKnob"></div></div>
-  </div>
-
+  <div id="toasts"></div>
+  <div id="hint" hidden></div>
   <div id="btns">
-    <button id="flyUp" class="rb" title="Subir" hidden>⬆️</button>
-    <button id="flyDn" class="rb" title="Descer" hidden>⬇️</button>
-    <button id="emo" class="rb" title="Acenar">👋</button>
-    <button id="bagBtn" class="rb" title="Bolsa e criar">🎒</button>
-    <button id="bld" class="rb" title="Construir">🔨</button>
-    <button id="alt" class="rb" title="Desmontar" hidden>🧹</button>
-    <button id="jump" class="rb" title="Pular">⤴️</button>
-    <button id="act"><span><span id="aic">✋</span><span id="alb">Nada perto</span><span id="asb"></span></span></button>
-  </div>
-
-  <div id="bmenu" class="panel glass" hidden>
-    <div class="ph"><h2>Construir</h2><button id="bClose" class="ico">✕</button></div>
-    <div id="bTabs"></div>
-    <div id="bTiers"></div>
-    <div id="bGrid" class="grid"></div>
-  </div>
-
-  <div id="bag" class="panel glass" hidden>
-    <div class="ph"><h2>Bolsa</h2><button id="bagClose" class="ico">✕</button></div>
-    <div class="pbody">
-      <div class="sect">Materiais</div>
-      <div id="bagInv" class="slots"></div>
-      <div class="sect">Poções (toque para beber)</div>
-      <div id="bagPots" class="slots"></div>
-      <div class="sect">Ferramentas</div>
-      <div id="bagTools" class="slots"></div>
-      <div class="sect" id="craftTitle">Criar</div>
-      <div id="craft" class="grid"></div>
-    </div>
-  </div>
-
-  <div id="chest" class="panel glass" hidden>
-    <div class="ph"><h2>Baú</h2><button id="chestClose" class="ico">✕</button></div>
-    <div class="pbody">
-      <div class="cols">
-        <div><div class="sect">No baú (toque para pegar)</div><div id="chestIn" class="slots"></div></div>
-        <div><div class="sect">Sua bolsa (toque para guardar)</div><div id="chestMine" class="slots"></div></div>
-      </div>
-      <div class="btnrow"><button id="chestAll" class="sbtn">Guardar todos os materiais</button></div>
-    </div>
-  </div>
-
-  <div id="map" class="glass" hidden>
-    <div id="mapWrap">
-      <canvas id="mapCv"></canvas>
-      <div class="mtitle">Ilha de Lumiar</div>
-      <div class="mhelp">Arraste para mover · pinça ou roda para zoom · toque para marcar destino</div>
-    </div>
-    <div id="mapSide">
-      <div class="ph"><h2>Mapa</h2><button id="mapClose" class="ico">✕</button></div>
-      <div id="travel"></div>
-    </div>
-  </div>
-
-  <div id="place" class="glass" hidden>
-    <span id="pName"></span>
-    <button id="pRotL" class="pb" title="Girar (R)">↺</button>
-    <button id="pRotR" class="pb" title="Girar (T)">↻</button>
-    <button id="pUp" class="pb" title="Andar de cima">⏫</button>
-    <button id="pDn" class="pb" title="Andar de baixo">⏬</button>
-    <button id="pNo" class="pb" title="Sair (Esc)">✕</button>
-    <button id="pOk" class="pb" title="Construir (Enter)">✔</button>
+    <button id="bAct" type="button" aria-label="Ação"><svg viewBox="0 0 24 24"><path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12M11 11V5a1.5 1.5 0 0 1 3 0v6M14 11V6.5a1.5 1.5 0 0 1 3 0V14c0 3.5-2.5 6-6 6s-5-2-6.5-4.5L3 12.5a1.4 1.4 0 0 1 2.3-1.6L8 14"/></svg><small id="actLb">ação</small></button>
+    <button id="bJump" type="button" aria-label="Pular"><svg viewBox="0 0 24 24"><path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/></svg><small>pular</small></button>
+    <button id="bMagic" type="button" aria-label="Magia"><svg viewBox="0 0 24 24"><path d="M5 19 15 9"/><path d="M15.5 3.5l.9 2.2 2.2.9-2.2.9-.9 2.2-.9-2.2-2.2-.9 2.2-.9zM19.5 11l.5 1.2 1.2.5-1.2.5-.5 1.2-.5-1.2-1.2-.5 1.2-.5z"/></svg><small>magia</small></button>
+    <button id="bBag" type="button" aria-label="Bolsa"><svg viewBox="0 0 24 24"><path d="M6 9h12l-1 11H7z"/><path d="M9 9V7a3 3 0 0 1 6 0v2"/></svg></button>
+    <button id="bBuild" type="button" aria-label="Construir"><svg viewBox="0 0 24 24"><path d="M4 11 12 4l8 7"/><path d="M6.5 9.5V20h11V9.5"/><path d="M10.5 20v-5h3v5"/></svg></button>
   </div>
 </div>
 
-<div id="rotate"><div class="ph2">📱</div><div>Vire o celular na horizontal para jogar</div></div>
+<!-- painéis (Bolsa, Construir, Mapa, Baú, Ajuda, Config): B-ui -->
+<div id="panels"></div>
 
-<div id="help" hidden>
-  <div class="card glass">
-    <h2>Como jogar</h2>
-    <ul>
-      <li><b>Andar:</b> arraste no lado esquerdo. Joystick todo para correr. ⤴️ pula. Toque no chão para o mago ir até lá. Teclado: WASD, Shift corre, Espaço pula.</li>
-      <li><b>Câmera:</b> arraste no lado direito para girar e olhar o céu. Dois dedos ou a roda do mouse aproximam.</li>
-      <li><b>Agir:</b> o botão grande faz o que estiver perto: cortar árvore, minerar, colher, alimentar, montar, abrir baú, acender fogo (E).</li>
-      <li><b>Ferramentas:</b> 🎒 abre a bolsa. Crie machado e picareta de pedra com as mãos; na bancada, enxada e martelo. Ferramentas de ferro saem da bigorna.</li>
-      <li><b>Forja e poções:</b> construa uma forja, acenda e derreta minério 🟠 em ferro 🔩. No caldeirão aceso, cristais 💎 viram poções.</li>
-      <li><b>Construir (B):</b> 🔨 abre o menu estilo ARK. Comece por uma fundação; paredes, portas, janelas, telhado e escadas encaixam sozinhos na grade. Materiais: palha, madeira, pedra e real.</li>
-      <li><b>Criaturas:</b> cada espécie gosta de uma comida. Chegue devagar e alimente até domar. Cada raça dá um poder. Cavalos, grifos e dragões podem ser montados.</li>
-      <li><b>Mapa (M):</b> toque no minimapa. Explorar revela a ilha. Lugares descobertos permitem viajar, e um toque no mapa marca o destino.</li>
-      <li><b>Juntos:</b> usem o mesmo código de mundo. Tudo que um constrói ou doma aparece para o outro.</li>
-      <li><b>Segredos:</b> há criaturas raras em lugares certos da ilha, e de noite a floresta muda…</li>
-    </ul>
-    <button id="hClose" class="big">Vamos!</button>
-  </div>
-</div>
+<div id="rotate"><div class="paper"><div class="tape"></div>Vire o celular na horizontal para jogar</div></div>
 
 <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
 <script src="https://unpkg.com/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
@@ -344,6 +89,7 @@ button.slot:active{background:rgba(255,210,122,.2)}
 <script src="lib/supabase.js"></script>
 <script src="config.js"></script>
 <script src="js/engine.js"></script>
+<script src="js/lore.js"></script>
 <script src="js/sky.js"></script>
 <script src="js/terramat.js"></script>
 <script src="js/flora.js"></script>
@@ -355,7 +101,14 @@ button.slot:active{background:rgba(255,210,122,.2)}
 <script src="js/creatures.js"></script>
 <script src="js/player.js"></script>
 <script src="js/build.js"></script>
+<script src="js/save.js"></script>
+<script src="js/survival.js"></script>
+<script src="js/farm.js"></script>
+<script src="js/story.js"></script>
+<script src="js/items.js"></script>
 <script src="js/ui.js"></script>
+<script src="js/storyui.js"></script>
+<script src="js/survui.js"></script>
 <script src="js/game.js"></script>
 </body>
 </html>
