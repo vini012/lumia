@@ -18,7 +18,7 @@ Os dois entram com o mesmo **código do mundo** na tela inicial. Construções, 
 
 - `index.html`: página do jogo e interface
 - `js/`: motor (three.js r128), terreno, vegetação, criaturas, jogador, construção, mapa e o jogo
-- `m/`: modelos 3D feitos no Blender (criaturas com esqueleto, mago e maga, construções, móveis, ruínas, castelo)
+- `m/`: modelos 3D feitos no Blender (criaturas com esqueleto, personagens, construções, móveis, ruínas, ilhas)
 - `assets/`: texturas e árvores
 - `config.js`: endereço do Supabase do modo juntos
 - `lib/supabase.js`: cliente oficial do Supabase (supabase-js 2.112.4, licença MIT)
