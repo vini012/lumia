@@ -440,7 +440,9 @@ CLOUD_THIN = [(350, 5600, 1500, 0.62), (-300, 3400, 600, 0.6)]
 
 # open ground kept free of forest (x, z, radius, keep factor): the spawn view corridor to the village and the falls
 FOREST_OPEN = [(-1110, 5100, 170, 0.0), (-1050, 4980, 170, 0.05), (-950, 4880, 170, 0.12), (-800, 4700, 160, 0.3),
-               (-1250, 5000, 150, 0.35), (-1000, 5230, 160, 0.3)]
+               (-1250, 5000, 150, 0.35), (-1000, 5230, 160, 0.3),
+               # east corridor: the terrace edge over the cloud sea stays visible from the spawn
+               (-760, 5100, 220, 0.2), (-480, 5060, 240, 0.12), (-240, 5020, 200, 0.2)]
 
 # ------------------------------------------------------------------ flora / ground per region (masks + scatter)
 # forest: base density, clump: 1 = groves/clumps, 0 = evenly scattered lone trees; meadow: flower/field share
