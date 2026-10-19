@@ -577,7 +577,9 @@
   const FALLBACK_LVL = 2;                                       // 4096 m nodes kept as cover while finer ones stream
   // split when distance < size * K * (relief factor); relief factor runs FLAT (flat ground) .. CLIFF (walls).
   // Per quality tier; setting L.LOD_K / L.LOD_FLAT / L.LOD_CLIFF explicitly overrides the tier.
-  L.LOD_TIERS = { alto: [.42, .7, 1.25], medio: [.26, .6, 1.1], baixo: [.22, .55, 1.0] };   // medio: ~330-400k terrain tris in view range (TECH: 450k on screen in all)
+  // medio K .26 -> .2 (integration A): the spawn view was 454k triangles in all (terrain + shadow pass), now ~385k;
+  // no visible change at the spawn or the Annecy view (shots/integ e02/e03)
+  L.LOD_TIERS = { alto: [.42, .7, 1.25], medio: [.2, .6, 1.1], baixo: [.2, .55, 1.0] };   // medio: ~320k terrain tris in view range (TECH: 450k on screen in all)
   L.LOD_K = null; L.LOD_FLAT = null; L.LOD_CLIFF = null;
   const _lod = [1, 1, 1];
   function lodParams() {

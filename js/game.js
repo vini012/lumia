@@ -175,7 +175,12 @@
   const _cp = new THREE.Vector3();
   function frame() {
     requestAnimationFrame(frame);
-    const tn = now(); const dt = Math.min(.05, (tn - last) / 1000); last = tn; G.t += dt; const t = G.t;
+    const tn = now(); const dt = Math.min(.05, (tn - last) / 1000); last = tn;
+    if (!G.simBusy) step(dt, true);
+  }
+  // one simulation step in the fixed order; draw = render this step (tests run steps without drawing)
+  function step(dt, draw) {
+    G.t += dt; const t = G.t;
     const playing = G.started;
     const S = L.story, SV = L.surv;
     const paused = playing && (!!(S && (S.busy || S.uiOpen)) || !!G.storyPause || !!(SV && (SV.sleeping || SV.respawning)));
@@ -258,7 +263,7 @@
     });
     // ---- render
     run('render', () => {
-      if (DBG.norender) return;
+      if (!draw || DBG.norender) return;
       const inf = L.renderer.info; inf.autoReset = false; inf.reset(); L.render(); inf.autoReset = true;
       G.calls = inf.render.calls; G.tris = inf.render.triangles;
     });
@@ -296,6 +301,14 @@
     // build everything the camera wants now (screenshots / tests)
     settle(ms) { const t0 = now(); L.camera.updateMatrixWorld(); while (!L.terrainUpdate(L.camera.position, 1e9) && now() - t0 < (ms || 30000)) { } if (L.scatterSettle) L.scatterSettle(P.x, P.z, L.camera); L.grassUpdate(P.x, P.z, true); return Math.round(now() - t0); },
     info() { const r = L.renderer.info; return { calls: G.calls, tris: G.tris, geo: r.memory.geometries, tex: r.memory.textures, programs: r.programs ? r.programs.length : 0, terrain: L.terrainStats, scatter: L.scatterStats, cr: L.crStats, times: G.times, phase: G.phase }; },
+    // advance the game by sec seconds of game time in fixed 1/30 s steps (no drawing): keys = codes held meanwhile.
+    // SwiftShader draws ~2 frames/s, so tests walk with this and render only the screenshots.
+    sim(sec, keys, every) {
+      G.simBusy = true; const k = keys || []; k.forEach(c => { L.input.keys[c] = true; }); const n = Math.round(sec * 30), path = [];
+      try { for (let i = 0; i < n; i++) { step(1 / 30, false); if (every && i % Math.round(every * 30) === 0) path.push([+P.x.toFixed(1), +P.y.toFixed(1), +P.z.toFixed(1)]); } }
+      finally { k.forEach(c => { L.input.keys[c] = false; }); G.simBusy = false; }
+      return { pos: [+P.x.toFixed(1), +P.y.toFixed(1), +P.z.toFixed(1)], path };
+    },
     walk(sec, dir) { return new Promise(res => { const k = dir || 'KeyW'; L.input.keys[k] = true; setTimeout(() => { L.input.keys[k] = false; res([P.x, P.y, P.z]); }, sec * 1000); }); },
   };
 
