@@ -226,7 +226,7 @@
   // ------------------------------------------------------------------ the player figure
   const PLY = { root: new THREE.Group(), I: null, st: {} }; scene.add(PLY.root);
   { const b = new THREE.Mesh(THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(.3, 1, 4, 8) : new THREE.CylinderGeometry(.3, .3, 1.6, 10), new THREE.MeshStandardMaterial({ color: lin('#e8eef4') })); b.position.y = .85; b.castShadow = true; PLY.root.add(b); PLY.stub = b; }
-  L.loadModel('mage_f').then(src => { if (!src || !L.instRigged) return; const I = L.instRigged(src); PLY.I = I; PLY.root.remove(PLY.stub); PLY.root.add(I.root); });
+  L.loadModel('hero_f').then(src => { if (!src || !L.instRigged) return; const I = L.instRigged(src); PLY.I = I; PLY.root.remove(PLY.stub); PLY.root.add(I.root); });
   function poseHero(dt, t) { PLY.root.position.set(L.P.x, L.P.y, L.P.z); PLY.root.rotation.y = L.P.ry; if (PLY.I && L.humanAnim) { const s = PLY.st; s.speed = L.P.speed || 0; s.t = t; s.dt = dt || .016; s.air = 0; s.swim = 0; s.ride = 0; s.now = t * 1000; s.turn = 0; L.humanAnim(PLY.I.rig, s); } }
 
   // ------------------------------------------------------------------ camera

@@ -493,7 +493,7 @@
 
   // ================================================================ character
   async function addHero(x, z, ry, speed, t) {
-    const src = await L.loadModel('mage_f'); if (!src) return null;
+    const src = await L.loadModel('hero_f'); if (!src) return null;
     const robe = L.MAT.v5skin.clone(); robe.color.set(0xe8eef6).convertSRGBToLinear(); const hat = L.MAT.v5skin.clone(); hat.color.set(0x8fb0d8).convertSRGBToLinear();
     const I = L.instRigged(src, { mat: L.MAT.v5skin });
     I.root.traverse(m => { if (!m.isMesh) return; if (/_robe/.test(m.name)) m.material = robe; else if (/_hat/.test(m.name)) m.material = hat; });
@@ -578,7 +578,7 @@
   async function boot() {
     if (P.test === 'clouds') return bootCloudTest();
     const t0 = performance.now();
-    await L.loadAll(['mage_f']);
+    await L.loadAll(['hero_f']);
     await L.loadLegacy(['tree_pine', 'tree_pine_lo', 'tree_oak', 'tree_oak_lo']);
     L.makeMaterials();
     L.skyInit();
