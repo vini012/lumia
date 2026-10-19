@@ -19,13 +19,13 @@ window.L = window.L || {};
   const TIERS = {
     alto: { name: 'alto', dpr: 2, shadow: 2048, shadowDist: 60, shadowTaps: 5, post: true, bloom: .6, fxaa: true, far: 12000,
       grassR: 52, grassSp: .5, grassFull: 18, grassBlades: 12, grassMaxTris: 260000, flowerMul: 1, grassMul: 1.3, scatterMul: 1.3, lodMul: 1.25, impostorMul: 1.25,
-      cloudPuffs: 1, seaShells: 5, seaSteps: 9, mistPuffs: 1, rainDrops: 6000, pointLights: 6, lod: 130, grass: 3200 },
+      cloudPuffs: 1, seaSteps: 5, mistPuffs: 1, rainDrops: 6000, pointLights: 6, lod: 130, grass: 3200 },
     medio: { name: 'medio', dpr: 1.5, shadow: 1536, shadowDist: 45, shadowTaps: 4, post: true, bloom: .4, fxaa: true, far: 12000,
       grassR: 36, grassSp: .58, grassFull: 13, grassBlades: 10, grassMaxTris: 120000, flowerMul: .8, grassMul: 1, scatterMul: 1, lodMul: 1, impostorMul: 1,
-      cloudPuffs: .7, seaShells: 3, seaSteps: 6, mistPuffs: .7, rainDrops: 3500, pointLights: 4, lod: 95, grass: 1800 },
+      cloudPuffs: .7, seaSteps: 4, mistPuffs: .7, rainDrops: 3500, pointLights: 4, lod: 95, grass: 1800 },
     baixo: { name: 'baixo', dpr: 1, shadow: 1024, shadowDist: 32, shadowTaps: 1, post: false, bloom: 0, fxaa: false, far: 10000,
       grassR: 22, grassSp: .7, grassFull: 8, grassBlades: 7, grassMaxTris: 45000, flowerMul: .5, grassMul: .6, scatterMul: .65, lodMul: .75, impostorMul: .75,
-      cloudPuffs: .45, seaShells: 2, seaSteps: 0, mistPuffs: .45, rainDrops: 1500, pointLights: 2, lod: 70, grass: 800 },
+      cloudPuffs: .45, seaSteps: 0, mistPuffs: .45, rainDrops: 1500, pointLights: 2, lod: 70, grass: 800 },
   };
   for (const k in TIERS) Object.freeze(TIERS[k]);
   L.TIERS = TIERS;
