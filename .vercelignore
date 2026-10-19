@@ -1,3 +1,5 @@
-# dev pages, test harnesses and build tools are not part of the published game
+# páginas de teste, harness e ferramentas não fazem parte do jogo publicado
 dev/
 tools/
+*.md
+!README.md

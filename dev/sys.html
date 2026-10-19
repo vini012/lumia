@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Sistemas (dev)</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #9cc6ec center/cover no-repeat; font: 13px system-ui, sans-serif; }
+  canvas { display: block; position: fixed; inset: 0; }
+  #dbg { position: fixed; right: 8px; bottom: 6px; color: #fff; font: 11px monospace; text-shadow: 0 1px 2px #000; opacity: .7; }
+</style></head>
+<body>
+<!-- Dev harness for save.js + survival.js + farm.js + survui.js (no game.js). URL params:
+     world, name, sb=mock (shared fake server of dev/e2e_sys.js), hour (start hour of a new world), bg (backdrop image),
+     3d=1 (small garden scene with crops), nolabels=1 -->
+<script src="sbshim.js"></script>
+<script>
+  window.L = window.L || {};
+  const Q = new URLSearchParams(location.search);
+  if (Q.get('sb') === 'mock') window.LUMIAR_SB = window.SB_MOCK;
+  if (Q.get('bg')) { const st = document.createElement('style'); st.textContent = 'html,body{background:#9cc6ec url(' + Q.get('bg') + ') center/cover no-repeat}'; document.head.appendChild(st); }
+  // minimal world stand-ins (WORLD/ACTORS own the real ones)
+  L.WS = 8000; L.CLOUD_Y = 90; L.ground = () => 200; L.waterAt = () => -Infinity;
+  L.P = { x: 0, y: 200, z: 0, ry: 0, vx: 0, vy: 0, vz: 0 };
+</script>
+<script src="../js/save.js"></script>
+<script src="../js/survival.js"></script>
+<script src="../js/farm.js"></script>
+<script src="../js/survui.js"></script>
+<script>
+  // test hooks
+  window.H = {
+    ctx: { moving: false, night: null }, log: [],
+    pos(x, y, z) { L.P.x = x; L.P.y = y; L.P.z = z; },
+    state() {
+      const p = L.save.player || {};
+      return { status: L.save.status, pending: L.save.pending, saving: L.save.saving, hours: +L.clock.hours().toFixed(3), off: L.clock.off,
+        inv: p.inv, sp: p.sp, notes: p.notes, pos: p.pos, home: p.home, st: p.st, peers: L.save.room.peers().map(q => q.presence.n) };
+    },
+  };
+  for (const n of ['hint', 'sleep', 'respawn', 'slept', 'woke']) L.surv.on(n, e => H.log.push(n + ':' + (e && (e.phase || e.kind || '')) + '@' + (performance.now() / 1000).toFixed(1)));
+  async function start() {
+    await L.save.init({ world: Q.get('world') || 'teste', name: Q.get('name') || 'Vini', startHour: Q.get('hour') != null ? +Q.get('hour') : 9,
+      defaults: { inv: { frutinhas: 4 } }, timeout: +(Q.get('timeout') || 4000) });
+    const ps = L.save.player.pos; if (ps) H.pos(ps[0], ps[1], ps[2]);
+    L.survUI.init({ show: true }); if (Q.get('nolabels')) L.survUI.labels(false);
+    let last = performance.now();
+    setInterval(() => {
+      const t = performance.now(), dt = Math.min(.25, (t - last) / 1000); last = t; if (H.paused) return;
+      const c = Object.assign({ x: L.P.x, y: L.P.y, z: L.P.z, grounded: true }, H.ctx); if (c.night == null) delete c.night;
+      L.surv.tick(dt, c); L.farm.tick(dt, L.P.x, L.P.z);
+      L.save.room.presence({ x: +L.P.x.toFixed(2), y: +L.P.y.toFixed(2), z: +L.P.z.toFixed(2) });
+    }, 100);
+    if (Q.get('3d')) await scene3d();
+    window.READY = true;
+  }
+  // a little garden: raised beds with crops at every stage, under the farm's own crop meshes
+  function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); }); }
+  async function scene3d() {
+    await loadScript('https://unpkg.com/three@0.128.0/build/three.min.js');
+    const R = new THREE.WebGLRenderer({ antialias: true }); R.setPixelRatio(1); R.setSize(innerWidth, innerHeight);
+    R.outputEncoding = THREE.sRGBEncoding; R.toneMapping = THREE.ACESFilmicToneMapping; R.toneMappingExposure = 1;
+    R.shadowMap.enabled = true; R.shadowMap.type = THREE.PCFSoftShadowMap; document.body.prepend(R.domElement);
+    const lc = h => new THREE.Color(h).convertSRGBToLinear();
+    const S = L.scene = new THREE.Scene(); S.background = lc(0x8fc0ea); S.fog = new THREE.Fog(lc(0xc9dcec), 30, 140);
+    S.add(new THREE.HemisphereLight(lc(0xcfe4ff), lc(0x8a8a3a), .95));
+    const sun = new THREE.DirectionalLight(lc(0xfff1d8), 2.3); sun.position.set(-14, 20, 9); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+    Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 16, bottom: -16, far: 70 }); sun.shadow.bias = -.0004; sun.target.position.set(0, 200, 0); S.add(sun, sun.target);
+    sun.position.add(new THREE.Vector3(0, 200, 0));
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({ color: lc(0xb8b13e), roughness: 1 })); ground.rotation.x = -Math.PI / 2; ground.position.y = 200; ground.receiveShadow = true; S.add(ground);
+    const wood = new THREE.MeshStandardMaterial({ color: lc(0x9a6a45), roughness: .9 }), soil = new THREE.MeshStandardMaterial({ color: lc(0x5e4130), roughness: 1 });
+    const bed = (x, z) => { const g = new THREE.Group(); g.position.set(x, 200, z);
+      for (const [px, pz, sx, sz] of [[0, -1.12, 2.4, .16], [0, 1.12, 2.4, .16], [-1.12, 0, .16, 2.4], [1.12, 0, .16, 2.4]]) { const b = new THREE.Mesh(new THREE.BoxGeometry(sx, .34, sz), wood); b.position.set(px, .17, pz); b.castShadow = b.receiveShadow = true; g.add(b); }
+      const s = new THREE.Mesh(new THREE.BoxGeometry(2.1, .28, 2.1), soil); s.position.y = .14; s.receiveShadow = true; g.add(s); S.add(g); };
+    L.farm.soilOf = () => .28;
+    const plan = (Q.get('plots') || 'trigo:3,cenoura:2,abobora:3,morango:3,ervas:2,trigo:1,abobora:2,lua:3').split(',');
+    plan.forEach((pc, i) => {
+      const [crop, st] = pc.split(':'), x = (i % 4 - 1.5) * 3.2, z = Math.floor(i / 4) * 3.4 - 1.7, id = 'dev_c' + i; bed(x, z);
+      L.save.set('b5', id, { t: 'canteiro', x, y: 200, z, r: 0 });
+      const K = L.CROPS[crop], p = K.th[Math.min(+st, K.th.length - 1)];
+      L.farm.plant(id, crop, { pay: false }); const rec = L.save.get('f5', id); L.save.set('f5', id, Object.assign({}, rec, { g: Math.ceil(p * K.grow) + 1000, wu: i === 5 ? L.clock.now() + 6e5 : 0 }));
+    });
+    const cam = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, .1, 500);
+    const cp = (Q.get('cam') || '0,206.2,10.5,0,200.2,0').split(',').map(Number); cam.position.set(cp[0], cp[1], cp[2]); cam.lookAt(cp[3], cp[4], cp[5]);
+    H.pos(0, 200, 4); L.farm.tick(1, 0, 4);
+    H.render = () => { L.farm.tick(.6, L.P.x, L.P.z); R.render(S, cam); return R.info.render; };
+    H.render();
+  }
+  start().catch(e => { console.error(e); window.READY = 'error: ' + e.message; });
+</script>
+<div id="dbg"></div>
+</body></html>
