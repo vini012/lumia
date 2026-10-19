@@ -6,6 +6,7 @@ import sys
 import time
 import argparse
 import numpy as np
+from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -60,7 +61,9 @@ def main():
     M0 = layout.masks(G, H, R, D, rivs, lakes, LID, [], 2, log)
     F = PO.Field(G, H, R, LID, M0['cloud'], D.MIST)
     fixed = PO.place_fixed(F, D, lakes, rivs, D.CLOUD_Y, log)
-    generic = PO.place_generic(F, D, fixed, lakes, rivs, D.CLOUD_Y, log)
+    sp0 = [p for p in fixed if p['id'] == 'spawn'][0]
+    walk = check.walk_map(G, H, R, M0, D, (sp0['x'], sp0['z']), SCRATCH)
+    generic = PO.place_generic(F, D, fixed, lakes, rivs, D.CLOUD_Y, log, walk=walk)
     pois = fixed + generic
     PO.apply_pads(G, H, pois)
     F = PO.Field(G, H, R, LID, M0['cloud'], D.MIST)
@@ -84,6 +87,7 @@ def main():
                    labels=labels, points=pts)
     if not args.no_map:
         img = mapart.paint(D, G, H, R, M, lakes, LID, rivs, roads, args.map_size)
+        img = img.quantize(colors=256, method=Image.Quantize.MEDIANCUT)  # palette PNG: ~1.9 MB instead of ~6 MB
         img.save(os.path.join(args.out, 'map5.png'), optimize=True)
         log('map5.png %.2f MB' % (os.path.getsize(os.path.join(args.out, 'map5.png')) / 1e6))
     log('done')

@@ -127,9 +127,13 @@ def place_fixed(F, D, lakes, rivs, cloud_y, log=print):
         if opt.get('span'):
             c = [q for q in D.CANYONS if q['id'] == opt['span']][0]
             p = np.asarray(c['pts'], float)
-            # middle of the canyon polyline
+            # middle of the canyon polyline, or the segment nearest to opt['at']
             k = len(p) // 2
             x, z = float((p[k - 1][0] + p[k][0]) / 2), float((p[k - 1][1] + p[k][1]) / 2)
+            if opt.get('at'):
+                x, z = map(float, opt['at'])
+                k = 1 + int(np.argmin([np.hypot((p[q][0] + p[q + 1][0]) / 2 - x, (p[q][1] + p[q + 1][1]) / 2 - z)
+                                       for q in range(len(p) - 1)]))
             dx, dz = p[k] - p[k - 1]
             opt = dict(opt, ry=float(np.arctan2(dz, dx)))  # bridge runs across the canyon
             # rim height: highest ground 150 m to either side
@@ -138,6 +142,10 @@ def place_fixed(F, D, lakes, rivs, cloud_y, log=print):
             for sgn in (-1, 1):
                 d = 20.0
                 while d < 400 and F.h(x + nx * sgn * d, z + nz * sgn * d) < 300:
+                    d += 4.0
+                # past the rounded lip: walk on until the ground is gentle
+                while d < 460 and (F.h(x + nx * sgn * (d + 4), z + nz * sgn * (d + 4)) -
+                                   F.h(x + nx * sgn * d, z + nz * sgn * d)) / 4.0 > 0.3:
                     d += 4.0
                 ends.append((x + nx * sgn * (d + 6), z + nz * sgn * (d + 6)))
             (ax, az), (bx, bz) = ends
@@ -162,7 +170,7 @@ def place_fixed(F, D, lakes, rivs, cloud_y, log=print):
     return out
 
 
-def place_generic(F, D, fixed, lakes, rivs, cloud_y, log=print):
+def place_generic(F, D, fixed, lakes, rivs, cloud_y, log=print, walk=None):
     out = []
     allp = list(fixed)
     G = F.G
@@ -193,6 +201,8 @@ def place_generic(F, D, fixed, lakes, rivs, cloud_y, log=print):
                 lid = int(F.coarse(F.L, x, z))
                 if lid and hh < lakes[lid - 1]['level'] + 1.0:
                     continue
+                if walk is not None and reg != 8 and kind != 'bridge' and not walk[F.ij(x, z)]:
+                    continue  # every generic POI outside the islets must be reachable on foot
                 r = 10.0 if kind not in ('flowerfield', 'standing_stones', 'camp') else 16.0
                 spread, med = F.pad_stats(x, z, r)
                 if spread > (6 if kind != 'cave' else 30):
@@ -204,7 +214,7 @@ def place_generic(F, D, fixed, lakes, rivs, cloud_y, log=print):
                 if kind == 'viewpoint':
                     # near a cliff top: ground drops > 60 m within 70 m in some direction
                     drops = [hh - F.h(x + np.cos(a) * 70, z + np.sin(a) * 70) for a in np.linspace(0, 6.28, 12)]
-                    if max(drops) < 60 or spread > 4:
+                    if max(drops) < (60 if reg != 2 else 35) or spread > 4:
                         continue
                 elif kind == 'cave':
                     # at the foot of a cliff: ground rises > 40 m within 50 m
@@ -213,8 +223,8 @@ def place_generic(F, D, fixed, lakes, rivs, cloud_y, log=print):
                         continue
                 elif kind in ('pier',):
                     near = False
-                    for a in np.linspace(0, 6.28, 12, endpoint=False):
-                        qx, qz = x + np.cos(a) * 25, z + np.sin(a) * 25
+                    for a in np.linspace(0, 6.28, 16, endpoint=False):
+                        qx, qz = x + np.cos(a) * 40, z + np.sin(a) * 40
                         hq = F.h(qx, qz)
                         l2 = int(F.coarse(F.L, qx, qz))
                         if hq < 0 or (l2 and hq < lakes[l2 - 1]['level'] - 0.5):
@@ -290,7 +300,7 @@ def route_roads(F, D, pois, lakes, rivs, cloud_y, scratch, log=print):
     blocked |= (np.abs(G.X) > 7600) | (np.abs(G.Z) > 7600)
     pen += np.clip((F.relief - 25) / 20.0, 0, 3).astype(np.float32)
     # meandering: roads bend around soft 'noise hills' instead of running in straight lines
-    pen += (1.2 * fbm(G.X / 260. + 4, G.Z / 260. - 2, 3, 951) + 0.5 * fbm(G.X / 70., G.Z / 70., 2, 953)).astype(np.float32)
+    pen += (2.2 * fbm(G.X / 340. + 4, G.Z / 340. - 2, 3, 951) + 0.8 * fbm(G.X / 90., G.Z / 90., 2, 953)).astype(np.float32)
     # rivers: crossing costs a bit (fords / small bridges)
     for rv in rivs:
         P = rv['P']

@@ -128,8 +128,9 @@
     L.trimTiles(cam.position.x, cam.position.z);
   }
   DEV.render = function () {
-    cam.updateMatrixWorld(); tick(1 / 30); L.render(); DEV.frames++;
-    const S = L.terrainStats, ri = L.renderer.info.render;
+    cam.updateMatrixWorld(); tick(1 / 30);
+    const inf = L.renderer.info; inf.autoReset = false; inf.reset(); L.render(); inf.autoReset = true; DEV.frames++;
+    const S = L.terrainStats, ri = inf.render;
     return { calls: ri.calls, tris: ri.triangles, nodes: S.visible, built: S.built, pending: S.pending };
   };
   DEV.settle = function (maxMs) {   // build everything the camera wants (no budget): for screenshots/tests

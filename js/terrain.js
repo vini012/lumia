@@ -254,7 +254,7 @@
     let mn = 1e9, mx = -1e9;
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const k = j * P.n + i; if (P.mn[k] < mn) mn = P.mn[k]; if (P.mx[k] > mx) mx = P.mx[k]; }
     if (x0 + size < -WS || x0 > WS || z0 + size < -WS || z0 > WS) { mn = -40; mx = 0; }
-    out[0] = Math.min(mn - 3, 0 - 1); out[1] = mx + 3; return out;
+    out[0] = mn - 3; out[1] = mx + 3; return out;
   }
 
   // ---------------------------------------------------------------- coarse rasters
@@ -541,7 +541,8 @@
   const ROOT = 16384, R0 = -ROOT / 2, MAXLVL = 8, NSEG = 32;   // level 8 = 64 m nodes with 2 m cells
   const MACRO_LVL = 5;                                          // levels <= 5 (>= 16 m cells) sample the macro grid only
   const FALLBACK_LVL = 3;                                       // 2048 m nodes kept as cover while finer ones stream
-  L.LOD_K = 1.45;                                               // split when distance < size * K
+  L.LOD_K = 1.3;                                                // split when distance < size * K * (relief factor)
+  L.LOD_FLAT = .8; L.LOD_CLIFF = 1.6;                           // relief factor range (flat ground .. cliffs)
   const nodes = new Map(); let TMAT = null, WMAT = null, FMAT = null;
   const group = new THREE.Group(); group.name = 'terrain'; L.terrainGroup = group;
   const waterGroup = new THREE.Group(); waterGroup.name = 'water';
@@ -665,7 +666,7 @@
         const t = k / (n - 1); const ww = f.w * (1 + t * .55) * (k === 0 ? .9 : 1);
         const steep = k ? clamp(Math.abs(y - pts[k - 1][1]) / Math.max(.01, Math.hypot(x - pts[k - 1][0], z - pts[k - 1][2], y - pts[k - 1][1])), 0, 1) : .4;
         for (let c = 0; c <= XS; c++) {
-          const fc = c / XS - .5; const bulge = Math.cos(fc * Math.PI) * Math.min(3, ww * .08);
+          const fc = c / XS - .5; const bulge = Math.cos(fc * Math.PI) * Math.min(.8, ww * .05);
           pos.push(x + px * ww * fc + f.dx * bulge, y, z + pz * ww * fc + f.dz * bulge); uv.push(c / XS, acc); st.push(steep); nor.push(f.dx, .15, f.dz);
         }
         if (k) { const o = (k - 1) * (XS + 1); for (let c = 0; c < XS; c++) idx.push(o + c, o + c + 1, o + c + XS + 1, o + c + 1, o + c + XS + 2, o + c + XS + 1); }
@@ -699,19 +700,24 @@
 
   // ---------------------------------------------------------------- LOD selection
   // camera distance to the node AABB (height range from the macro min/max pyramid) decides splitting
+  // relief-adaptive: nodes holding cliffs split farther out (crisp edges), flat nodes earlier (fewer triangles)
+  const _nd = [0, 0, 0];
   function nodeDist(l, i, j, cx, cy, cz) {
     const size = ROOT / (1 << l), x0 = R0 + i * size, z0 = R0 + j * size;
     rangeOf(x0, z0, size, _rng);
     const dx = Math.max(x0 - cx, 0, cx - (x0 + size)), dz = Math.max(z0 - cz, 0, cz - (z0 + size)), dy = Math.max(_rng[0] - cy, 0, cy - _rng[1]);
-    return [Math.sqrt(dx * dx + dz * dz + dy * dy), Math.sqrt(dx * dx + dz * dz)];
+    _nd[0] = Math.sqrt(dx * dx + dz * dz + dy * dy); _nd[1] = Math.sqrt(dx * dx + dz * dz);
+    const rel = (_rng[1] - _rng[0]) / size;          // relief relative to the node size
+    _nd[2] = L.LOD_FLAT + (L.LOD_CLIFF - L.LOD_FLAT) * sstep(.05, .28, rel);
+    return _nd;
   }
   let want = [], wantSet = new Set(), lastCam = [1e9, 1e9, 1e9], visible = new Set();
   function computeWant(cx, cy, cz) {
     const out = []; const far = L.TERRAIN_FAR, K = L.LOD_K;
     const rec = (l, i, j) => {
-      const [d, dh] = nodeDist(l, i, j, cx, cy, cz); if (dh > far) return;
+      const nd = nodeDist(l, i, j, cx, cy, cz), d = nd[0], dh = nd[1]; if (dh > far) return;
       const size = ROOT / (1 << l);
-      const split = l < MAXLVL && d < size * K;
+      const split = l < MAXLVL && d < size * K * nd[2];
       out.push({ k: nkey(l, i, j), l, i, j, d, split });
       if (split) { rec(l + 1, i * 2, j * 2); rec(l + 1, i * 2 + 1, j * 2); rec(l + 1, i * 2, j * 2 + 1); rec(l + 1, i * 2 + 1, j * 2 + 1); }
     };

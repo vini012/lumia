@@ -21,6 +21,17 @@ def flood(G, H, blocked, starts, max_grade, scratch):
     return np.fromfile(of, np.uint8).reshape(G.n, G.n).astype(bool)
 
 
+def walk_map(G, H, R, M, D, spawn, scratch):
+    """cells reachable on foot from the spawn (through the mist ring), same rules as report()."""
+    n = G.n
+    step = (n - 1) // (R.shape[0] - 1)
+    cl = np.kron(M['cloud'], np.ones((step, step)))[:n, :n]
+    blocked = ((H < D.CLOUD_Y - 2) & (cl > 0.35)) | (H < -6)
+    blocked |= (np.abs(G.X) > 7700) | (np.abs(G.Z) > 7700)
+    s0 = int(round((spawn[1] + G.ws) / G.cell)) * n + int(round((spawn[0] + G.ws) / G.cell))
+    return flood(G, H, blocked, [s0], 0.84, scratch)
+
+
 def report(G, H, R, LID, M, lakes, rivs, pois, D, log, scratch):
     n = G.n
     step = (n - 1) // (R.shape[0] - 1)

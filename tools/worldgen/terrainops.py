@@ -112,6 +112,10 @@ def table_field(G, t, floor):
             cw = np.minimum(cw, sstep(cr * 0.55, cr, np.hypot(X - cx, Z - cz)))
         n = fbm(X / cl + 31.1, Z / cl - 17.7, 5, sd + 61, gain=0.52) - .5
         s = s + n / 0.125 * ca * cw
+    # the noise terms stretch/compress the field: renormalise it to a true distance near the edge so that the
+    # cliff steepness k is the real one everywhere
+    gzs, gxs = np.gradient(s, G.cell)
+    s = s / np.clip(np.hypot(gxs, gzs), 0.35, 3.0)
     # top surface
     gx, gz = t.get('grad', (0, 0))
     gref = t.get('gref', ((x0 + x1) / 2, (z0 + z1) / 2))
@@ -152,11 +156,18 @@ def table_field(G, t, floor):
         prof = tt ** 1.25 * (0.75 + 0.35 * rid)
         top = top + dh * np.clip(crest, 0.25, 1.2) * prof
     # edge profile
+    s0 = s
     if edge == 'slope':
         tn = t.get('tan', 0.1)
         R = 40.0
         drop = tn * (np.sqrt(np.maximum(s, 0) ** 2 + R * R) - R)
     else:
+        # rounded grassy lip (~LIP m wide, ~LIP/2 m deep) before the sheer face: the 15.6 m grid cannot hold an
+        # 85-degree edge without saw teeth on the skyline; the lip keeps the silhouette smooth and crisp
+        LIP = t.get('lip', 34.0)
+        sp = np.maximum(s, 0)
+        lipd = np.where(sp < LIP, sp * sp / (2 * LIP), LIP / 2)
+        s = np.where(sp < LIP, 0, sp - LIP) * (s > 0) + np.minimum(s, 0)
         kk = k * (0.8 + 0.45 * fbm(X / 260. + 1, Z / 260. + 2, 2, sd + 21))
         lf = t.get('ledge', 0.0)
         nl = t.get('ledges', 1)
@@ -181,6 +192,7 @@ def table_field(G, t, floor):
             R = 50.0
             sd2 = slope * (np.sqrt(np.maximum(s, 0) ** 2 + R * R) - R)
             drop = drop * (1 - ws) + sd2 * ws
+        drop = drop + lipd
     f = top - drop
     # safety taper: the field must reach the floor at its window border (except at the world edge)
     nj, ni = f.shape
@@ -193,7 +205,7 @@ def table_field(G, t, floor):
     di1 = (ni - 1 - ii) if wi.stop < G.n else big
     db = np.minimum(np.minimum(dj0, dj1), np.minimum(di0, di1)) * G.cell
     f = np.minimum(f, floor + db * 6.0)
-    return (wj, wi), f, s, top
+    return (wj, wi), f, s0, top
 
 
 def _src_hash():

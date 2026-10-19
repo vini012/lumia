@@ -186,7 +186,7 @@ def carve_rivers(G, H, rivs):
             wj, wi = G.window(Q[:, 0].min() - m, Q[:, 1].min() - m, Q[:, 0].max() + m, Q[:, 1].max() + m)
             X = G.X[wj, wi]
             Z = G.Z[wj, wi]
-            d, along, _ = polyline_dist(X, Z, Q)
+            d, along, total = polyline_dist(X, Z, Q)
             k = np.clip((along / 10.0).astype(int), 0, len(Q) - 1)
             s = S[k]
             w = W[k]
@@ -194,6 +194,10 @@ def carve_rivers(G, H, rivs):
             # (e.g. below a fall) cuts a gorge, never a window-shaped trench
             e = np.maximum(0, d - w / 2 - 4)
             cut = s - 1.0 + 0.13 * np.minimum(e, 60) + 0.8 * np.clip(e - 60, 0, 120) + 3.0 * np.maximum(e - 180, 0)
+            # beyond the ends of a reach (round caps: a lip, a fall foot, a lake or the sea) only the channel is cut,
+            # otherwise the cap cone would bite a notch into the cliff the river falls from
+            cap = (along <= 0.5) | (along >= total - 0.5)
+            cut = np.where(cap & (e > 0), 1e9, cut)
             h = H[wj, wi]
             h = np.minimum(h, cut)
             fill = s + 0.4 - np.maximum(0, d - w / 2 - 10) * 0.35
