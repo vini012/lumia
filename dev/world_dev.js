@@ -172,6 +172,8 @@
     if (QS.get('top')) {
       const s = L.WS * 1.02; const oc = new THREE.OrthographicCamera(-s, s, s, -s, 10, 30000); oc.position.set(0, 12000, 0); oc.up.set(0, 0, -1); oc.lookAt(0, 0, 0); oc.updateMatrixWorld();
       L.TERRAIN_FAR = 20000; DEV.top = oc;
+      // seen from 12 km up the LOD would stop at 4 km nodes: split further (1 km nodes, 0.5 km on cliffs) for the overview
+      L.LOD_K = num('lodk', 11); L.NODE_CAP = 6000;
       // the overview renders with the ortho camera; LOD uses a high viewpoint
       const r0 = L.render; L.render = () => { if (L.composer) { L.composer.passes[0].camera = oc; } r0(); };
       cam.position.set(0, 12000, 0); cam.rotation.set(-Math.PI / 2, 0, 0); cam.updateMatrixWorld();
@@ -186,7 +188,8 @@
       if (P.length === 2) P = [P[0], null, P[1]];
       if (T && T.length === 2) T = [T[0], null, T[1]];
       if (T) DEV.go(P[0], P[1], P[2], T[0], T[1], T[2]);
-      else { yaw = -num('yaw', poi ? 0 : (sp.ry || 0) / D2R) * D2R; pitch = num('pitch', -4) * D2R; DEV.go(P[0], P[1], P[2]); }
+      // default: the spawn heading as the game uses it (player forward = (sin ry, cos ry)), i.e. the camera yaw ry - PI
+      else { yaw = QS.get('yaw') != null ? -num('yaw', 0) * D2R : poi ? 0 : (sp.ry || 0) - Math.PI; pitch = num('pitch', -4) * D2R; DEV.go(P[0], P[1], P[2]); }
     }
     DEV.tInit = Math.round(performance.now() - t0);
     if (QS.get('still')) { DEV.ready = true; return; }
