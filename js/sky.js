@@ -420,7 +420,17 @@
     get mesh() { return seaMesh; },
     setY(y) { L.CLOUD_Y = y; seaU.uSeaY.value = y; },
     setCoverage(c) { seaU.uCov.value = c; },
-    setDensityMap(tex, x0, z0, size) { seaU.tDens.value = tex; seaU.uDensXf.value.set(x0, z0, 1 / size, tex ? 1 : 0); },
+    // tex: R channel 0..255 over the square [x0, x0+size] x [z0, z0+size] (rows = +z). A DataTexture also drives the
+    // near cloud islands (CPU lookup of the same data), so WORLD's baked mask is enough on its own.
+    setDensityMap(tex, x0, z0, size) {
+      seaU.tDens.value = tex; seaU.uDensXf.value.set(x0, z0, 1 / size, tex ? 1 : 0);
+      const im = tex && tex.image;
+      if (im && im.data && im.width) {
+        const data = im.data, W = im.width, H = im.height || W, st = data.length / (W * H) | 0;
+        densFn = (x, z) => { const i = clamp(Math.floor((x - x0) / size * W), 0, W - 1), j = clamp(Math.floor((z - z0) / size * H), 0, H - 1); return data[(j * W + i) * st] / 255; };
+        for (const [k, cl] of seaClumps) if (FB) for (const c of cl) FB.remove(c); seaClumps.clear(); lastCI = lastCJ = 1e9;
+      }
+    },
     // bake a density texture from a height function: thick where land meets the cloud layer, holes far from land
     densityFromHeight(hfn, x0, z0, size, res, mod) {   // mod(x, z, v) -> v: optional art-directed override
       res = res || 256; const N = res, cy = L.CLOUD_Y; const land = new Float32Array(N * N);
@@ -434,7 +444,7 @@
       const t = new THREE.DataTexture(data, N, N, THREE.RGBAFormat); t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearFilter; t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.needsUpdate = true;
       this.setDensityMap(t, x0, z0, size); this._dens = { data, N, x0, z0, size, hfn };
       densFn = (x, z) => { const u = (x - x0) / size * N - .5, v = (z - z0) / size * N - .5; const i = clamp(Math.round(u), 0, N - 1), j = clamp(Math.round(v), 0, N - 1); return data[(j * N + i) * 4] / 255; };
-      for (const [k, cl] of seaClumps) FB.remove(cl); seaClumps.clear();
+      for (const [k, cl] of seaClumps) if (FB) for (const c of cl) FB.remove(c); seaClumps.clear(); lastCI = lastCJ = 1e9;
       return t;
     },
     // custom density function for clump placement (if no map was baked)

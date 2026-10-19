@@ -260,12 +260,14 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
     IncidentLight directLight;
     #pragma unroll_loop_start
     for ( int i = 0; i < NUM_POINT_LIGHTS; i ++ ) {
+      { // braces: the unrolled copies must not redeclare pdl
       getPointDirectLightIrradiance( pointLights[ i ], geometry, directLight );
       float pdl = dot( geometry.normal, directLight.direction );
       vLightFront += clamp( pdl * .6 + .4, 0., 1. ) * directLight.color;
       #ifdef DOUBLE_SIDED
         vLightBack += clamp( -pdl * .6 + .4, 0., 1. ) * directLight.color;
       #endif
+      }
     }
     #pragma unroll_loop_end
   }
@@ -563,7 +565,7 @@ void v5Light(vec3 alb, vec3 N, vec3 V, vec3 Ld, vec3 Lc, vec3 up, vec3 skyC, vec
       _c.copy(GREY).multiplyScalar(1 - TOD.night * .7); TOD.hor.lerp(_c, R * .7); TOD.low.lerp(_c, R * .7);
       TOD.cLit.lerp(_c.copy(GREY).multiplyScalar(1.05 - TOD.night * .65), R * .75); TOD.cBody.lerp(_c.copy(GREY).multiplyScalar(.8 - TOD.night * .5), R * .75); TOD.cShade.lerp(_c.copy(GREY).multiplyScalar(.55 - TOD.night * .35), R * .75); TOD.cDeep.lerp(_c.copy(GREY).multiplyScalar(.42 - TOD.night * .3), R * .75);
     }
-    // key light: the sun while it is up, then the moon
+    // main light: the sun while it is up, then the moon
     const useSun = TOD.sunDir.y > -.06; TOD.lightDir.copy(useSun ? TOD.sunDir : TOD.moonDir);
     if (TOD.lightDir.y < .08) { TOD.lightDir.y = .08; TOD.lightDir.normalize(); }
     mix3('sun', TOD.sunCol); sun.color.copy(TOD.sunCol);

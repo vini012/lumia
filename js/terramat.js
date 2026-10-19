@@ -77,6 +77,7 @@ vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack) {
           g *= 1. + (n2.a - .5) * .12;
           // soil under the grass carpet: deep green near the camera so gaps between blades never flash bright ground
           float gc = uGrass.w * (1. - smoothstep(uGrass.x, uGrass.y * .95, camd)) * clamp(1. - vT.x * 1.6 - vT.y * 1.5 - vT.z - vT.w, 0., 1.);
+          gc *= 1. - smoothstep(.3, .62, (cameraPosition.y - vWp.y) / max(camd, .1));   // seen from above, the lit tops and soil show
           g = mix(g, mix(g * vec3(.42, .55, .3), vec3(.03, .056, .008), 1. - smoothstep(3., uGrass.x, camd)), gc * uGrass.z);
           // forest floor + wet/moss
           g = mix(g, g * uForest / max(uPalMean, vec3(.05)) * .8, clamp(vU.x, 0., 1.) * .8);
@@ -201,14 +202,15 @@ vec3 v5Rock(vec3 wp, vec3 wn, vec4 n1, out float crack) {
           #else
             float sc = .05;
           #endif
+          vec3 V = normalize(cameraPosition - vW);
           vec4 a = texture2D(tN, vW.xz * sc + vec2(uTime * .011, uTime * .007));
           vec4 b = texture2D(tN, vW.xz * sc * 2.7 - vec2(uTime * .013, -uTime * .017));
           vec2 nxy = (a.xy + b.xy - 1.) * mix(1.2, .25, calm);
           vec3 n = normalize(vec3(nxy.x, 1., nxy.y));
-          vec3 V = normalize(cameraPosition - vW);
           float fr = pow(1. - max(dot(n, V), 0.), 4.);
           float dep = clamp(vD / 9., 0., 1.);
-          vec3 col = mix(uShallow, uDeep, smoothstep(0., 1., dep));
+          // seen from above the paintings keep the sea turquoise; the deep blue shows at grazing angles and depth
+          vec3 col = mix(uShallow, uDeep, smoothstep(0., 1., dep) * (1. - smoothstep(.06, .45, V.y) * .72));
           col *= .85 + (a.z + b.z - 1.) * .18;
           vec3 R = reflect(-V, n); vec3 sky = mix(uSky, uSkyTop, clamp(R.y * 1.6, 0., 1.));
           col = mix(col, sky, fr * .55);

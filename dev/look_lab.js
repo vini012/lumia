@@ -51,11 +51,11 @@
   const FALLS_A = [[672, 1000, 6], [852, 980, 11], [902, 975, 15]];   // reference pixel x, distance, width
   // ---- area C (relative to OC): camera at OC looking -z, pitched down; meadow (120 m) with a fenced sea cliff on the right
   const C_G = 120;
-  const C_M = rel([[70, 420], [16, 40], [10, 6], [7, -6], [4, -24], [-10, -40], [-30, -56], [-58, -72], [-110, -94], [-190, -112], [-420, -96], [-760, 0], [-760, 420]], OC);
-  const C_V = rel([[-70, -196], [30, -186], [72, -210], [86, -262], [62, -306], [-22, -318], [-84, -286], [-98, -234]], OC);
+  const C_M = rel([[70, 420], [16, 40], [13, 6], [12, -6], [9, -24], [-5, -41], [-26, -58], [-56, -74], [-108, -96], [-190, -114], [-420, -100], [-760, 0], [-760, 420]], OC);
+  const C_V = rel([[-70, -282], [30, -272], [72, -296], [86, -348], [62, -392], [-22, -404], [-84, -372], [-98, -320]], OC);
   const C_F = rel([[-160, -128], [-112, -150], [-96, -270], [-160, -430], [-470, -420], [-560, -180]], OC);
-  const C_P = rel([[-1100, -640], [-420, -690], [-60, -720], [210, -770], [330, -900], [330, -1700], [-1300, -1700], [-1400, -900]], OC);
-  const FALLS_C = [[-135, -720, 9], [70, -760, 7]];
+  const C_P = rel([[-1300, -620], [-620, -660], [-260, -700], [10, -760], [120, -900], [120, -1700], [-1500, -1700], [-1600, -900]], OC);
+  const FALLS_C = [[-330, -690, 9], [-120, -730, 7]];
   // area B (relative to OB)
   const B_L = rel([[-3300, 1700], [-3300, -5400], [400, -5400], [700, -4400], [560, -1500], [470, -700], [430, 400], [300, 1700]], OB);
   const B_S = rel([[620, -1560], [1180, -1330], [1650, -1720], [1720, -2320], [1250, -2700], [700, -2480], [560, -2000]], OB);
@@ -88,7 +88,7 @@
     const rx = x - OC[0], rz = z - OC[1];
     return C_G - .1 * Math.max(0, -rx * .6 - rz * .8 - 20) + .03 * Math.max(0, rz) + (fbm(x * .02, z * .02, 2, 32) - .5) * 1.4 + (fbm(x * .004, z * .004, 2, 33) - .5) * 6;
   } });
-  mesa({ poly: C_V, warp: 10, seed: 34, w: 10, prof: ledges(2, .7), top(x, z) { return C_G - 9 + (fbm(x * .02, z * .02, 2, 35) - .5) * 3; } });
+  mesa({ poly: C_V, warp: 10, seed: 34, w: 10, prof: ledges(2, .7), top(x, z) { return C_G - 20 + (fbm(x * .02, z * .02, 2, 35) - .5) * 3; } });
   mesa({ poly: C_F, warp: 30, seed: 36, w: 40, top(x, z) { const rz = z - OC[1]; return 70 + .32 * Math.max(0, -rz - 150) + (fbm(x * .01, z * .01, 3, 37) - .5) * 14; } });
   mesa({ poly: C_P, warp: 40, seed: 38, w: 60, foot: 300, prof: ledges(3, .8), top(x, z) { const rz = z - OC[1]; return 430 + .12 * Math.max(0, -rz - 700) + (fbm(x * .003, z * .003, 3, 39) - .5) * 50; } });
   // B
@@ -148,7 +148,7 @@
   const inC = x => x > OC[0] - 2500 && x < OC[0] + 3000;
   // rock tint WORLD would paint into `color` where aT.x is high: cream sandstone terraces, grey plateau walls
   function rockTint(x, z, h) {
-    if (inC(x)) { const rx = x - OC[0], rz = z - OC[1]; return rz < -170 && rz > -340 && rx > -120 && rx < 110 ? COL.sand : COL.grey; }
+    if (inC(x)) { const rx = x - OC[0], rz = z - OC[1]; return rz < -250 && rz > -430 && rx > -120 && rx < 110 ? COL.sand : COL.grey; }
     if (!inB(x) && z > -700 && h < 175) return COL.sand;
     return COL.grey;
   }
@@ -167,7 +167,7 @@
     if (rock > .01) _pc.lerp(rockTint(x, z, h), rock);
     out.c = out.c || [0, 0, 0]; out.c[0] = _pc.r; out.c[1] = _pc.g; out.c[2] = _pc.b;
     out.rock = rock; out.path = path; out.sand = sand; out.snow = snow; out.forest = forest; out.wet = 0;
-    out.meadow = clamp(1 - rock - path - sand - snow, 0, 1); out.region = inB(x) ? (h > 300 ? 6 : 0) : 3;
+    out.meadow = clamp(1 - rock - path - sand - snow, 0, 1); out.region = inB(x) ? (h > 300 ? 6 : 0) : inC(x) ? 1 : 3;
     return out;
   }
   // WORLD contract stand-ins for grass and the lab
@@ -310,6 +310,7 @@
     if (opts.ogive) houses.lathe(x, y + h + roofH + 1.2, z, [[0, -.45], [.42, -.3], [.48, 0], [.42, .3], [0, .45]], 8, () => K.frame);
     const nw = Math.max(2, Math.floor(h / 5)); for (let k = 0; k < nw; k++) { const a = (k * 1.7 + (opts.face || 0)); houses.win(x + Math.sin(a) * r, y + 3 + k * (h - 4) / nw, z + Math.cos(a) * r, .8, 1.2, a, 0); }
   }
+  L.flowerHint = (x, z) => inC(x) ? .18 : 1;
   const SOLIDS = [];   // [x, z, r] footprints kept free of grass
   L.noGrass = (x, z) => { for (let k = 0; k < SOLIDS.length; k++) { const o = SOLIDS[k], dx = x - o[0], dz = z - o[1]; if (dx * dx + dz * dz < o[2] * o[2]) return true; } return false; };
   function towerHouse(x, z, s) {   // the concept-art composition: hall + wing + round tower with a red skirt roof and an ogive cap
@@ -369,7 +370,7 @@
     if (PRESET === 'c') {
       const X = x => OC[0] + x, Z = z => OC[1] + z;
       for (let gx = -560; gx < -90; gx += 9) for (let gz = -440; gz < -120; gz += 9) { const x = X(gx + (r() - .5) * 8), z = Z(gz + (r() - .5) * 8); if (labH(x, z) < 60 || L.slope(x, z) > .6 || r() > .7 || fbm(x * .01, z * .01, 2, 40) < .38) continue; addTree('pine', x, z, lerp(12, 22, r()), r); }
-      for (let i = 0; i < 40; i++) { const x = X(-90 + r() * 170), z = Z(-320 + r() * 130); if (labH(x, z) < C_G - 14 || L.slope(x, z) > .3 || Math.abs(x - X(5)) < 30 && Math.abs(z - Z(-238)) < 26) continue; addTree(r() < .6 ? 'pine' : 'oak', x, z, lerp(7, 13, r()), r); }
+      for (let i = 0; i < 40; i++) { const x = X(-90 + r() * 170), z = Z(-406 + r() * 130); if (labH(x, z) < C_G - 25 || L.slope(x, z) > .3 || Math.abs(x - X(5)) < 30 && Math.abs(z - Z(-324)) < 26) continue; addTree(r() < .6 ? 'pine' : 'oak', x, z, lerp(7, 13, r()), r); }
       for (let i = 0; i < 400; i++) { const x = X(-1100 + r() * 1400), z = Z(-760 - r() * 700); if (labH(x, z) < 380 || L.slope(x, z) > .4 || fbm(x * .006, z * .006, 2, 41) < .52) continue; addTree('pine', x, z, lerp(14, 22, r()), r); }
       for (const [x, z, h] of [[-40, 30, 9], [-58, 6, 10]]) addTree('oak', X(x), Z(z), h, r);
     }
@@ -467,7 +468,7 @@
       clumpAt(OB[0] + 120, 230, OB[1] - 700, 90, 30, 41); clumpAt(OB[0] - 90, 260, OB[1] - 1300, 120, 36, 42); clumpAt(OB[0] + 640, 260, OB[1] - 1250, 120, 40, 43); clumpAt(OB[0] + 980, 330, OB[1] - 1500, 90, 26, 44);
     } else {
       cumulusAt(cam, 39, -1, 2600, 1000, 280, 51); cumulusAt(cam, 50, 0, 2200, 700, 200, 52); cumulusAt(cam, 4, 6, 3800, 1500, 600, 53); cumulusAt(cam, -30, 8, 3400, 900, 400, 54);
-      const S = [[-40, 96, -110, 90, 26], [20, 98, -150, 120, 30], [62, 95, -120, 80, 24], [-80, 96, -170, 110, 30], [100, 92, -200, 120, 30], [-60, 112, -160, 70, 18], [-130, 98, -140, 100, 26], [40, 104, -95, 60, 16]];
+      const S = [[-40, 92, -130, 100, 22], [10, 90, -200, 120, 24], [-90, 92, -230, 120, 26], [-60, 104, -170, 70, 16], [-140, 94, -170, 110, 24], [24, 98, -110, 60, 14], [-30, 90, -280, 130, 22], [60, 84, -420, 120, 24]];
       S.forEach((c, k) => clumpAt(OC[0] + c[0], c[1], OC[1] + c[2], c[3], c[4], 61 + k));
     }
   }
@@ -515,7 +516,7 @@
     }
     if (PRESET === 'c') {
       const X = x => OC[0] + x, Z = z => OC[1] + z;
-      tower(X(-6), Z(-240), 3, 17, 7.5, { face: 1.2 }); house(X(10), Z(-232), .3, 12, 8, 5, 4.5); house(X(28), Z(-250), -.4, 9, 7, 4.5, 4); house(X(-28), Z(-226), .1, 10, 7, 4.5, 4); house(X(44), Z(-226), .6, 8, 6, 4, 3.5); house(X(-40), Z(-260), -.2, 8, 7, 4.5, 4);
+      tower(X(-6), Z(-326), 3.2, 21, 8, { face: 1.2 }); house(X(10), Z(-318), .3, 12, 8, 5, 4.5); house(X(28), Z(-336), -.4, 9, 7, 4.5, 4); house(X(-28), Z(-312), .1, 10, 7, 4.5, 4); house(X(44), Z(-312), .6, 8, 6, 4, 3.5); house(X(-40), Z(-346), -.2, 8, 7, 4.5, 4);
     }
     if (PRESET === 'b') {
       const r = rnd(8); const tx = OB[0] + 860, tz = OB[1] - 1960;
@@ -526,7 +527,7 @@
     }
     const hm = new THREE.Mesh(houses.geo(), L.MAT.v5); hm.castShadow = true; hm.receiveShadow = true; L.scene.add(hm);
     if (PRESET === 'a') fence([[-9, -50], [-1, -47.5], [8, -45.5]], 2.4);
-    if (PRESET === 'c') fence(rel([[9, 12], [6.5, -4], [3.5, -22], [-9, -36], [-29, -51], [-56, -66], [-100, -86], [-150, -100]], OC), 2.5);
+    if (PRESET === 'c') fence(rel([[6, 12], [5.3, -4], [2.2, -23], [-12, -38], [-31, -54], [-60, -70], [-104, -90], [-160, -106]], OC), 2.5);
     if (PRESET === 'b') { fence([[OB[0] - 9, OB[1] + 330], [OB[0] - 8, OB[1] + 290], [OB[0] - 12, OB[1] + 250]], 2.4); fence([[OB[0] + 9, OB[1] + 300], [OB[0] + 11, OB[1] + 270], [OB[0] + 16, OB[1] + 240]], 2.4); }
     if (fences.P.length) { const fm = new THREE.Mesh(fences.geo(), L.MAT.v5); fm.castShadow = true; fm.receiveShadow = true; L.scene.add(fm); }
     // trees
@@ -540,8 +541,8 @@
       if (x < -3000) return 0;
       if (inC(x)) {
         const rx = x - OC[0], rz = z - OC[1];
-        if (rx > 40) v *= .45 + .55 * sstep(-500, -1100, rz);                                        // open turquoise sea east of the meadow
-        if (rx > -200 && rx < 120 && rz < -40 && rz > -700) v = Math.max(v, .82);                  // the cloud gap in front of the village
+        if (rx > 30) v *= .5 * sstep(-500, -1400, rz);                                              // open turquoise sea east of the meadow
+        if (rx > -200 && rx < 20 && rz < -60 && rz > -700) v = Math.max(v, .86);                   // the cloud gap in front of the village
         return v;
       }
       if (z < -650 && x < 700) v = Math.max(v, .9);                                                // thick at the plateau foot

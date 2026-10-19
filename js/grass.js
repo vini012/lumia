@@ -68,10 +68,10 @@ vec2 v5gPush(vec2 xz, float y) {
   // close up: a deep green, self-shadowed carpet with lit yellow-green tips; further out the blades fade to the
   // ground tint so the ring edge never shows
   vec3 bc = iC.rgb * iC.rgb;
-  float nearK = 1. - smoothstep(4., uLod.x * 1.7, camd);
+  float nearK = (1. - smoothstep(4., uLod.x * 1.7, camd)) * (1. - smoothstep(.3, .62, (hzP.y - iP.y) / max(camd, .1)));   // edge-on views only
   vec3 body = bc * mix(vec3(1.), vec3(.46, .66, .32), nearK);
   vec3 deep = vec3(.02, .042, .005) * (.75 + .5 * aB.w);
-  vColor = mix(mix(bc * .55, deep, nearK), body * (.9 + .2 * aB.w), smoothstep(mix(.02, .22, nearK), 1., t)) * (1. + .16 * wave * t)
+  vColor = mix(mix(bc * .68, deep, nearK), body * (.9 + .2 * aB.w), smoothstep(mix(.02, .22, nearK), 1., t)) * (1. + .16 * wave * t)
          + bc * vec3(.16, .17, 0.) * pow(t, 4.) * nearK;
   vGFar = camd;
 `;
